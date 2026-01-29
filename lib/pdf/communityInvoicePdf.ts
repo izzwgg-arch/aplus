@@ -1,10 +1,13 @@
 import { prisma } from '@/lib/prisma'
-import { generateCommunityInvoicePDF } from './communityInvoicePDFGenerator'
+import { generateInvoiceHTML, InvoiceForHTML } from './invoiceHtmlTemplate'
+import { generatePDFFromHTML } from './playwrightPDF'
+import { format } from 'date-fns'
 
 /**
  * Generate Community Invoice PDF from invoiceId
  * This is the SINGLE source of truth for Community invoice PDF generation
  * Used by both Print/Download route and Email Queue
+ * Uses modern HTML template with Smart Steps ABA branding
  */
 export async function generateCommunityInvoicePdf(invoiceId: string): Promise<Buffer> {
   const startTime = Date.now()
@@ -42,31 +45,55 @@ export async function generateCommunityInvoicePdf(invoiceId: string): Promise<Bu
       className: invoice.class.name,
     })
 
-    // Generate PDF using old PDFKit-based generator
-    const pdfBuffer = await generateCommunityInvoicePDF({
+    // Format client name
+    const clientName = `${invoice.client.firstName} ${invoice.client.lastName}`
+    
+    // Format service date or use created date
+    const serviceDate = invoice.serviceDate ? new Date(invoice.serviceDate) : new Date(invoice.createdAt)
+    const monthYear = format(serviceDate, 'MMMM yyyy')
+    
+    // Format Medicaid ID
+    const medicaidIdDisplay = invoice.client.medicaidId || 'N/A'
+    
+    // Create invoice entries for the template
+    const entries = [{
+      date: serviceDate,
+      description: invoice.class.name,
+      units: invoice.units,
+      amount: invoice.totalAmount.toNumber(),
+    }]
+
+    // Prepare invoice data for HTML template
+    const invoiceForHTML: InvoiceForHTML = {
       id: invoice.id,
+      invoiceNumber: `CI-${format(new Date(invoice.createdAt), 'yyyy-MM-dd')}-${invoice.id.substring(0, 6)}`,
+      createdAt: invoice.createdAt,
+      serviceDate: invoice.serviceDate || invoice.createdAt,
       totalAmount: invoice.totalAmount.toNumber(),
       units: invoice.units,
-      ratePerUnit: invoice.class.ratePerUnit?.toNumber() || 0,
       notes: invoice.notes,
-      createdAt: invoice.createdAt.toISOString(),
       client: {
         firstName: invoice.client.firstName,
         lastName: invoice.client.lastName,
-        email: invoice.client.email,
-        phone: invoice.client.phone,
-        address: invoice.client.address,
-        city: invoice.client.city,
-        state: invoice.client.state,
-        zipCode: invoice.client.zipCode,
-        medicaidId: invoice.client.medicaidId,
+        name: clientName,
+        address: invoice.client.address || null,
+        city: invoice.client.city || null,
+        state: invoice.client.state || null,
+        zipCode: invoice.client.zipCode || null,
+        medicaidId: invoice.client.medicaidId || null,
       },
       class: {
         name: invoice.class.name,
-        ratePerUnit: invoice.class.ratePerUnit?.toNumber() || 0,
       },
-      serviceDate: invoice.serviceDate?.toISOString() || null,
-    })
+      description: invoice.class.name,
+      entries: entries,
+    }
+
+    // Generate HTML
+    const html = generateInvoiceHTML(invoiceForHTML)
+    
+    // Generate PDF from HTML
+    const pdfBuffer = await generatePDFFromHTML(html)
     
     const duration = Date.now() - startTime
 
