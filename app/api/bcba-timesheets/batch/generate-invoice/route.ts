@@ -176,10 +176,12 @@ export async function POST(request: NextRequest) {
 
       // Create invoice entries
       // For BCBA invoices, we need to use a regular Insurance ID for InvoiceEntry
-      // We'll use the client's regular insurance ID as a fallback, or create a placeholder
       // Note: InvoiceEntry requires insuranceId, but BCBA uses bcbaInsurance
-      // We'll use the client's regular insurance ID for compatibility
-      const clientInsuranceId = client.insuranceId || ''
+      // We'll use the client's insurance ID (which we already validated exists)
+      if (!insurance.id) {
+        errors.push(`Client "${client.name}" insurance has no ID`)
+        continue
+      }
 
       const invoiceEntries: any[] = []
       for (const entry of allEntries) {
@@ -193,7 +195,7 @@ export async function POST(request: NextRequest) {
         invoiceEntries.push({
           timesheetId: entry.timesheetId,
           providerId: timesheet.providerId,
-          insuranceId: client.insuranceId!, // Use client's insurance ID (source of truth)
+          insuranceId: insurance.id, // Use insurance ID from the validated insurance object
           units: entryUnits,
           rate: ratePerUnit.toNumber(), // BCBA Insurance rate
           amount: entryAmount,
