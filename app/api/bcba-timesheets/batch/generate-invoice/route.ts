@@ -280,7 +280,7 @@ export async function POST(request: NextRequest) {
           const timesheetIdsForUpdate = weekTimesheets.map((ts: any) => ts.id)
           if (timesheetIdsForUpdate.length > 0) {
             // Format array properly for PostgreSQL - escape IDs to prevent SQL injection
-            const escapedIds = timesheetIdsForUpdate.map(id => `'${String(id).replace(/'/g, "''")}'`).join(',')
+            const escapedIds = timesheetIdsForUpdate.map((id: string) => `'${String(id).replace(/'/g, "''")}'`).join(',')
             const idsArray = `ARRAY[${escapedIds}]` // Use ARRAY[] syntax
             const updateResult = await tx.$executeRawUnsafe(`
               UPDATE "Timesheet"
