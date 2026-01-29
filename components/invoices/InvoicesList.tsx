@@ -27,6 +27,14 @@ interface Invoice {
       name: string
     }
   }
+  entries?: Array<{
+    timesheet?: {
+      isBCBA: boolean
+    }
+  }>
+  timesheets?: Array<{
+    isBCBA: boolean
+  }>
 }
 
 export function InvoicesList() {
@@ -419,6 +427,9 @@ export function InvoicesList() {
               <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-20">
                 INVOICE #
               </th>
+              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-20">
+                TYPE
+              </th>
               <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 CLIENT
               </th>
@@ -443,10 +454,27 @@ export function InvoicesList() {
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
-            {invoices.map((invoice) => (
+            {invoices.map((invoice) => {
+              // Determine if invoice is BCBA by checking timesheets or entries
+              const isBCBA = invoice.timesheets?.some(ts => ts.isBCBA === true) ||
+                            invoice.entries?.some(e => e.timesheet?.isBCBA === true) ||
+                            false
+              
+              return (
               <tr key={invoice.id} className="hover:bg-gray-50">
                 <td className="px-3 py-2 whitespace-nowrap text-xs font-medium" style={{ color: '#000000' }}>
                   {formatInvoiceNumberForDisplay(invoice.invoiceNumber)}
+                </td>
+                <td className="px-3 py-2 whitespace-nowrap">
+                  <span
+                    className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                      isBCBA
+                        ? 'bg-purple-100 text-purple-800'
+                        : 'bg-blue-100 text-blue-800'
+                    }`}
+                  >
+                    {isBCBA ? 'BCBA' : 'Regular'}
+                  </span>
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap text-xs text-gray-500 overflow-hidden text-ellipsis max-w-[200px]">
                   {invoice.client.name}
@@ -503,7 +531,7 @@ export function InvoicesList() {
                   </RowActionsMenu>
                 </td>
               </tr>
-            ))}
+            )})}
           </tbody>
         </table>
         {invoices.length === 0 && (

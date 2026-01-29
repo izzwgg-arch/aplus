@@ -64,6 +64,16 @@ export async function GET(request: NextRequest) {
           entries: {
             include: {
               provider: true,
+              timesheet: {
+                select: {
+                  isBCBA: true,
+                },
+              },
+            },
+          },
+          timesheets: {
+            select: {
+              isBCBA: true,
             },
           },
           payments: true,
