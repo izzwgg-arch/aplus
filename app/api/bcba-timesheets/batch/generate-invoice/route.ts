@@ -92,8 +92,15 @@ export async function POST(request: NextRequest) {
     const grouped = new Map<string, typeof timesheets>()
     
     for (const timesheet of timesheets) {
+      // Check if timesheet is already invoiced
+      if (timesheet.invoiceId) {
+        console.log(`[BCBA BATCH INVOICE] Skipping timesheet ${timesheet.id} - already linked to invoice ${timesheet.invoiceId}`)
+        continue
+      }
+      
       const nonInvoicedEntries = timesheet.entries.filter((e: any) => !e.invoiced)
       if (nonInvoicedEntries.length === 0) {
+        console.log(`[BCBA BATCH INVOICE] Skipping timesheet ${timesheet.id} - no non-invoiced entries`)
         continue
       }
       
@@ -104,6 +111,8 @@ export async function POST(request: NextRequest) {
       }
       grouped.get(weekKey)!.push(timesheet)
     }
+    
+    console.log(`[BCBA BATCH INVOICE] Grouped ${timesheets.length} timesheets into ${grouped.size} group(s)`)
 
     const createdInvoices: string[] = []
     const errors: string[] = []
@@ -136,20 +145,49 @@ export async function POST(request: NextRequest) {
       const weekStart = getWeekStart(weekTimesheets[0].startDate)
       const weekEnd = getWeekEnd(weekTimesheets[0].startDate)
 
-      // Check for existing invoice
+      // Check if any of these specific timesheets are already linked to an invoice
+      const timesheetIds = weekTimesheets.map((ts: any) => ts.id)
+      const alreadyInvoicedTimesheets = await prisma.timesheet.findMany({
+        where: {
+          id: { in: timesheetIds },
+          invoiceId: { not: null },
+          deletedAt: null,
+        },
+        select: {
+          id: true,
+          invoiceId: true,
+        },
+      })
+      
+      if (alreadyInvoicedTimesheets.length > 0) {
+        const invoiceIds = [...new Set(alreadyInvoicedTimesheets.map(ts => ts.invoiceId).filter(Boolean))]
+        const weekStartStr = format(utcToZonedTime(weekStart, 'America/New_York'), 'MMM d, yyyy')
+        const weekEndStr = format(utcToZonedTime(weekEnd, 'America/New_York'), 'MMM d, yyyy')
+        skipped.push(`Client "${client.name}" - Week ${weekStartStr} to ${weekEndStr} (${alreadyInvoicedTimesheets.length} timesheet(s) already invoiced)`)
+        console.log(`[BCBA BATCH INVOICE] Skipping group for client "${client.name}" - ${alreadyInvoicedTimesheets.length} timesheet(s) already linked to invoice(s): ${invoiceIds.join(', ')}`)
+        continue
+      }
+      
+      // Also check for existing invoice in the date range that includes these specific timesheets
       const existingInvoice = await prisma.invoice.findFirst({
         where: {
           clientId,
           deletedAt: null,
           startDate: { lte: weekEnd },
           endDate: { gte: weekStart },
+          timesheets: {
+            some: {
+              id: { in: timesheetIds },
+            },
+          },
         },
       })
 
       if (existingInvoice) {
         const weekStartStr = format(utcToZonedTime(weekStart, 'America/New_York'), 'MMM d, yyyy')
         const weekEndStr = format(utcToZonedTime(weekEnd, 'America/New_York'), 'MMM d, yyyy')
-        skipped.push(`Client "${client.name}" - Week ${weekStartStr} to ${weekEndStr} (Invoice ${existingInvoice.invoiceNumber} already exists)`)
+        skipped.push(`Client "${client.name}" - Week ${weekStartStr} to ${weekEndStr} (Invoice ${existingInvoice.invoiceNumber} already exists for these timesheets)`)
+        console.log(`[BCBA BATCH INVOICE] Skipping group for client "${client.name}" - invoice ${existingInvoice.invoiceNumber} already exists`)
         continue
       }
 
@@ -239,15 +277,19 @@ export async function POST(request: NextRequest) {
           }
 
           // Mark timesheets as invoiced
-          const timesheetIds = weekTimesheets.map((ts: any) => ts.id)
-          if (timesheetIds.length > 0) {
-            await tx.$executeRawUnsafe(`
+          const timesheetIdsForUpdate = weekTimesheets.map((ts: any) => ts.id)
+          if (timesheetIdsForUpdate.length > 0) {
+            // Format array properly for PostgreSQL - escape IDs to prevent SQL injection
+            const escapedIds = timesheetIdsForUpdate.map(id => `'${String(id).replace(/'/g, "''")}'`).join(',')
+            const idsArray = `ARRAY[${escapedIds}]` // Use ARRAY[] syntax
+            const updateResult = await tx.$executeRawUnsafe(`
               UPDATE "Timesheet"
               SET "invoiceId" = $1, "invoicedAt" = $2
-              WHERE id = ANY($3::text[])
+              WHERE id = ANY(${idsArray}::text[])
                 AND "deletedAt" IS NULL
                 AND ("invoiceId" IS NULL OR "invoiceId" = '')
-            `, newInvoice.id, new Date(), timesheetIds)
+            `, newInvoice.id, new Date())
+            console.log(`[BCBA BATCH INVOICE] Updated ${updateResult} timesheet(s) to link to invoice ${newInvoice.invoiceNumber}`)
           }
 
           await logCreate('Invoice', newInvoice.id, session.user.id, {
@@ -262,7 +304,9 @@ export async function POST(request: NextRequest) {
         })
 
         createdInvoices.push(invoice.invoiceNumber)
+        console.log(`[BCBA BATCH INVOICE] Created invoice ${invoice.invoiceNumber} for client "${client.name}" with ${weekTimesheets.length} timesheet(s)`)
       } catch (error: any) {
+        console.error(`[BCBA BATCH INVOICE] Failed to create invoice for client "${client.name}":`, error)
         errors.push(`Failed to create invoice for client "${client.name}": ${error.message}`)
       }
     }
