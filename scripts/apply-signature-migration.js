@@ -6,8 +6,8 @@ const prisma = new PrismaClient()
 
 async function applyMigration() {
   try {
-    // Create tables directly
-    const createTables = `
+    // Create tables one at a time
+    await prisma.$executeRawUnsafe(`
       CREATE TABLE IF NOT EXISTS "SignatureImportBatch" (
         "id" TEXT NOT NULL,
         "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -15,8 +15,11 @@ async function applyMigration() {
         "type" TEXT NOT NULL DEFAULT 'SIGNATURE_IMPORT',
         "notes" TEXT,
         CONSTRAINT "SignatureImportBatch_pkey" PRIMARY KEY ("id")
-      );
-
+      )
+    `)
+    console.log('✓ SignatureImportBatch table created')
+    
+    await prisma.$executeRawUnsafe(`
       CREATE TABLE IF NOT EXISTS "SignatureImportBatchItem" (
         "id" TEXT NOT NULL,
         "batchId" TEXT NOT NULL,
@@ -28,21 +31,21 @@ async function applyMigration() {
         "errorMessage" TEXT,
         "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
         CONSTRAINT "SignatureImportBatchItem_pkey" PRIMARY KEY ("id")
-      );
-    `
+      )
+    `)
+    console.log('✓ SignatureImportBatchItem table created')
     
-    await prisma.$executeRawUnsafe(createTables)
-    console.log('✓ Tables created')
+    // Create indexes one at a time
+    const indexes = [
+      'CREATE INDEX IF NOT EXISTS "SignatureImportBatch_createdAt_idx" ON "SignatureImportBatch"("createdAt" DESC)',
+      'CREATE INDEX IF NOT EXISTS "SignatureImportBatch_createdByUserId_idx" ON "SignatureImportBatch"("createdByUserId")',
+      'CREATE INDEX IF NOT EXISTS "SignatureImportBatchItem_batchId_idx" ON "SignatureImportBatchItem"("batchId")',
+      'CREATE INDEX IF NOT EXISTS "SignatureImportBatchItem_entityType_entityId_idx" ON "SignatureImportBatchItem"("entityType", "entityId")',
+    ]
     
-    // Create indexes
-    const createIndexes = `
-      CREATE INDEX IF NOT EXISTS "SignatureImportBatch_createdAt_idx" ON "SignatureImportBatch"("createdAt" DESC);
-      CREATE INDEX IF NOT EXISTS "SignatureImportBatch_createdByUserId_idx" ON "SignatureImportBatch"("createdByUserId");
-      CREATE INDEX IF NOT EXISTS "SignatureImportBatchItem_batchId_idx" ON "SignatureImportBatchItem"("batchId");
-      CREATE INDEX IF NOT EXISTS "SignatureImportBatchItem_entityType_entityId_idx" ON "SignatureImportBatchItem"("entityType", "entityId");
-    `
-    
-    await prisma.$executeRawUnsafe(createIndexes)
+    for (const indexSql of indexes) {
+      await prisma.$executeRawUnsafe(indexSql)
+    }
     console.log('✓ Indexes created')
     
     // Add foreign keys (with error handling)
