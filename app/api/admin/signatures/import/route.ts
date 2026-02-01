@@ -2,12 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { writeFile, mkdir } from 'fs/promises'
+import { writeFile, mkdir, rm, readFile } from 'fs/promises'
 import { join } from 'path'
 import { existsSync } from 'fs'
 import * as XLSX from 'xlsx'
 import AdmZip from 'adm-zip'
 import { normalizeName, parseName, normalizeFullName } from '@/lib/signature-import/nameMatching'
+import { checkLibreOffice, convertEmfToPng, sanitizePath } from '@/lib/signatures/emfConvert'
 
 const requestId = () => `import-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
 const UPLOAD_DIR = join(process.cwd(), 'uploads', 'signatures')
@@ -27,6 +28,20 @@ export async function POST(request: NextRequest) {
       console.log(`[SIGNATURE_IMPORT] ${reqId} Forbidden - not admin`)
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
+
+    // Check LibreOffice availability
+    const libreOfficeCheck = await checkLibreOffice()
+    if (!libreOfficeCheck.available) {
+      console.log(`[SIGNATURE_IMPORT] ${reqId} LibreOffice not available: ${libreOfficeCheck.error}`)
+      return NextResponse.json(
+        { 
+          error: 'LIBREOFFICE_NOT_INSTALLED',
+          message: 'Install libreoffice to enable EMF conversion.'
+        },
+        { status: 500 }
+      )
+    }
+    console.log(`[SIGNATURE_IMPORT] ${reqId} LibreOffice check passed`)
 
     const formData = await request.formData()
     const excelFile = formData.get('excel') as File | null
@@ -50,6 +65,18 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Validate ZIP file size
+    const MAX_ZIP_SIZE = 200 * 1024 * 1024 // 200MB
+    const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5MB per file
+    const MAX_FILES = 500
+
+    if (zipFile.size > MAX_ZIP_SIZE) {
+      return NextResponse.json(
+        { error: 'ZIP_LIMIT_EXCEEDED', message: `ZIP file exceeds ${MAX_ZIP_SIZE / 1024 / 1024}MB limit` },
+        { status: 400 }
+      )
+    }
+
     // Parse Excel file (same logic as dry-run)
     const excelBuffer = Buffer.from(await excelFile.arrayBuffer())
     const workbook = XLSX.read(excelBuffer, { type: 'buffer' })
@@ -67,15 +94,104 @@ export async function POST(request: NextRequest) {
     const zipBuffer = Buffer.from(await zipFile.arrayBuffer())
     const zip = new AdmZip(zipBuffer)
     const zipEntries = zip.getEntries()
-    const imageMap = new Map<string, { buffer: Buffer; filename: string }>()
+    const fileEntries = zipEntries.filter(e => !e.isDirectory)
     
-    zipEntries.forEach(entry => {
-      if (!entry.isDirectory) {
-        const filename = entry.entryName.split('/').pop() || entry.entryName
-        const normalized = normalizeName(filename.replace(/\.(png|jpg|jpeg|emf)$/i, ''))
-        imageMap.set(normalized, { buffer: entry.getData(), filename })
+    // Validate file count
+    if (fileEntries.length > MAX_FILES) {
+      return NextResponse.json(
+        { error: 'ZIP_LIMIT_EXCEEDED', message: `ZIP contains ${fileEntries.length} files, maximum is ${MAX_FILES}` },
+        { status: 400 }
+      )
+    }
+
+    // Validate individual file sizes
+    for (const entry of fileEntries) {
+      if (entry.header.size > MAX_FILE_SIZE) {
+        return NextResponse.json(
+          { error: 'ZIP_LIMIT_EXCEEDED', message: `File ${entry.entryName} exceeds ${MAX_FILE_SIZE / 1024 / 1024}MB limit` },
+          { status: 400 }
+        )
       }
-    })
+    }
+
+    // Setup temp directories
+    const tempBase = join('/tmp', 'signature-import', reqId)
+    const tempIn = join(tempBase, 'in')
+    const tempOut = join(tempBase, 'out')
+    
+    try {
+      await mkdir(tempIn, { recursive: true })
+      await mkdir(tempOut, { recursive: true })
+    } catch (error: any) {
+      console.error(`[SIGNATURE_IMPORT] ${reqId} Failed to create temp directories:`, error)
+      return NextResponse.json(
+        { error: 'Failed to create temporary directories' },
+        { status: 500 }
+      )
+    }
+
+    // Extract ZIP files with Zip Slip protection
+    const extractedFiles = new Map<string, string>() // original filename -> extracted path
+    const emfFiles: Array<{ originalName: string; extractedPath: string }> = []
+    
+    for (const entry of fileEntries) {
+      const sanitized = sanitizePath(entry.entryName, tempIn)
+      if (!sanitized) {
+        console.warn(`[SIGNATURE_IMPORT] ${reqId} Zip Slip blocked: ${entry.entryName}`)
+        continue
+      }
+
+      try {
+        const data = entry.getData()
+        await writeFile(sanitized, data)
+        const filename = entry.entryName.split('/').pop() || entry.entryName
+        extractedFiles.set(filename, sanitized)
+        
+        // Track EMF files for conversion
+        if (/\.emf$/i.test(filename)) {
+          emfFiles.push({ originalName: filename, extractedPath: sanitized })
+        }
+      } catch (error: any) {
+        console.error(`[SIGNATURE_IMPORT] ${reqId} Failed to extract ${entry.entryName}:`, error)
+      }
+    }
+
+    console.log(`[SIGNATURE_IMPORT] ${reqId} Extracted ${extractedFiles.size} files, ${emfFiles.length} EMF files to convert`)
+
+    // Convert EMF files to PNG
+    const convertedFiles = new Map<string, string>() // original name -> converted PNG path
+    for (const emfFile of emfFiles) {
+      try {
+        const result = await convertEmfToPng(emfFile.extractedPath, tempOut, 10000)
+        if (result.ok && result.outputPath) {
+          convertedFiles.set(emfFile.originalName, result.outputPath)
+          console.log(`[SIGNATURE_IMPORT] ${reqId} Converted ${emfFile.originalName} -> ${result.outputPath}`)
+        } else {
+          console.warn(`[SIGNATURE_IMPORT] ${reqId} Failed to convert ${emfFile.originalName}: ${result.error}`)
+        }
+      } catch (error: any) {
+        console.error(`[SIGNATURE_IMPORT] ${reqId} Error converting ${emfFile.originalName}:`, error)
+      }
+    }
+
+    // Build image map (normalized) - includes original PNG/JPG and converted PNGs
+    const imageMap = new Map<string, { filename: string; path: string; isConverted: boolean }>()
+    
+    // Add original PNG/JPG/JPEG files
+    for (const [filename, path] of extractedFiles.entries()) {
+      if (/\.(png|jpg|jpeg)$/i.test(filename)) {
+        const normalized = normalizeName(filename.replace(/\.(png|jpg|jpeg)$/i, ''))
+        imageMap.set(normalized, { filename, path, isConverted: false })
+      }
+    }
+    
+    // Add converted PNG files (from EMF)
+    for (const [originalName, convertedPath] of convertedFiles.entries()) {
+      const baseName = originalName.replace(/\.emf$/i, '')
+      const normalized = normalizeName(baseName)
+      const pngFilename = `${baseName}.png`
+      imageMap.set(normalized, { filename: pngFilename, path: convertedPath, isConverted: true })
+    }
 
     // Ensure upload directory exists
     if (!existsSync(UPLOAD_DIR)) {
@@ -132,27 +248,49 @@ export async function POST(request: NextRequest) {
       // Find image
       let imageBuffer: Buffer | null = null
       let imageFilename: string | null = null
+      let imagePath: string | null = null
 
+      // Try signature_filename column first
       if (signatureFilenameCol && row[signatureFilenameCol]) {
         const filename = String(row[signatureFilenameCol]).trim()
-        const zipEntry = zipEntries.find(e => e.entryName.includes(filename))
-        if (zipEntry) {
-          imageBuffer = zipEntry.getData()
-          imageFilename = zipEntry.entryName.split('/').pop() || zipEntry.entryName
+        const baseName = filename.replace(/\.(png|jpg|jpeg|emf)$/i, '')
+        const normalized = normalizeName(baseName)
+        const imageInfo = imageMap.get(normalized)
+        
+        if (imageInfo) {
+          imagePath = imageInfo.path
+          imageFilename = imageInfo.filename
+        } else {
+          // Try direct filename match in extracted files
+          const extractedPath = extractedFiles.get(filename)
+          if (extractedPath) {
+            imagePath = extractedPath
+            imageFilename = filename
+          }
         }
       }
 
-      if (!imageBuffer) {
-        const matched = imageMap.get(normalizedName)
-        if (matched) {
-          imageBuffer = matched.buffer
-          imageFilename = matched.filename
+      // Try normalized name match
+      if (!imagePath) {
+        const imageInfo = imageMap.get(normalizedName)
+        if (imageInfo) {
+          imagePath = imageInfo.path
+          imageFilename = imageInfo.filename
         }
       }
 
-      if (!imageBuffer) {
+      if (!imagePath) {
         failedCount++
         errors.push(`Row ${rowIndex} (${detectedName}): Image not found`)
+        continue
+      }
+
+      // Read image buffer from file path
+      try {
+        imageBuffer = await readFile(imagePath)
+      } catch (error: any) {
+        failedCount++
+        errors.push(`Row ${rowIndex} (${detectedName}): Failed to read image file: ${error.message}`)
         continue
       }
 
@@ -211,9 +349,9 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // Determine file extension
-      const ext = imageFilename?.match(/\.(png|jpg|jpeg|emf)$/i)?.[1]?.toLowerCase() || 'png'
-      const safeExt = ['png', 'jpg', 'jpeg', 'emf'].includes(ext) ? ext : 'png'
+      // Determine file extension (always PNG for converted EMF, or original extension)
+      const ext = imageFilename?.match(/\.(png|jpg|jpeg)$/i)?.[1]?.toLowerCase() || 'png'
+      const safeExt = ['png', 'jpg', 'jpeg'].includes(ext) ? ext : 'png'
 
       // Save file
       const entityDir = join(UPLOAD_DIR, entityType.toLowerCase() + 's')
