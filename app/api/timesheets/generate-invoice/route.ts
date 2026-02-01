@@ -84,30 +84,78 @@ export async function POST(request: NextRequest) {
       id: ts.id,
       clientId: ts.clientId,
       clientName: ts.client.name,
+      isBCBA: ts.isBCBA,
       entriesCount: ts.entries.length,
       nonInvoicedEntries: ts.entries.filter(e => !e.invoiced).length,
     })))
+
+    // CRITICAL: Separate BCBA and Regular timesheets - they must NEVER mix
+    const bcbaTimesheets = timesheets.filter(ts => ts.isBCBA === true)
+    const regularTimesheets = timesheets.filter(ts => ts.isBCBA !== true)
+
+    if (bcbaTimesheets.length > 0) {
+      return NextResponse.json(
+        { 
+          error: `Cannot process BCBA timesheets in regular invoice route. ${bcbaTimesheets.length} BCBA timesheet(s) detected. Please use the BCBA invoice generation route.`,
+          bcbaTimesheetIds: bcbaTimesheets.map(ts => ts.id),
+        },
+        { status: 400 }
+      )
+    }
 
     // Initialize arrays for tracking results
     const createdInvoices: string[] = []
     const errors: string[] = []
     const skipped: string[] = []
 
-    // Group timesheets by client + week (Monday-Sunday)
-    const grouped = new Map<string, typeof timesheets>()
+    // Group timesheets by client + week (Regular only)
+    // Multiple invoices for same date allowed if timesheets aren't already in an invoice
+    const grouped = new Map<string, typeof regularTimesheets>()
     
-    for (const timesheet of timesheets) {
-      // Check if timesheet is already directly linked to an invoice
+    for (const timesheet of regularTimesheets) {
+      // Check if timesheet is "ghosted" - marked as invoiced but not actually in invoice entries
       if (timesheet.invoiceId) {
-        const linkedInvoice = await prisma.invoice.findUnique({
-          where: { id: timesheet.invoiceId },
-          select: { invoiceNumber: true },
+        // Verify the timesheet actually has entries in the invoice
+        const actualInvoiceEntries = await prisma.invoiceEntry.findMany({
+          where: {
+            invoiceId: timesheet.invoiceId,
+            timesheetId: timesheet.id,
+          },
+          select: { id: true },
         })
-        if (linkedInvoice) {
-          const skipMsg = `Timesheet ${timesheet.id} (${timesheet.client.name}) is already linked to Invoice ${linkedInvoice.invoiceNumber}`
-          console.log(`[INVOICE_GEN] ${skipMsg}`)
-          skipped.push(skipMsg)
-          continue
+        
+        if (actualInvoiceEntries.length > 0) {
+          // Timesheet is legitimately in an invoice
+          const linkedInvoice = await prisma.invoice.findUnique({
+            where: { id: timesheet.invoiceId },
+            select: { invoiceNumber: true },
+          })
+          if (linkedInvoice) {
+            const skipMsg = `Timesheet ${timesheet.id} (${timesheet.client.name}) is already in Invoice ${linkedInvoice.invoiceNumber}`
+            console.log(`[INVOICE_GEN] ${skipMsg}`)
+            skipped.push(skipMsg)
+            continue
+          }
+        } else {
+          // Timesheet is "ghosted" - marked as invoiced but no actual entries
+          // Release it so it can be re-invoiced
+          console.log(`[INVOICE_GEN] Releasing ghosted timesheet ${timesheet.id} (${timesheet.client.name}) - marked as invoiced but no entries found`)
+          await prisma.timesheet.update({
+            where: { id: timesheet.id },
+            data: {
+              invoiceId: null,
+              invoicedAt: null,
+            },
+          })
+          // Also mark all entries as not invoiced
+          await prisma.timesheetEntry.updateMany({
+            where: {
+              timesheetId: timesheet.id,
+            },
+            data: {
+              invoiced: false,
+            },
+          })
         }
       }
       
@@ -119,6 +167,7 @@ export async function POST(request: NextRequest) {
       }
       
       // Get the week key based on the timesheet's start date
+      // Group by client + week (multiple invoices for same date allowed if timesheets aren't already invoiced)
       const weekKey = `${timesheet.clientId}-${getWeekKey(timesheet.startDate)}`
       
       if (!grouped.has(weekKey)) {
@@ -189,22 +238,48 @@ export async function POST(request: NextRequest) {
 
       console.log(`[INVOICE_GEN] Week range: ${format(utcToZonedTime(weekStart, 'America/New_York'), 'MMM d, yyyy')} to ${format(utcToZonedTime(weekEnd, 'America/New_York'), 'MMM d, yyyy')}`)
 
-      // Check for existing invoice for this client + week
-      const existingInvoice = await prisma.invoice.findFirst({
+      // Check if these specific timesheets are already in an invoice
+      // Only check if the timesheets are actually in invoice entries, not just date overlap
+      const timesheetIds = weekTimesheets.map(ts => ts.id)
+      const existingInvoiceEntries = await prisma.invoiceEntry.findMany({
         where: {
-          clientId,
-          deletedAt: null,
-          startDate: { lte: weekEnd },
-          endDate: { gte: weekStart },
+          timesheetId: { in: timesheetIds },
+        },
+        include: {
+          invoice: {
+            select: {
+              id: true,
+              invoiceNumber: true,
+              deletedAt: true,
+            },
+          },
         },
       })
 
-      if (existingInvoice) {
-        const weekStartStr = format(utcToZonedTime(weekStart, 'America/New_York'), 'MMM d, yyyy')
-        const weekEndStr = format(utcToZonedTime(weekEnd, 'America/New_York'), 'MMM d, yyyy')
-        const skipMsg = `Client "${client.name}" - Week ${weekStartStr} to ${weekEndStr} (Invoice ${existingInvoice.invoiceNumber} already exists)`
-        console.log(`[INVOICE_GEN] ${skipMsg}`)
-        skipped.push(skipMsg)
+      if (existingInvoiceEntries.length > 0) {
+        // Group by invoice to show which invoices contain these timesheets
+        const invoicesByTimesheet = new Map<string, string[]>()
+        for (const entry of existingInvoiceEntries) {
+          if (!entry.invoice.deletedAt) {
+            const invoiceNum = entry.invoice.invoiceNumber
+            if (!invoicesByTimesheet.has(entry.timesheetId)) {
+              invoicesByTimesheet.set(entry.timesheetId, [])
+            }
+            invoicesByTimesheet.get(entry.timesheetId)!.push(invoiceNum)
+          }
+        }
+
+        // Build skip message with specific invoice numbers
+        const skipMessages: string[] = []
+        for (const [tsId, invoiceNums] of invoicesByTimesheet.entries()) {
+          const timesheet = weekTimesheets.find(ts => ts.id === tsId)
+          const tsName = timesheet ? timesheet.client.name : tsId
+          const uniqueInvoices = [...new Set(invoiceNums)]
+          skipMessages.push(`Timesheet ${tsId} (${tsName}) is already in invoice(s): ${uniqueInvoices.join(', ')}`)
+        }
+        
+        skipped.push(...skipMessages)
+        console.log(`[INVOICE_GEN] Skipping group - timesheets already in invoices: ${skipMessages.join('; ')}`)
         continue
       }
 
@@ -225,18 +300,10 @@ export async function POST(request: NextRequest) {
         continue
       }
 
-      // Check if this is a BCBA timesheet (use BCBA rates if so)
-      const isBCBATimesheet = weekTimesheets.some(ts => ts.isBCBA === true)
-      const rateToUse = isBCBATimesheet 
-        ? ((insurance as any).bcbaRatePerUnit 
-            ? new Decimal((insurance as any).bcbaRatePerUnit.toString())
-            : ratePerUnit) // Fallback to regular rate if BCBA rate not set
-        : ratePerUnit
-      
-      // Get unit duration from Insurance (BCBA vs regular)
-      const unitMinutesToUse = isBCBATimesheet
-        ? ((insurance as any).bcbaUnitMinutes || unitMinutes)
-        : unitMinutes
+      // This route only processes Regular timesheets (BCBA already filtered out)
+      // Use regular rates only
+      const rateToUse = ratePerUnit
+      const unitMinutesToUse = unitMinutes
 
       // Generate invoice number (increment counter for each invoice)
       invoiceCounter++
@@ -253,18 +320,14 @@ export async function POST(request: NextRequest) {
         const timesheet = weekTimesheets.find(ts => ts.entries.some(e => e.id === entry.id))
         if (!timesheet) continue
         
-        // Get unit duration for this specific timesheet (in case of mixed BCBA/regular)
-        const entryUnitMinutes = timesheet.isBCBA
-          ? ((insurance as any).bcbaUnitMinutes || unitMinutes)
-          : unitMinutes
-        
+        // This route only processes Regular timesheets
         // Calculate units and amount for this entry using Insurance unit duration
         const { units, amount: entryAmount } = calculateEntryTotals(
           entry.minutes,
           entry.notes,
           rateToUse,
-          !timesheet.isBCBA, // isRegularTimesheet
-          entryUnitMinutes // unitMinutes from Insurance
+          true, // isRegularTimesheet (always true in this route)
+          unitMinutesToUse // unitMinutes from Insurance
         )
         
         entryTotalUnits += units // Always add units (for display)
