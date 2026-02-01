@@ -416,6 +416,9 @@ export async function POST(request: NextRequest) {
           eventsByEmployeeDate.set(dateKey, [])
         }
         
+        // Ensure workDate is set to local midnight
+        workDate.setHours(0, 0, 0, 0)
+        
         const eventType = String(row[eventTypeColumn] || '').trim().toLowerCase()
         const isClockIn = eventType.includes('in') || eventType === 'clock-in' || eventType === 'clockin'
         const isClockOut = eventType.includes('out') || eventType === 'clock-out' || eventType === 'clockout'
