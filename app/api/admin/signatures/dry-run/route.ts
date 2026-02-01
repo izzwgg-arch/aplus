@@ -279,6 +279,47 @@ export async function POST(request: NextRequest) {
           imageFound = true
           imageFilename = imageInfo.filename
           imagePath = imageInfo.path
+          console.log(`[SIGNATURE_DRY_RUN] ${reqId} Found image for ${detectedName}: ${imageInfo.filename}`)
+        } else {
+          // Try to find EMF file with same base name and convert on-the-fly if needed
+          // Check all extracted files for potential EMF matches
+          for (const [extractedFilename, extractedPath] of extractedFiles.entries()) {
+            const extractedBaseName = normalizeName(extractedFilename.replace(/\.(png|jpg|jpeg|emf)$/i, ''))
+            if (extractedBaseName === normalizedName) {
+              if (/\.emf$/i.test(extractedFilename)) {
+                // Found matching EMF file - try to convert it
+                try {
+                  const result = await convertEmfToPng(extractedPath, tempOut, 10000)
+                  if (result.ok && result.outputPath) {
+                    const pngFilename = `${extractedFilename.replace(/\.emf$/i, '')}.png`
+                    imageFound = true
+                    imageFilename = pngFilename
+                    imagePath = result.outputPath
+                    // Add to imageMap for future reference
+                    imageMap.set(normalizedName, { filename: pngFilename, path: result.outputPath, isConverted: true })
+                    console.log(`[SIGNATURE_DRY_RUN] ${reqId} On-the-fly converted ${extractedFilename} for ${detectedName}`)
+                    break
+                  } else {
+                    console.warn(`[SIGNATURE_DRY_RUN] ${reqId} Failed to convert ${extractedFilename} for ${detectedName}: ${result.error}`)
+                  }
+                } catch (error: any) {
+                  console.warn(`[SIGNATURE_DRY_RUN] ${reqId} Error converting ${extractedFilename} for ${detectedName}:`, error)
+                }
+              } else if (/\.(png|jpg|jpeg)$/i.test(extractedFilename)) {
+                // Found matching image file (should have been in map, but add it anyway)
+                imageFound = true
+                imageFilename = extractedFilename
+                imagePath = extractedPath
+                imageMap.set(normalizedName, { filename: extractedFilename, path: extractedPath, isConverted: false })
+                console.log(`[SIGNATURE_DRY_RUN] ${reqId} Found image file ${extractedFilename} for ${detectedName}`)
+                break
+              }
+            }
+          }
+          
+          if (!imageFound) {
+            console.log(`[SIGNATURE_DRY_RUN] ${reqId} No image found for ${detectedName} (normalized: ${normalizedName}). Available files: ${Array.from(extractedFiles.keys()).slice(0, 5).join(', ')}...`)
+          }
         }
       }
 
