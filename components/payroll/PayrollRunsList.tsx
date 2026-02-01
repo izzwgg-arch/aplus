@@ -100,7 +100,7 @@ export function PayrollRunsList({ permissions, userRole }: { permissions: any, u
         <div>
           <Link
             href="/payroll"
-            className="flex items-center text-gray-600 hover:text-gray-900 mb-2"
+            className="flex items-center text-white hover:text-gray-100 mb-2"
           >
             ← Back to Payroll
           </Link>

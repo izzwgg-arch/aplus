@@ -343,7 +343,7 @@ export function PayrollRunDetail({
         <div>
           <Link
             href="/payroll/runs"
-            className="flex items-center text-gray-600 hover:text-gray-900 mb-2"
+            className="flex items-center text-white hover:text-gray-100 mb-2"
           >
             <ArrowLeft className="w-4 h-4 mr-1" />
             Back to Payroll Runs
