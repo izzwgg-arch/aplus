@@ -96,6 +96,7 @@ model User {
   payrollRunsCreated        PayrollRun[]              @relation("PayrollRunCreator")
   payrollPaymentsCreated    PayrollPayment[]          @relation("PayrollPaymentCreator")
   payrollReportsCreated     PayrollReportArtifact[]   @relation("PayrollReportCreator")
+  signatureImportBatches    SignatureImportBatch[]    @relation("SignatureImportBatchCreator")
 }
 
 model Role {
@@ -985,4 +986,36 @@ model PayrollReportArtifact {
   @@index([runId])
   @@index([employeeId])
   @@index([year, month])
+}
+
+// Signature Import Batch Tracking
+model SignatureImportBatch {
+  id            String                      @id @default(cuid())
+  createdAt     DateTime                    @default(now())
+  createdByUserId String
+  type          String                      @default("SIGNATURE_IMPORT")
+  notes         String?
+  items         SignatureImportBatchItem[]
+
+  createdBy     User                        @relation("SignatureImportBatchCreator", fields: [createdByUserId], references: [id])
+
+  @@index([createdAt(sort: Desc)])
+  @@index([createdByUserId])
+}
+
+model SignatureImportBatchItem {
+  id                    String                @id @default(cuid())
+  batchId               String
+  entityType            String // "CLIENT" or "PROVIDER"
+  entityId              String
+  originalSignatureUrl  String? // null if no signature existed before
+  newSignatureUrl       String
+  status                String // "SUCCESS", "FAILED", etc.
+  errorMessage          String?
+  createdAt             DateTime               @default(now())
+
+  batch                 SignatureImportBatch   @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([batchId])
+  @@index([entityType, entityId])
 }
