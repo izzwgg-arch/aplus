@@ -122,6 +122,35 @@ export function generateInvoiceHTML(invoice: InvoiceForHTML): string {
       overflow: hidden;
     }
     
+    /* KJ Play Center Header Style (for community invoices) */
+    .kj-header {
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    
+    .kj-header-company-name {
+      color: #0066CC;
+      font-size: 32px;
+      font-weight: 700;
+      margin: 0;
+      margin-bottom: 8px;
+      letter-spacing: 1px;
+    }
+    
+    .kj-header-tagline {
+      color: #333;
+      font-size: 11px;
+      margin: 0;
+      margin-bottom: 6px;
+    }
+    
+    .kj-header-contact {
+      color: #666;
+      font-size: 9px;
+      margin: 0;
+      line-height: 1.4;
+    }
+    
     .header-gradient::before {
       content: '';
       position: absolute;
@@ -174,6 +203,18 @@ export function generateInvoiceHTML(invoice: InvoiceForHTML): string {
       margin-bottom: 12px;
       display: grid;
       grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+    
+    /* Info card for community invoices (2 columns, no Invoice ID) */
+    .info-card-community {
+      background: #f8fafc;
+      border: 2px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 12px;
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
       gap: 16px;
     }
     
@@ -343,6 +384,21 @@ export function generateInvoiceHTML(invoice: InvoiceForHTML): string {
   </style>
 </head>
 <body>
+  ${invoice.branding?.orgName === 'KJ PLAY CENTER' ? `
+  <!-- KJ Play Center Header -->
+  <div class="kj-header">
+    <div class="kj-header-company-name">${orgName}</div>
+    ${tagline ? `<div class="kj-header-tagline">${tagline}</div>` : ''}
+    ${(addressLine || phoneLine || emailLine) ? `
+    <div class="kj-header-contact">
+      ${addressLine || ''}${addressLine && (phoneLine || emailLine) ? ' / ' : ''}
+      ${phoneLine ? `P.${phoneLine}` : ''}${phoneLine && emailLine ? ' / ' : ''}
+      ${emailLine ? `E.${emailLine}` : ''}
+    </div>
+    ` : ''}
+  </div>
+  ` : `
+  <!-- Regular Modern Header -->
   <div class="modern-header">
     <div class="header-gradient">
       <h1>${orgName}</h1>
@@ -357,9 +413,10 @@ export function generateInvoiceHTML(invoice: InvoiceForHTML): string {
       <div class="header-accent-line"></div>
     </div>
   </div>
+  `}
   
   <!-- Info card with Bill To, Date, Invoice Number, Medicaid ID, Description -->
-  <div class="info-card">
+  <div class="${invoice.branding?.orgName === 'KJ PLAY CENTER' ? 'info-card-community' : 'info-card'}">
     <div class="info-item">
       <span class="info-label">Bill To</span>
       <div class="info-value">${clientName}</div>
@@ -380,10 +437,12 @@ export function generateInvoiceHTML(invoice: InvoiceForHTML): string {
       <span class="info-label">${invoice.class ? 'Class Name' : 'Description'}</span>
       <div class="info-value">${description}</div>
     </div>
+    ${invoice.branding?.orgName !== 'KJ PLAY CENTER' ? `
     <div class="info-item">
       <span class="info-label">Invoice ID</span>
       <div class="info-value">${invoice.id}</div>
     </div>
+    ` : ''}
   </div>
   
   <div class="modern-table-container">

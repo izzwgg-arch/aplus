@@ -63,7 +63,7 @@ export async function generateCommunityInvoicePdf(invoiceId: string): Promise<Bu
       amount: invoice.totalAmount.toNumber(),
     }]
 
-    // Prepare invoice data for HTML template
+    // Prepare invoice data for HTML template with KJ Play Center branding
     const invoiceForHTML: InvoiceForHTML = {
       id: invoice.id,
       invoiceNumber: `CI-${format(new Date(invoice.createdAt), 'yyyy-MM-dd')}-${invoice.id.substring(0, 6)}`,
@@ -87,6 +87,13 @@ export async function generateCommunityInvoicePdf(invoiceId: string): Promise<Bu
       },
       description: invoice.class.name,
       entries: entries,
+      branding: {
+        orgName: 'KJ PLAY CENTER',
+        tagline: 'Where you Discover Intelligence Creativity, Excitement and Fun.',
+        addressLine: 'Address 68 Jefferson St. Highland Mills N.Y.10930',
+        phoneLine: '845-827-9585',
+        emailLine: 'kjplaycanter@gmail.com',
+      },
     }
 
     // Generate HTML
