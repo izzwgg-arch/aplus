@@ -87,23 +87,24 @@ export async function GET(request: NextRequest) {
     const userIdParam = searchParams.get('userId')
 
     if (search) {
+      const searchConditions = [
+        { client: { name: { contains: search, mode: 'insensitive' } } },
+        { provider: { name: { contains: search, mode: 'insensitive' } } },
+        // Search by timesheet ID (timesheetNumber)
+        { timesheetNumber: { contains: search, mode: 'insensitive' } },
+        // Also search by ID if it matches
+        { id: { contains: search, mode: 'insensitive' } },
+      ]
+
       // If where.OR already exists (for archive), combine with search
       if (where.OR) {
         where.AND = [
           { OR: where.OR },
-          {
-            OR: [
-              { client: { name: { contains: search, mode: 'insensitive' } } },
-              { provider: { name: { contains: search, mode: 'insensitive' } } },
-            ]
-          }
+          { OR: searchConditions },
         ]
         delete where.OR
       } else {
-        where.OR = [
-          { client: { name: { contains: search, mode: 'insensitive' } } },
-          { provider: { name: { contains: search, mode: 'insensitive' } } },
-        ]
+        where.OR = searchConditions
       }
     }
 

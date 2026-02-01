@@ -41,6 +41,7 @@ export function BCBATimesheetsList({ isArchive = false }: { isArchive?: boolean 
   const [timesheets, setTimesheets] = useState<Timesheet[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('')
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [rowsPerPage, setRowsPerPage] = useState(25)
@@ -48,6 +49,7 @@ export function BCBATimesheetsList({ isArchive = false }: { isArchive?: boolean 
   const [userRole, setUserRole] = useState<string>('USER')
   const [showExportMenu, setShowExportMenu] = useState(false)
   const exportMenuRef = useRef<HTMLDivElement>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const [canViewAllTimesheets, setCanViewAllTimesheets] = useState(false)
   const [hasViewSelectedUsers, setHasViewSelectedUsers] = useState(false)
   const [selectedUserId, setSelectedUserId] = useState<string>('')
@@ -151,7 +153,7 @@ export function BCBATimesheetsList({ isArchive = false }: { isArchive?: boolean 
 
   const fetchTimesheets = async () => {
     try {
-      let url = `/api/timesheets?page=${page}&limit=${rowsPerPage}&search=${searchTerm}&isBCBA=true`
+      let url = `/api/timesheets?page=${page}&limit=${rowsPerPage}&search=${debouncedSearchTerm}&isBCBA=true`
       if (isArchive) {
         url += `&archived=true`
       }
@@ -171,17 +173,31 @@ export function BCBATimesheetsList({ isArchive = false }: { isArchive?: boolean 
     }
   }
 
+  // Debounce search term (300ms delay)
   useEffect(() => {
-    const delayDebounce = setTimeout(() => {
-      if (page === 1) {
-        fetchTimesheets()
-      } else {
-        setPage(1)
-      }
-    }, 500)
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm)
+    }, 300)
 
-    return () => clearTimeout(delayDebounce)
-  }, [searchTerm, selectedUserId])
+    return () => clearTimeout(timer)
+  }, [searchTerm])
+
+  // Trigger fetch when debounced search term or selectedUserId changes
+  useEffect(() => {
+    if (page === 1) {
+      fetchTimesheets()
+    } else {
+      setPage(1)
+    }
+  }, [debouncedSearchTerm, selectedUserId])
+
+  // Maintain focus on search input
+  useEffect(() => {
+    if (searchInputRef.current && document.activeElement === searchInputRef.current) {
+      // Focus is already on the input, keep it there
+      searchInputRef.current.focus()
+    }
+  }, [debouncedSearchTerm])
 
   useEffect(() => {
     if (page === 1) {
@@ -605,8 +621,9 @@ export function BCBATimesheetsList({ isArchive = false }: { isArchive?: boolean 
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
           <input
+            ref={searchInputRef}
             type="text"
-            placeholder="Search by client or provider..."
+            placeholder="Search by client, provider, or timesheet ID..."
             className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}

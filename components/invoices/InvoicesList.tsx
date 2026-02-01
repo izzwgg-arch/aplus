@@ -41,12 +41,14 @@ export function InvoicesList() {
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [userRole, setUserRole] = useState<string>('USER')
   const [showExportMenu, setShowExportMenu] = useState(false)
   const exportMenuRef = useRef<HTMLDivElement>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const [showGenerateModal, setShowGenerateModal] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [billingPeriod, setBillingPeriod] = useState<{
@@ -150,17 +152,38 @@ export function InvoicesList() {
     }
   }
 
+  // Debounce search term (300ms delay)
   useEffect(() => {
-    const delayDebounce = setTimeout(() => {
-      if (page === 1) {
-        fetchInvoices()
-      } else {
-        setPage(1)
-      }
-    }, 500)
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm)
+    }, 300)
 
-    return () => clearTimeout(delayDebounce)
+    return () => clearTimeout(timer)
   }, [searchTerm])
+
+  // Trigger fetch when debounced search term or status filter changes (reset to page 1)
+  useEffect(() => {
+    if (page === 1) {
+      fetchInvoices()
+    } else {
+      setPage(1)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearchTerm, statusFilter])
+
+  // Trigger fetch when page changes (for pagination)
+  useEffect(() => {
+    fetchInvoices()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page])
+
+  // Maintain focus on search input
+  useEffect(() => {
+    if (searchInputRef.current && document.activeElement === searchInputRef.current) {
+      // Focus is already on the input, keep it there
+      searchInputRef.current.focus()
+    }
+  }, [debouncedSearchTerm])
 
   const fetchInvoices = async () => {
     try {
@@ -168,7 +191,7 @@ export function InvoicesList() {
       const params = new URLSearchParams({
         page: page.toString(),
         limit: '25',
-        ...(searchTerm && { search: searchTerm }),
+        ...(debouncedSearchTerm && { search: debouncedSearchTerm }),
         ...(statusFilter && { status: statusFilter }),
       })
 
@@ -398,6 +421,7 @@ export function InvoicesList() {
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
           <input
+            ref={searchInputRef}
             type="text"
             placeholder="Search invoices..."
             className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"

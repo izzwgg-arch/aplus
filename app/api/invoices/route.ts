@@ -27,6 +27,17 @@ export async function GET(request: NextRequest) {
       where.OR = [
         { invoiceNumber: { contains: search, mode: 'insensitive' } },
         { client: { name: { contains: search, mode: 'insensitive' } } },
+        // Search by timesheet ID (timesheetNumber) in linked timesheets
+        {
+          timesheets: {
+            some: {
+              OR: [
+                { timesheetNumber: { contains: search, mode: 'insensitive' } },
+                { id: { contains: search, mode: 'insensitive' } },
+              ],
+            },
+          },
+        },
       ]
     }
 
@@ -73,6 +84,8 @@ export async function GET(request: NextRequest) {
           },
           timesheets: {
             select: {
+              id: true,
+              timesheetNumber: true,
               isBCBA: true,
             },
           },
