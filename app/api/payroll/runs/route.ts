@@ -167,6 +167,37 @@ export async function POST(request: NextRequest) {
       periodEndDate = new Date(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59, 999)
     }
     
+    // If period dates are still null, calculate from the actual row dates
+    if (!periodStartDate || !periodEndDate) {
+      const rowDates = await (prisma as any).payrollImportRow?.findMany({
+        where: {
+          importId: sourceImportId,
+          linkedEmployeeId: { in: selectedEmployeeIds },
+        },
+        select: { workDate: true },
+        orderBy: { workDate: 'asc' },
+      })
+      
+      if (rowDates && rowDates.length > 0) {
+        const dates = rowDates.map((r: any) => new Date(r.workDate)).filter((d: Date) => !isNaN(d.getTime()))
+        if (dates.length > 0) {
+          const minDate = new Date(Math.min(...dates.map((d: Date) => d.getTime())))
+          const maxDate = new Date(Math.max(...dates.map((d: Date) => d.getTime())))
+          periodStartDate = new Date(minDate.getFullYear(), minDate.getMonth(), minDate.getDate(), 0, 0, 0, 0)
+          periodEndDate = new Date(maxDate.getFullYear(), maxDate.getMonth(), maxDate.getDate(), 23, 59, 59, 999)
+          console.log(`[PAYROLL RUN] Calculated period dates from row dates: ${periodStartDate.toISOString()} to ${periodEndDate.toISOString()}`)
+        }
+      }
+    }
+    
+    // Ensure we have valid dates - if still null, use current date range
+    if (!periodStartDate || !periodEndDate) {
+      const today = new Date()
+      periodStartDate = new Date(today.getFullYear(), today.getMonth(), 1, 0, 0, 0, 0)
+      periodEndDate = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59, 999)
+      console.log(`[PAYROLL RUN] Using fallback period dates: ${periodStartDate.toISOString()} to ${periodEndDate.toISOString()}`)
+    }
+    
     // Build where clause - only add date filter if period dates are available
     const whereClause: any = {
       importId: sourceImportId,
@@ -265,7 +296,18 @@ export async function POST(request: NextRequest) {
     importRows = validImportRows
 
     // Create the payroll run (only if we have data)
-    const payrollRun = await (prisma as any).payrollRun?.create({
+    // Ensure periodStartDate and periodEndDate are not null (required by schema)
+    if (!periodStartDate || !periodEndDate) {
+      return NextResponse.json(
+        { 
+          error: 'Invalid date range',
+          details: 'Unable to determine period start and end dates. Please ensure the import has period dates set or provide them manually.'
+        },
+        { status: 400 }
+      )
+    }
+    
+    const payrollRun = await prisma.payrollRun.create({
       data: {
         name: name.trim(),
         periodStart: periodStartDate,
