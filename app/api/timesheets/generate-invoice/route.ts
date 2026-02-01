@@ -92,6 +92,20 @@ export async function POST(request: NextRequest) {
     const grouped = new Map<string, typeof timesheets>()
     
     for (const timesheet of timesheets) {
+      // Check if timesheet is already directly linked to an invoice
+      if (timesheet.invoiceId) {
+        const linkedInvoice = await prisma.invoice.findUnique({
+          where: { id: timesheet.invoiceId },
+          select: { invoiceNumber: true },
+        })
+        if (linkedInvoice) {
+          const skipMsg = `Timesheet ${timesheet.id} (${timesheet.client.name}) is already linked to Invoice ${linkedInvoice.invoiceNumber}`
+          console.log(`[INVOICE_GEN] ${skipMsg}`)
+          skipped.push(skipMsg)
+          continue
+        }
+      }
+      
       // Only process timesheets that have at least one non-invoiced entry
       const nonInvoicedEntries = timesheet.entries.filter(e => !e.invoiced)
       if (nonInvoicedEntries.length === 0) {
@@ -388,9 +402,29 @@ export async function POST(request: NextRequest) {
     }
 
     if (createdInvoices.length === 0 && skipped.length > 0) {
+      // Extract invoice numbers from skipped messages
+      const invoiceNumbers = skipped
+        .map(msg => {
+          const match = msg.match(/Invoice (INV-\d{4}-\d+|I-\d+)/i)
+          return match ? match[1] : null
+        })
+        .filter(Boolean) as string[]
+      
+      // Format invoice numbers for display (convert INV-YYYY-XXXX to I-XXXX)
+      const formattedInvoiceNumbers = invoiceNumbers.map(inv => {
+        const match = inv.match(/INV-\d{4}-(\d+)/)
+        return match ? `I-${match[1]}` : inv
+      })
+      
+      let errorMessage = 'No invoices created. All selected timesheets already have invoices for their date ranges.'
+      if (formattedInvoiceNumbers.length > 0) {
+        const uniqueInvoices = [...new Set(formattedInvoiceNumbers)]
+        errorMessage += ` Existing invoice(s): ${uniqueInvoices.join(', ')}`
+      }
+      
       return NextResponse.json(
         { 
-          error: 'No invoices created. All selected timesheets already have invoices for their date ranges.',
+          error: errorMessage,
           skipped,
           invoicesCreated: 0,
         },

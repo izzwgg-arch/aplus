@@ -492,7 +492,15 @@ export function TimesheetsList({ isArchive = false }: { isArchive?: boolean }) {
         setSelectedTimesheets(new Set())
         fetchTimesheets() // Refresh to show updated status
       } else {
-        toast.error(data.error || 'Failed to generate invoices')
+        // Display error with skipped details if available
+        let errorMsg = data.error || 'Failed to generate invoices'
+        if (data.skipped && Array.isArray(data.skipped) && data.skipped.length > 0) {
+          // Show first few skipped items in the error
+          const skippedPreview = data.skipped.slice(0, 3).join('; ')
+          const moreCount = data.skipped.length > 3 ? ` (and ${data.skipped.length - 3} more)` : ''
+          errorMsg += `. Details: ${skippedPreview}${moreCount}`
+        }
+        toast.error(errorMsg)
       }
     } catch (error: any) {
       console.error('Error generating invoices:', error)
