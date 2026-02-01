@@ -88,6 +88,11 @@ export async function POST(request: NextRequest) {
       nonInvoicedEntries: ts.entries.filter(e => !e.invoiced).length,
     })))
 
+    // Initialize arrays for tracking results
+    const createdInvoices: string[] = []
+    const errors: string[] = []
+    const skipped: string[] = []
+
     // Group timesheets by client + week (Monday-Sunday)
     const grouped = new Map<string, typeof timesheets>()
     
@@ -123,10 +128,6 @@ export async function POST(request: NextRequest) {
       
       console.log(`[INVOICE_GEN] Added timesheet ${timesheet.id} to group ${weekKey} (Client: ${timesheet.client.name}, ${nonInvoicedEntries.length} non-invoiced entries)`)
     }
-
-    const createdInvoices: string[] = []
-    const errors: string[] = []
-    const skipped: string[] = []
 
     // Get initial invoice count for sequential numbering
     let invoiceCounter = await prisma.invoice.count()
