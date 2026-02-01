@@ -195,13 +195,23 @@ export function TimesheetsList({ isArchive = false }: { isArchive?: boolean }) {
     }
   }, [debouncedSearchTerm, selectedUserId])
 
-  // Maintain focus on search input
+  // Maintain focus on search input - use requestAnimationFrame to ensure DOM is ready
   useEffect(() => {
-    if (searchInputRef.current && document.activeElement === searchInputRef.current) {
-      // Focus is already on the input, keep it there
-      searchInputRef.current.focus()
-    }
-  }, [debouncedSearchTerm])
+    const timer = requestAnimationFrame(() => {
+      if (searchInputRef.current) {
+        // Only refocus if the input was previously focused
+        const wasFocused = document.activeElement === searchInputRef.current || 
+                          searchInputRef.current === document.activeElement?.closest('input')
+        if (wasFocused || searchTerm.length > 0) {
+          searchInputRef.current.focus()
+          // Restore cursor position if possible
+          const cursorPos = searchInputRef.current.selectionStart || searchTerm.length
+          searchInputRef.current.setSelectionRange(cursorPos, cursorPos)
+        }
+      }
+    })
+    return () => cancelAnimationFrame(timer)
+  }, [debouncedSearchTerm, searchTerm])
 
   useEffect(() => {
     if (page === 1) {
@@ -650,7 +660,15 @@ export function TimesheetsList({ isArchive = false }: { isArchive?: boolean }) {
             placeholder="Search by client, provider, or timesheet ID..."
             className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(e) => {
+              setSearchTerm(e.target.value)
+              // Maintain focus immediately
+              if (searchInputRef.current) {
+                requestAnimationFrame(() => {
+                  searchInputRef.current?.focus()
+                })
+              }
+            }}
           />
         </div>
       </div>

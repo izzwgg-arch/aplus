@@ -40,6 +40,7 @@ interface Invoice {
 export function InvoicesList() {
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [loading, setLoading] = useState(true)
+  const [searching, setSearching] = useState(false) // Separate state for search loading
   const [searchTerm, setSearchTerm] = useState('')
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
@@ -177,17 +178,34 @@ export function InvoicesList() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page])
 
-  // Maintain focus on search input
+  // Maintain focus on search input - use requestAnimationFrame to ensure DOM is ready
   useEffect(() => {
-    if (searchInputRef.current && document.activeElement === searchInputRef.current) {
-      // Focus is already on the input, keep it there
-      searchInputRef.current.focus()
-    }
-  }, [debouncedSearchTerm])
+    const timer = requestAnimationFrame(() => {
+      if (searchInputRef.current) {
+        // Only refocus if the input was previously focused
+        const wasFocused = document.activeElement === searchInputRef.current || 
+                          searchInputRef.current === document.activeElement?.closest('input')
+        if (wasFocused || searchTerm.length > 0) {
+          searchInputRef.current.focus()
+          // Restore cursor position if possible
+          const cursorPos = searchInputRef.current.selectionStart || searchTerm.length
+          searchInputRef.current.setSelectionRange(cursorPos, cursorPos)
+        }
+      }
+    })
+    return () => cancelAnimationFrame(timer)
+  }, [debouncedSearchTerm, searchTerm])
 
   const fetchInvoices = async () => {
     try {
-      setLoading(true)
+      // Only show full page loading on initial load, not during search
+      const isInitialLoad = invoices.length === 0 && !debouncedSearchTerm
+      if (isInitialLoad) {
+        setLoading(true)
+      } else {
+        setSearching(true) // Use searching state for search operations
+      }
+      
       const params = new URLSearchParams({
         page: page.toString(),
         limit: '25',
@@ -202,7 +220,8 @@ export function InvoicesList() {
           invoicesCount: data.invoices?.length || 0,
           total: data.total,
           totalPages: data.totalPages,
-          firstInvoice: data.invoices?.[0]?.invoiceNumber
+          firstInvoice: data.invoices?.[0]?.invoiceNumber,
+          searchTerm: debouncedSearchTerm
         })
         if (data.invoices && Array.isArray(data.invoices)) {
           setInvoices(data.invoices)
@@ -224,6 +243,7 @@ export function InvoicesList() {
       setInvoices([])
     } finally {
       setLoading(false)
+      setSearching(false)
     }
   }
 
@@ -292,7 +312,8 @@ export function InvoicesList() {
     toast.success('Invoices exported to Excel')
   }
 
-  if (loading) {
+  // Only show full page loading on initial load (no invoices yet)
+  if (loading && invoices.length === 0) {
     return <div className="text-center py-12">Loading invoices...</div>
   }
 
@@ -423,11 +444,31 @@ export function InvoicesList() {
           <input
             ref={searchInputRef}
             type="text"
-            placeholder="Search invoices..."
+            placeholder="Search invoices by number, client, or timesheet ID..."
             className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-primary-500 focus:border-primary-500"
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(e) => {
+              setSearchTerm(e.target.value)
+              // Maintain focus immediately
+              if (searchInputRef.current) {
+                requestAnimationFrame(() => {
+                  searchInputRef.current?.focus()
+                })
+              }
+            }}
+            onBlur={(e) => {
+              // Only blur if clicking outside, not during state updates
+              const relatedTarget = e.relatedTarget as HTMLElement
+              if (!relatedTarget || !relatedTarget.closest('input, button, select')) {
+                // Allow blur only if clicking on non-interactive elements
+              }
+            }}
           />
+          {searching && (
+            <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-600"></div>
+            </div>
+          )}
         </div>
         <select
           value={statusFilter}
