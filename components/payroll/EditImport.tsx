@@ -249,6 +249,8 @@ export function EditImport({ importId }: { importId: string }) {
 
       toast.success('Rows saved successfully!')
       fetchImport() // Refresh data
+      // Redirect to Payroll Management Dashboard after successful save
+      router.push('/payroll')
     } catch (error: any) {
       console.error('Error saving rows:', error)
       toast.error(error.message || 'Failed to save rows')

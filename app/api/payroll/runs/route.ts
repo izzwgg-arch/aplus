@@ -121,18 +121,7 @@ export async function POST(request: NextRequest) {
       )
     }
     
-    // Use import's period dates if available, otherwise use provided dates
-    const periodStartDate = payrollImport.periodStart 
-      ? new Date(payrollImport.periodStart)
-      : (periodStart ? new Date(periodStart) : new Date())
-    const periodEndDate = payrollImport.periodEnd
-      ? new Date(payrollImport.periodEnd)
-      : (periodEnd ? new Date(periodEnd) : new Date())
-    
-    periodStartDate.setHours(0, 0, 0, 0)
-    periodEndDate.setHours(23, 59, 59, 999)
-    
-    // First, verify that employees exist and are linked to import rows
+    // First, verify that employees exist and are linked to import rows (WITHOUT date filter)
     const employeeCheck = await (prisma as any).payrollImportRow?.findMany({
       where: {
         importId: sourceImportId,
@@ -140,6 +129,7 @@ export async function POST(request: NextRequest) {
       },
       select: {
         linkedEmployeeId: true,
+        workDate: true, // Include workDate for debugging
       },
       distinct: ['linkedEmployeeId'],
     })
@@ -156,28 +146,91 @@ export async function POST(request: NextRequest) {
       )
     }
     
+    // Use import's period dates if available, otherwise use provided dates
+    // Normalize dates to local dates to avoid timezone issues
+    let periodStartDate: Date | null = null
+    let periodEndDate: Date | null = null
+    
+    if (payrollImport.periodStart) {
+      const start = new Date(payrollImport.periodStart)
+      periodStartDate = new Date(start.getFullYear(), start.getMonth(), start.getDate(), 0, 0, 0, 0)
+    } else if (periodStart) {
+      const start = new Date(periodStart)
+      periodStartDate = new Date(start.getFullYear(), start.getMonth(), start.getDate(), 0, 0, 0, 0)
+    }
+    
+    if (payrollImport.periodEnd) {
+      const end = new Date(payrollImport.periodEnd)
+      periodEndDate = new Date(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59, 999)
+    } else if (periodEnd) {
+      const end = new Date(periodEnd)
+      periodEndDate = new Date(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59, 999)
+    }
+    
+    // Build where clause - only add date filter if period dates are available
+    const whereClause: any = {
+      importId: sourceImportId,
+      linkedEmployeeId: { in: selectedEmployeeIds },
+    }
+    
+    // Only filter by date range if both dates are available
+    if (periodStartDate && periodEndDate) {
+      whereClause.workDate = {
+        gte: periodStartDate,
+        lte: periodEndDate,
+      }
+      console.log(`[PAYROLL RUN] Filtering by date range: ${periodStartDate.toISOString()} to ${periodEndDate.toISOString()}`)
+    } else {
+      console.log(`[PAYROLL RUN] No date range filter applied (periodStart: ${periodStartDate?.toISOString()}, periodEnd: ${periodEndDate?.toISOString()})`)
+    }
+    
     // Get all import rows for selected employees (we'll calculate minutes from inTime/outTime if needed)
     importRows = await (prisma as any).payrollImportRow?.findMany({
-      where: {
-        importId: sourceImportId,
-        linkedEmployeeId: { in: selectedEmployeeIds },
-        workDate: {
-          gte: periodStartDate,
-          lte: periodEndDate,
-        },
-      },
+      where: whereClause,
       include: {
         linkedEmployee: true,
       },
     })
+    
+    // Debug: Log sample work dates to help diagnose timezone issues
+    if (importRows.length > 0) {
+      const sampleDates = importRows.slice(0, 3).map((row: any) => ({
+        workDate: row.workDate?.toISOString(),
+        employeeId: row.linkedEmployeeId,
+      }))
+      console.log(`[PAYROLL RUN] Sample work dates from found rows:`, sampleDates)
+    }
+    
     console.log(`[PAYROLL RUN] Found ${importRows.length} linked import rows for import ${sourceImportId} with ${selectedEmployeeIds.length} selected employees`)
     
     // Check if we have any linked rows BEFORE creating the run
     if (importRows.length === 0) {
+      // Get count of rows without date filter for better error message
+      const rowsWithoutDateFilter = await (prisma as any).payrollImportRow?.findMany({
+        where: {
+          importId: sourceImportId,
+          linkedEmployeeId: { in: selectedEmployeeIds },
+        },
+        select: { id: true, workDate: true },
+      })
+      
+      let errorDetails = `No import rows found for the selected ${selectedEmployeeIds.length} employee(s) in this import`
+      if (periodStartDate && periodEndDate) {
+        errorDetails += ` within the date range ${periodStartDate.toISOString().split('T')[0]} to ${periodEndDate.toISOString().split('T')[0]}`
+      }
+      
+      if (rowsWithoutDateFilter && rowsWithoutDateFilter.length > 0) {
+        const dateRange = rowsWithoutDateFilter.map((r: any) => r.workDate?.toISOString().split('T')[0]).filter(Boolean)
+        const uniqueDates = [...new Set(dateRange)].sort()
+        errorDetails += `. Found ${rowsWithoutDateFilter.length} row(s) for these employees, but they are outside the specified date range. Row dates: ${uniqueDates.slice(0, 5).join(', ')}${uniqueDates.length > 5 ? '...' : ''}`
+      } else {
+        errorDetails += `. Please ensure employees are linked to import rows in the Edit Import page.`
+      }
+      
       return NextResponse.json(
         { 
           error: 'No import rows found for selected employees.',
-          details: `No import rows found for the selected ${selectedEmployeeIds.length} employee(s) in this import within the specified period. Please ensure employees are linked to import rows.`
+          details: errorDetails
         },
         { status: 400 }
       )
