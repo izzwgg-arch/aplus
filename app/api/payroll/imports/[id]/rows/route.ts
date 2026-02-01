@@ -30,7 +30,24 @@ export async function PUT(
         const updateData: any = {}
         
         if (row.workDate !== undefined) {
-          updateData.workDate = new Date(row.workDate)
+          // Parse workDate and ensure it's stored as local midnight (no timezone shift)
+          const dateValue = row.workDate
+          let workDate: Date
+          
+          if (dateValue instanceof Date) {
+            // If already a Date, extract local components to avoid timezone issues
+            workDate = new Date(dateValue.getFullYear(), dateValue.getMonth(), dateValue.getDate(), 0, 0, 0, 0)
+          } else if (typeof dateValue === 'string') {
+            // Parse ISO string and convert to local date components
+            const parsed = new Date(dateValue)
+            // Extract local date components (not UTC) to preserve the calendar date
+            workDate = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate(), 0, 0, 0, 0)
+          } else {
+            workDate = new Date(dateValue)
+            workDate.setHours(0, 0, 0, 0)
+          }
+          
+          updateData.workDate = workDate
         }
         if (row.inTime !== undefined) {
           updateData.inTime = row.inTime ? new Date(row.inTime) : null

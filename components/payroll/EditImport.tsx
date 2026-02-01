@@ -260,7 +260,13 @@ export function EditImport({ importId }: { importId: string }) {
   const formatDate = (dateString: string | null) => {
     if (!dateString) return ''
     try {
-      return format(new Date(dateString), 'yyyy-MM-dd')
+      // Parse the date string and extract local date components to avoid timezone shift
+      const date = new Date(dateString)
+      // Use local date components, not UTC, to ensure the displayed date matches the stored date
+      const year = date.getFullYear()
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      const day = String(date.getDate()).padStart(2, '0')
+      return `${year}-${month}-${day}`
     } catch {
       return dateString
     }
@@ -486,11 +492,13 @@ export function EditImport({ importId }: { importId: string }) {
                       value={formatDate(row.workDate)}
                       onChange={(e) => {
                         if (e.target.value) {
-                          // Parse the date input (YYYY-MM-DD) as local date, then convert to ISO string
-                          // This ensures the date stored matches what the user selected
+                          // Parse the date input (YYYY-MM-DD) as local date
+                          // Store as ISO string but ensure it represents local midnight, not UTC
                           const [year, month, day] = e.target.value.split('-').map(Number)
-                          const localDate = new Date(year, month - 1, day)
-                          // Store as ISO string with time set to local midnight (no timezone shift)
+                          // Create date at local midnight
+                          const localDate = new Date(year, month - 1, day, 0, 0, 0, 0)
+                          // Convert to ISO string - this will be UTC, but we'll handle it on the server
+                          // The key is to send the date components explicitly
                           const isoString = localDate.toISOString()
                           updateRow(row.id, 'workDate', isoString)
                         } else {
