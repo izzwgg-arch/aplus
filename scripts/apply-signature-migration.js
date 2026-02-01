@@ -6,30 +6,73 @@ const prisma = new PrismaClient()
 
 async function applyMigration() {
   try {
-    const sqlPath = path.join(__dirname, '..', 'migrations', 'add_signature_import_batch.sql')
-    const sql = fs.readFileSync(sqlPath, 'utf8')
+    // Create tables directly
+    const createTables = `
+      CREATE TABLE IF NOT EXISTS "SignatureImportBatch" (
+        "id" TEXT NOT NULL,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "createdByUserId" TEXT NOT NULL,
+        "type" TEXT NOT NULL DEFAULT 'SIGNATURE_IMPORT',
+        "notes" TEXT,
+        CONSTRAINT "SignatureImportBatch_pkey" PRIMARY KEY ("id")
+      );
+
+      CREATE TABLE IF NOT EXISTS "SignatureImportBatchItem" (
+        "id" TEXT NOT NULL,
+        "batchId" TEXT NOT NULL,
+        "entityType" TEXT NOT NULL,
+        "entityId" TEXT NOT NULL,
+        "originalSignatureUrl" TEXT,
+        "newSignatureUrl" TEXT NOT NULL,
+        "status" TEXT NOT NULL,
+        "errorMessage" TEXT,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "SignatureImportBatchItem_pkey" PRIMARY KEY ("id")
+      );
+    `
     
-    // Split SQL into individual statements
-    const statements = sql
-      .split(';')
-      .map(s => s.trim())
-      .filter(s => s.length > 0 && !s.startsWith('--'))
+    await prisma.$executeRawUnsafe(createTables)
+    console.log('✓ Tables created')
     
-    for (const statement of statements) {
-      if (statement.trim()) {
-        try {
-          await prisma.$executeRawUnsafe(statement)
-          console.log('✓ Executed statement')
-        } catch (error) {
-          // Ignore "already exists" errors
-          if (error.message.includes('already exists') || 
-              error.message.includes('duplicate') ||
-              error.message.includes('does not exist')) {
-            console.log('⚠ Statement skipped (already applied or not applicable)')
-          } else {
-            throw error
-          }
-        }
+    // Create indexes
+    const createIndexes = `
+      CREATE INDEX IF NOT EXISTS "SignatureImportBatch_createdAt_idx" ON "SignatureImportBatch"("createdAt" DESC);
+      CREATE INDEX IF NOT EXISTS "SignatureImportBatch_createdByUserId_idx" ON "SignatureImportBatch"("createdByUserId");
+      CREATE INDEX IF NOT EXISTS "SignatureImportBatchItem_batchId_idx" ON "SignatureImportBatchItem"("batchId");
+      CREATE INDEX IF NOT EXISTS "SignatureImportBatchItem_entityType_entityId_idx" ON "SignatureImportBatchItem"("entityType", "entityId");
+    `
+    
+    await prisma.$executeRawUnsafe(createIndexes)
+    console.log('✓ Indexes created')
+    
+    // Add foreign keys (with error handling)
+    try {
+      await prisma.$executeRawUnsafe(`
+        ALTER TABLE "SignatureImportBatch" 
+        ADD CONSTRAINT "SignatureImportBatch_createdByUserId_fkey" 
+        FOREIGN KEY ("createdByUserId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+      `)
+      console.log('✓ Foreign key for SignatureImportBatch created')
+    } catch (error) {
+      if (error.message.includes('already exists')) {
+        console.log('⚠ Foreign key for SignatureImportBatch already exists')
+      } else {
+        throw error
+      }
+    }
+    
+    try {
+      await prisma.$executeRawUnsafe(`
+        ALTER TABLE "SignatureImportBatchItem" 
+        ADD CONSTRAINT "SignatureImportBatchItem_batchId_fkey" 
+        FOREIGN KEY ("batchId") REFERENCES "SignatureImportBatch"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+      `)
+      console.log('✓ Foreign key for SignatureImportBatchItem created')
+    } catch (error) {
+      if (error.message.includes('already exists')) {
+        console.log('⚠ Foreign key for SignatureImportBatchItem already exists')
+      } else {
+        throw error
       }
     }
     
