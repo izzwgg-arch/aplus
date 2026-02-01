@@ -264,7 +264,8 @@ export function NewImport() {
 
       const data = await response.json()
       toast.success(`Import saved successfully! ${data.rowCount} rows imported.`)
-      router.push('/payroll')
+      // Redirect to the Edit Import page for the newly created import
+      router.push(`/payroll/imports/${data.importId}`)
     } catch (error: any) {
       console.error('Error saving import:', error)
       toast.error(error.message || 'Failed to save import')
