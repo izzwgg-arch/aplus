@@ -94,22 +94,51 @@ export async function POST(request: NextRequest) {
     // FINGERPRINT SCANNER DETECTION: 
     // ALWAYS check for multiple punches per employee per day FIRST
     // If detected, treat as fingerprint scanner regardless of mapping
+    // Helper function to parse date as local date (no timezone shift)
+    const parseLocalDate = (dateValue: any): Date | null => {
+      if (!dateValue) return null
+      
+      if (dateValue instanceof Date) {
+        const localDate = new Date(dateValue.getFullYear(), dateValue.getMonth(), dateValue.getDate())
+        localDate.setHours(0, 0, 0, 0)
+        return localDate
+      } else if (typeof dateValue === 'string') {
+        const dateMatch = dateValue.match(/^(\d{4})-(\d{2})-(\d{2})/)
+        if (dateMatch) {
+          const year = parseInt(dateMatch[1])
+          const month = parseInt(dateMatch[2]) - 1
+          const day = parseInt(dateMatch[3])
+          return new Date(year, month, day)
+        }
+        const parsed = new Date(dateValue)
+        if (!isNaN(parsed.getTime())) {
+          const localDate = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate())
+          localDate.setHours(0, 0, 0, 0)
+          return localDate
+        }
+        return null
+      } else if (typeof dateValue === 'number') {
+        const excelEpoch = new Date(1900, 0, 1)
+        const daysSinceEpoch = dateValue - 1
+        const localDate = new Date(excelEpoch)
+        localDate.setDate(localDate.getDate() + daysSinceEpoch)
+        localDate.setHours(0, 0, 0, 0)
+        return localDate
+      }
+      return null
+    }
+
     const employeeDateCounts = new Map<string, number>()
     data.forEach((row) => {
       const employeeId = (mapping.employeeName ? row[mapping.employeeName] : row[mapping.employeeExternalId])?.toString().trim() || ''
-      const dateValue = row[mapping.workDate]
-      let workDate: Date | null = null
-      
-      if (dateValue instanceof Date) {
-        workDate = dateValue
-      } else if (typeof dateValue === 'string') {
-        workDate = new Date(dateValue)
-      } else if (typeof dateValue === 'number') {
-        workDate = new Date((dateValue - 25569) * 86400 * 1000)
-      }
+      const workDate = parseLocalDate(row[mapping.workDate])
       
       if (workDate && !isNaN(workDate.getTime())) {
-        const dateKey = `${employeeId}|${workDate.toISOString().split('T')[0]}`
+        // Use local date string (YYYY-MM-DD) for key, not ISO which includes timezone
+        const year = workDate.getFullYear()
+        const month = String(workDate.getMonth() + 1).padStart(2, '0')
+        const day = String(workDate.getDate()).padStart(2, '0')
+        const dateKey = `${employeeId}|${year}-${month}-${day}`
         employeeDateCounts.set(dateKey, (employeeDateCounts.get(dateKey) || 0) + 1)
       }
     })
@@ -188,20 +217,15 @@ export async function POST(request: NextRequest) {
       
       data.forEach((row, index) => {
         const employeeId = (mapping.employeeName ? row[mapping.employeeName] : row[mapping.employeeExternalId])?.toString().trim() || ''
-        const dateValue = row[mapping.workDate]
-        let workDate: Date | null = null
-        
-        if (dateValue instanceof Date) {
-          workDate = dateValue
-        } else if (typeof dateValue === 'string') {
-          workDate = new Date(dateValue)
-        } else if (typeof dateValue === 'number') {
-          workDate = new Date((dateValue - 25569) * 86400 * 1000)
-        }
+        const workDate = parseLocalDate(row[mapping.workDate])
         
         if (!workDate || isNaN(workDate.getTime())) return
         
-        const dateKey = `${employeeId}|${workDate.toISOString().split('T')[0]}`
+        // Use local date string for key
+        const year = workDate.getFullYear()
+        const month = String(workDate.getMonth() + 1).padStart(2, '0')
+        const day = String(workDate.getDate()).padStart(2, '0')
+        const dateKey = `${employeeId}|${year}-${month}-${day}`
         
         if (!punchesByEmployeeDate.has(dateKey)) {
           punchesByEmployeeDate.set(dateKey, [])
@@ -214,6 +238,9 @@ export async function POST(request: NextRequest) {
         const timeValue = timeColumn ? row[timeColumn] : null
         
         if (!timeValue || String(timeValue).trim() === '') return
+        
+        // Ensure workDate is set to local midnight
+        workDate.setHours(0, 0, 0, 0)
         
         punchesByEmployeeDate.get(dateKey)!.push({
           index,
@@ -375,20 +402,15 @@ export async function POST(request: NextRequest) {
       
       data.forEach((row, index) => {
         const employeeId = (mapping.employeeName ? row[mapping.employeeName] : row[mapping.employeeExternalId])?.toString().trim() || ''
-        const dateValue = row[mapping.workDate]
-        let workDate: Date | null = null
-        
-        if (dateValue instanceof Date) {
-          workDate = dateValue
-        } else if (typeof dateValue === 'string') {
-          workDate = new Date(dateValue)
-        } else if (typeof dateValue === 'number') {
-          workDate = new Date((dateValue - 25569) * 86400 * 1000)
-        }
+        const workDate = parseLocalDate(row[mapping.workDate])
         
         if (!workDate || isNaN(workDate.getTime())) return
         
-        const dateKey = `${employeeId}|${workDate.toISOString().split('T')[0]}`
+        // Use local date string for key
+        const year = workDate.getFullYear()
+        const month = String(workDate.getMonth() + 1).padStart(2, '0')
+        const day = String(workDate.getDate()).padStart(2, '0')
+        const dateKey = `${employeeId}|${year}-${month}-${day}`
         
         if (!eventsByEmployeeDate.has(dateKey)) {
           eventsByEmployeeDate.set(dateKey, [])
@@ -556,17 +578,52 @@ export async function POST(request: NextRequest) {
         const employeeNameRaw = mapping.employeeName ? row[mapping.employeeName]?.toString().trim() : null
         const employeeExternalIdRaw = mapping.employeeExternalId ? row[mapping.employeeExternalId]?.toString().trim() : null
       
+      // Helper function to parse date as local date (no timezone shift)
+      const parseLocalDate = (dateValue: any): Date | null => {
+        if (!dateValue) return null
+        
+        if (dateValue instanceof Date) {
+          // If already a Date, create a new date with local components to avoid timezone issues
+          const localDate = new Date(dateValue.getFullYear(), dateValue.getMonth(), dateValue.getDate())
+          return localDate
+        } else if (typeof dateValue === 'string') {
+          // Parse string date as local date (YYYY-MM-DD format)
+          const dateMatch = dateValue.match(/^(\d{4})-(\d{2})-(\d{2})/)
+          if (dateMatch) {
+            const year = parseInt(dateMatch[1])
+            const month = parseInt(dateMatch[2]) - 1 // Month is 0-indexed
+            const day = parseInt(dateMatch[3])
+            return new Date(year, month, day)
+          }
+          // Try parsing as ISO string, then extract local date components
+          const parsed = new Date(dateValue)
+          if (!isNaN(parsed.getTime())) {
+            return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate())
+          }
+          return null
+        } else if (typeof dateValue === 'number') {
+          // Excel serial date - convert to local date (not UTC)
+          // Excel epoch is Jan 1, 1900 (serial 1), but Excel incorrectly treats 1900 as a leap year
+          // JavaScript epoch is Jan 1, 1970
+          // Formula: (Excel serial - 1) days from Jan 1, 1900
+          const excelEpoch = new Date(1900, 0, 1) // Jan 1, 1900 in local time
+          const daysSinceEpoch = dateValue - 1 // Excel serial 1 = Jan 1, 1900
+          const localDate = new Date(excelEpoch)
+          localDate.setDate(localDate.getDate() + daysSinceEpoch)
+          // Set time to local midnight to avoid timezone issues
+          localDate.setHours(0, 0, 0, 0)
+          return localDate
+        }
+        return null
+      }
+
       // Parse work date
       let workDate: Date | null = null
       if (mapping.workDate && row[mapping.workDate]) {
-        const dateValue = row[mapping.workDate]
-        if (dateValue instanceof Date) {
-          workDate = dateValue
-        } else if (typeof dateValue === 'string') {
-          workDate = new Date(dateValue)
-        } else if (typeof dateValue === 'number') {
-          // Excel serial date
-          workDate = new Date((dateValue - 25569) * 86400 * 1000)
+        workDate = parseLocalDate(row[mapping.workDate])
+        // Ensure time is set to local midnight
+        if (workDate) {
+          workDate.setHours(0, 0, 0, 0)
         }
       }
 
@@ -717,7 +774,17 @@ export async function POST(request: NextRequest) {
         rowIndex: index,
         employeeNameRaw: employeeNameRaw || null,
         employeeExternalIdRaw: employeeExternalIdRaw || null,
-        workDate: workDate || new Date(), // Default to today if not parsed
+        workDate: workDate ? (() => {
+          // Ensure workDate is set to local midnight before storing
+          const normalized = new Date(workDate)
+          normalized.setHours(0, 0, 0, 0)
+          return normalized
+        })() : (() => {
+          // Default to today at local midnight
+          const today = new Date()
+          today.setHours(0, 0, 0, 0)
+          return today
+        })(),
         inTime: inTime || null,
         outTime: outTime || null,
         minutesWorked: minutesWorked || null,

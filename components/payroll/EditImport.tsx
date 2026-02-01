@@ -485,8 +485,17 @@ export function EditImport({ importId }: { importId: string }) {
                       type="date"
                       value={formatDate(row.workDate)}
                       onChange={(e) => {
-                        const newDate = e.target.value ? new Date(e.target.value).toISOString() : row.workDate
-                        updateRow(row.id, 'workDate', newDate)
+                        if (e.target.value) {
+                          // Parse the date input (YYYY-MM-DD) as local date, then convert to ISO string
+                          // This ensures the date stored matches what the user selected
+                          const [year, month, day] = e.target.value.split('-').map(Number)
+                          const localDate = new Date(year, month - 1, day)
+                          // Store as ISO string with time set to local midnight (no timezone shift)
+                          const isoString = localDate.toISOString()
+                          updateRow(row.id, 'workDate', isoString)
+                        } else {
+                          updateRow(row.id, 'workDate', row.workDate)
+                        }
                       }}
                       disabled={importData.status === 'FINALIZED'}
                       className="w-full px-2 py-1 text-sm border border-gray-300 rounded disabled:bg-gray-100"
