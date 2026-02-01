@@ -130,25 +130,27 @@ export function generateInvoiceHTML(invoice: InvoiceForHTML): string {
     
     .kj-header-company-name {
       color: #0066CC;
-      font-size: 32px;
+      font-size: 48px;
       font-weight: 700;
       margin: 0;
-      margin-bottom: 8px;
-      letter-spacing: 1px;
+      margin-bottom: 12px;
+      letter-spacing: 2px;
     }
     
     .kj-header-tagline {
       color: #333;
-      font-size: 11px;
+      font-size: 16px;
       margin: 0;
-      margin-bottom: 6px;
+      margin-bottom: 10px;
+      font-weight: 500;
     }
     
     .kj-header-contact {
       color: #666;
-      font-size: 9px;
+      font-size: 13px;
       margin: 0;
-      line-height: 1.4;
+      line-height: 1.6;
+      font-weight: 500;
     }
     
     .header-gradient::before {
