@@ -182,23 +182,50 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Helper function to extract name from filename (removes prefixes, suffixes, etc.)
+    const extractNameFromFilename = (filename: string): string => {
+      // Remove extension
+      let name = filename.replace(/\.(png|jpg|jpeg|emf)$/i, '')
+      
+      // Remove numeric prefix (e.g., "01__" or "01_")
+      name = name.replace(/^\d+[_\s]+/, '')
+      
+      // Remove suffix patterns like "__image15" or "_image15" or "-image15"
+      name = name.replace(/[_\s-]+image\d+$/i, '')
+      name = name.replace(/[_\s-]+img\d+$/i, '')
+      name = name.replace(/[_\s-]+\d+$/i, '') // Remove trailing numbers
+      
+      // Normalize the extracted name
+      return normalizeName(name)
+    }
+    
     // Build image filename map (normalized) - includes original PNG/JPG and converted PNGs
     const imageMap = new Map<string, { filename: string; path: string; isConverted: boolean }>()
     
     // Add original PNG/JPG/JPEG files
     for (const [filename, path] of extractedFiles.entries()) {
       if (/\.(png|jpg|jpeg)$/i.test(filename)) {
-        const normalized = normalizeName(filename.replace(/\.(png|jpg|jpeg)$/i, ''))
+        const normalized = extractNameFromFilename(filename)
         imageMap.set(normalized, { filename, path, isConverted: false })
+        // Also add with direct normalization for backward compatibility
+        const directNormalized = normalizeName(filename.replace(/\.(png|jpg|jpeg)$/i, ''))
+        if (directNormalized !== normalized) {
+          imageMap.set(directNormalized, { filename, path, isConverted: false })
+        }
       }
     }
     
     // Add converted PNG files (from EMF)
     for (const [originalName, convertedPath] of convertedFiles.entries()) {
       const baseName = originalName.replace(/\.emf$/i, '')
-      const normalized = normalizeName(baseName)
+      const normalized = extractNameFromFilename(originalName)
       const pngFilename = `${baseName}.png`
       imageMap.set(normalized, { filename: pngFilename, path: convertedPath, isConverted: true })
+      // Also add with direct normalization for backward compatibility
+      const directNormalized = normalizeName(baseName)
+      if (directNormalized !== normalized) {
+        imageMap.set(directNormalized, { filename: pngFilename, path: convertedPath, isConverted: true })
+      }
     }
 
     console.log(`[SIGNATURE_DRY_RUN] ${reqId} Built image map: ${imageMap.size} images (${convertedFiles.size} converted from EMF)`)
@@ -293,8 +320,9 @@ export async function POST(request: NextRequest) {
           // Try to find EMF file with same base name and convert on-the-fly if needed
           // Check all extracted files for potential EMF matches
           for (const [extractedFilename, extractedPath] of extractedFiles.entries()) {
-            const extractedBaseName = normalizeName(extractedFilename.replace(/\.(png|jpg|jpeg|emf)$/i, ''))
-            if (extractedBaseName === normalizedName) {
+            // Use the same extraction logic as in imageMap building
+            const extractedNormalized = extractNameFromFilename(extractedFilename)
+            if (extractedNormalized === normalizedName) {
               if (/\.emf$/i.test(extractedFilename)) {
                 // Found matching EMF file - try to convert it
                 try {
