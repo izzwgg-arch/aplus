@@ -28,10 +28,12 @@ interface EmployeeMonthlyReportData {
   }
   breakdown: Array<{
     date: Date | string
-    sourceImport?: string | null
+    inTime?: Date | string | null
+    outTime?: Date | string | null
+    inTimeFormatted?: string
+    outTimeFormatted?: string
     hours: number
-    rate: number
-    gross: number
+    sourceImport?: string | null
   }>
   payments: Array<{
     date: Date | string
@@ -256,32 +258,39 @@ export function generateEmployeeMonthlyReportHTML(data: EmployeeMonthlyReportDat
   </div>
   
   <div class="section">
-    <div class="section-title">Detailed Breakdown</div>
+    <div class="section-title">Detailed Time Entries</div>
     <table>
       <thead>
         <tr>
           <th>Date</th>
-          <th>Source Import</th>
+          <th>In Time</th>
+          <th>Out Time</th>
           <th class="text-right">Hours</th>
-          <th class="text-right">Rate</th>
-          <th class="text-right">Gross Pay</th>
+          <th>Source Import</th>
         </tr>
       </thead>
       <tbody>
         ${breakdown.length > 0 ? breakdown.map((row) => `
         <tr>
           <td>${formatDate(row.date)}</td>
-          <td>${row.sourceImport || '-'}</td>
+          <td>${row.inTimeFormatted || '-'}</td>
+          <td>${row.outTimeFormatted || '-'}</td>
           <td class="text-right">${row.hours.toFixed(2)}</td>
-          <td class="text-right">${formatCurrency(row.rate)}</td>
-          <td class="text-right">${formatCurrency(row.gross)}</td>
+          <td>${row.sourceImport || '-'}</td>
         </tr>
         `).join('') : `
         <tr>
-          <td colspan="5" class="text-center">No breakdown data available</td>
+          <td colspan="5" class="text-center">No time entries available</td>
         </tr>
         `}
       </tbody>
+      <tfoot>
+        <tr style="font-weight: bold; background-color: #f0f0f0;">
+          <td colspan="3">Total Hours</td>
+          <td class="text-right">${breakdown.reduce((sum, row) => sum + row.hours, 0).toFixed(2)}</td>
+          <td></td>
+        </tr>
+      </tfoot>
     </table>
   </div>
   
