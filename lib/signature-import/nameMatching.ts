@@ -8,7 +8,8 @@
  * - trim
  * - replace multiple spaces with single
  * - remove punctuation (.,#,'" etc)
- * - keep letters/numbers/spaces
+ * - convert spaces to underscores for consistent matching with filenames
+ * - keep letters/numbers/underscores
  */
 export function normalizeName(name: string): string {
   if (!name) return ''
@@ -18,6 +19,7 @@ export function normalizeName(name: string): string {
     .trim()
     .replace(/\s+/g, ' ') // Multiple spaces to single
     .replace(/[^\w\s]/g, '') // Remove punctuation
+    .replace(/\s+/g, '_') // Convert spaces to underscores for consistent matching
     .trim()
 }
 
