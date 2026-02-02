@@ -159,6 +159,11 @@ export async function POST(request: NextRequest) {
     }
 
     console.log(`[SIGNATURE_DRY_RUN] ${reqId} Extracted ${extractedFiles.size} files, ${emfFiles.length} EMF files to convert`)
+    console.log(`[SIGNATURE_DRY_RUN] ${reqId} Extracted file list:`, Array.from(extractedFiles.keys()).slice(0, 20).join(', '))
+    if (extractedFiles.size > 20) {
+      console.log(`[SIGNATURE_DRY_RUN] ${reqId} ... and ${extractedFiles.size - 20} more files`)
+    }
+    console.log(`[SIGNATURE_DRY_RUN] ${reqId} EMF files found:`, emfFiles.map(f => f.originalName).join(', '))
 
     // Convert EMF files to PNG
     const convertedFiles = new Map<string, string>() // original name -> converted PNG path
@@ -197,6 +202,10 @@ export async function POST(request: NextRequest) {
     }
 
     console.log(`[SIGNATURE_DRY_RUN] ${reqId} Built image map: ${imageMap.size} images (${convertedFiles.size} converted from EMF)`)
+    console.log(`[SIGNATURE_DRY_RUN] ${reqId} Image map keys (normalized names):`, Array.from(imageMap.keys()).slice(0, 10).join(', '))
+    if (imageMap.size > 10) {
+      console.log(`[SIGNATURE_DRY_RUN] ${reqId} ... and ${imageMap.size - 10} more image entries`)
+    }
 
     // Process each row
     const results: Array<{
