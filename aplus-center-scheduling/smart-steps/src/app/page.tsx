@@ -2,23 +2,46 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { useSession } from "next-auth/react";
+import { useSession, signIn } from "next-auth/react";
 import { motion } from "framer-motion";
+
+const APLUS_TOKEN_EMAIL = "__aplus_token__";
 
 export default function SplashPage() {
   const router = useRouter();
   const { status } = useSession();
   const [stats, setStats] = useState({ sessionsToday: 0, masteryStreak: 0 });
+  const [tokenLoginDone, setTokenLoginDone] = useState(false);
 
   useEffect(() => {
     setStats({ sessionsToday: 4, masteryStreak: 87 });
+  }, []);
+
+  // A+ Center SSO: if URL has #token=..., sign in with that token (no separate password)
+  useEffect(() => {
+    if (typeof window === "undefined" || tokenLoginDone) return;
+    const hash = window.location.hash?.replace(/^#/, "") || "";
+    const params = new URLSearchParams(hash);
+    const token = params.get("token");
+    if (token) {
+      setTokenLoginDone(true);
+      signIn("credentials", { email: APLUS_TOKEN_EMAIL, password: token, redirect: false }).then((res) => {
+        if (res?.ok) router.replace("/dashboard");
+        else router.replace("/login");
+      });
+      return;
+    }
+  }, [router, tokenLoginDone]);
+
+  useEffect(() => {
+    if (tokenLoginDone) return;
     const t = setTimeout(() => {
       if (status === "authenticated") router.replace("/dashboard");
       else if (status === "unauthenticated") router.replace("/login");
       else router.replace("/dashboard");
     }, 2200);
     return () => clearTimeout(t);
-  }, [router, status]);
+  }, [router, status, tokenLoginDone]);
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-[var(--background)] px-4">
