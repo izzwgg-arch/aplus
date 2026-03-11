@@ -1,0 +1,194 @@
+// Smart Steps ABA Tracker — data doesn't sleep
+// Prisma schema for Postgres (Supabase / Vercel Postgres ready)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  RBT
+  BCBA
+  ADMIN
+}
+
+enum TargetType {
+  DISCRETE_TRIAL
+  TASK_ANALYSIS_CHAIN_FWD
+  TASK_ANALYSIS_CHAIN_BWD
+  TASK_ANALYSIS_CHAIN_TOTAL
+  COLD_PROBE
+  GEN_PROBE
+}
+
+enum TrialResult {
+  CORRECT
+  INCORRECT
+  PROMPTED
+  NR
+  SKIP
+}
+
+enum PromptLevel {
+  FULL_PHYSICAL
+  PARTIAL_PHYSICAL
+  GESTURAL
+  VERBAL
+  MODEL
+  INDEPENDENT
+}
+
+enum Phase {
+  BASELINE
+  ACQUISITION
+  MAINTENANCE
+  GENERALIZATION
+  MASTERED
+}
+
+enum IntervalType {
+  PARTIAL
+  WHOLE
+  MOMENTARY
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  role          Role      @default(RBT)
+  image         String?
+  emailVerified DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  assignedClients ClientAssignment[]
+  sessions      Session[]
+  notes         Note[]
+  auditEntries  AuditEntry[]
+}
+
+model Client {
+  id          String   @id @default(cuid())
+  name        String
+  photoUrl    String?
+  dob         DateTime
+  diagnosis   String[] // tags e.g. ["ASD", "ADHD"]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  assignments ClientAssignment[]
+  programs    Program[]
+  sessions    Session[]
+  notes       Note[]
+}
+
+model ClientAssignment {
+  id        String   @id @default(cuid())
+  clientId  String
+  userId    String
+  role      Role     // RBT or BCBA for this client
+  createdAt DateTime @default(now())
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([clientId, userId])
+  @@index([clientId])
+  @@index([userId])
+}
+
+model Program {
+  id          String   @id @default(cuid())
+  clientId    String
+  name        String
+  domain      String   // Mand, Tact, Intraverbal, Social, ADL, etc.
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  targets     Target[]
+}
+
+model Target {
+  id            String     @id @default(cuid())
+  programId     String
+  definition    String
+  targetType    TargetType
+  phase         Phase      @default(BASELINE)
+  masteryRule   Json?      // { thresholdPct, consecutiveDays, promptFade }
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  program       Program    @relation(fields: [programId], references: [id], onDelete: Cascade)
+  trials        Trial[]
+}
+
+model Session {
+  id          String    @id @default(cuid())
+  clientId    String
+  userId      String
+  startedAt   DateTime  @default(now())
+  endedAt     DateTime?
+  notes       String?
+  voiceNotes  String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  client      Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trials      Trial[]
+  behaviors   BehaviorEvent[]
+}
+
+model Trial {
+  id          String       @id @default(cuid())
+  sessionId   String
+  targetId    String
+  result      TrialResult
+  promptLevel PromptLevel?
+  latencyMs   Int?
+  createdAt   DateTime     @default(now())
+  session     Session      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  target      Target       @relation(fields: [targetId], references: [id], onDelete: Cascade)
+  @@index([sessionId])
+  @@index([targetId])
+}
+
+model BehaviorEvent {
+  id          String   @id @default(cuid())
+  sessionId   String
+  type        String   // frequency, duration, latency, ABC
+  value       Float?   // count or seconds
+  antecedent  String?
+  behavior    String?
+  consequence String?
+  intensity   String?  // mild, moderate, severe
+  createdAt   DateTime @default(now())
+  session     Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  @@index([sessionId])
+}
+
+model Note {
+  id        String   @id @default(cuid())
+  clientId  String
+  userId    String
+  content   String
+  type      String   // SOAP, progress, general
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([clientId])
+}
+
+model AuditEntry {
+  id         String   @id @default(cuid())
+  userId     String
+  action     String
+  entityType String
+  entityId   String?
+  details    Json?
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+  @@index([entityType, entityId])
+}

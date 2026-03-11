@@ -72,68 +72,20 @@ export async function GET(
       }))
     ).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
 
-    // Fetch detailed time entries (PayrollImportRow) for this employee in the period
-    const detailedEntries: any[] = await (prisma as any).payrollImportRow?.findMany({
-      where: {
-        linkedEmployeeId: employeeId,
-        workDate: {
-          gte: periodStart,
-          lte: periodEnd,
-        },
-      },
-      include: {
-        import: {
-          select: {
-            originalFileName: true,
-            uploadedAt: true,
-          },
-        },
-      },
-      orderBy: {
-        workDate: 'asc',
-      },
-    }) || []
-
-    // Calculate summary from detailed entries
-    const totalHours = detailedEntries.reduce((sum, entry) => {
-      if (entry.hoursWorked) {
-        return sum + parseFloat(entry.hoursWorked.toString())
-      } else if (entry.minutesWorked) {
-        return sum + (entry.minutesWorked / 60)
-      }
-      return sum
-    }, 0)
-
-    // Calculate gross pay from run lines (more accurate as it includes overtime calculations)
+    // Calculate summary
+    const totalHours = runLines.reduce((sum, line) => sum + parseFloat(line.totalHours.toString()), 0)
     const grossPay = runLines.reduce((sum, line) => sum + parseFloat(line.grossPay.toString()), 0)
     const totalPaid = allPayments.reduce((sum, p) => sum + p.amount, 0)
     const totalOwed = grossPay - totalPaid
 
-    // Build detailed breakdown from import rows
-    const breakdown = detailedEntries.map((entry: any) => {
-      const hours = entry.hoursWorked 
-        ? parseFloat(entry.hoursWorked.toString())
-        : entry.minutesWorked 
-          ? entry.minutesWorked / 60
-          : 0
-      
-      // Format times
-      const formatTime = (date: Date | string | null) => {
-        if (!date) return '-'
-        const d = typeof date === 'string' ? new Date(date) : date
-        return format(d, 'h:mm a')
-      }
-
-      return {
-        date: entry.workDate,
-        inTime: entry.inTime,
-        outTime: entry.outTime,
-        inTimeFormatted: formatTime(entry.inTime),
-        outTimeFormatted: formatTime(entry.outTime),
-        hours: hours,
-        sourceImport: entry.import?.originalFileName || 'Unknown',
-      }
-    })
+    // Build breakdown from run lines
+    const breakdown = runLines.map((line: any) => ({
+      date: line.run.periodStart,
+      sourceImport: null, // We can add this if needed
+      hours: parseFloat(line.totalHours.toString()),
+      rate: parseFloat(line.hourlyRateUsed.toString()),
+      gross: parseFloat(line.grossPay.toString()),
+    }))
 
     // Generate HTML
     const html = generateEmployeeMonthlyReportHTML({

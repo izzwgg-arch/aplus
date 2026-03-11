@@ -42,83 +42,15 @@ export async function GET(
     const totalOwed = (run.lines || []).reduce((sum: number, line: any) => sum + parseFloat((line.amountOwed?.toString() || '0')), 0)
     const employeeCount = (run.lines || []).length
 
-    // Fetch detailed time entries for each employee from the source import
-    const sourceImportId = run.sourceImportId
-    let detailedEntriesByEmployee: Map<string, any[]> = new Map()
-    
-    if (sourceImportId) {
-      const periodStart = new Date(run.periodStart)
-      const periodEnd = new Date(run.periodEnd)
-      periodEnd.setHours(23, 59, 59, 999)
-
-      const employeeIds = (run.lines || []).map((line: any) => line.employeeId)
-      
-      if (employeeIds.length > 0) {
-        const allEntries: any[] = await (prisma as any).payrollImportRow?.findMany({
-          where: {
-            importId: sourceImportId,
-            linkedEmployeeId: { in: employeeIds },
-            workDate: {
-              gte: periodStart,
-              lte: periodEnd,
-            },
-          },
-          orderBy: [
-            { linkedEmployeeId: 'asc' },
-            { workDate: 'asc' },
-          ],
-        }) || []
-
-        // Group entries by employee
-        for (const entry of allEntries) {
-          const empId = entry.linkedEmployeeId
-          if (!detailedEntriesByEmployee.has(empId)) {
-            detailedEntriesByEmployee.set(empId, [])
-          }
-          detailedEntriesByEmployee.get(empId)!.push(entry)
-        }
-      }
-    }
-
-    // Build employee data with detailed entries
-    const employees = (run.lines || []).map((line: any) => {
-      const entries = detailedEntriesByEmployee.get(line.employeeId) || []
-      
-      // Format detailed entries
-      const formatTime = (date: Date | string | null) => {
-        if (!date) return '-'
-        const d = typeof date === 'string' ? new Date(date) : date
-        return format(d, 'h:mm a')
-      }
-
-      const detailedTimeEntries = entries.map((entry: any) => {
-        const hours = entry.hoursWorked 
-          ? parseFloat(entry.hoursWorked.toString())
-          : entry.minutesWorked 
-            ? entry.minutesWorked / 60
-            : 0
-        
-        return {
-          date: entry.workDate,
-          inTime: entry.inTime,
-          outTime: entry.outTime,
-          inTimeFormatted: formatTime(entry.inTime),
-          outTimeFormatted: formatTime(entry.outTime),
-          hours: hours,
-        }
-      })
-
-      return {
-        employeeName: line.employee.fullName,
-        employeeId: line.employeeId,
-        totalHours: parseFloat(line.totalHours.toString()),
-        hourlyRate: parseFloat(line.hourlyRateUsed.toString()),
-        grossPay: parseFloat(line.grossPay.toString()),
-        amountPaid: parseFloat(line.amountPaid.toString()),
-        amountOwed: parseFloat(line.amountOwed.toString()),
-        detailedEntries: detailedTimeEntries,
-      }
-    })
+    // Build employee data
+    const employees = (run.lines || []).map((line: any) => ({
+      employeeName: line.employee.fullName,
+      totalHours: parseFloat(line.totalHours.toString()),
+      hourlyRate: parseFloat(line.hourlyRateUsed.toString()),
+      grossPay: parseFloat(line.grossPay.toString()),
+      amountPaid: parseFloat(line.amountPaid.toString()),
+      amountOwed: parseFloat(line.amountOwed.toString()),
+    }))
 
     // Generate HTML
     const html = generateRunSummaryReportHTML({

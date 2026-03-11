@@ -23,20 +23,11 @@ interface RunSummaryReportData {
   }
   employees: Array<{
     employeeName: string
-    employeeId?: string
     totalHours: number
     hourlyRate: number
     grossPay: number
     amountPaid: number
     amountOwed: number
-    detailedEntries?: Array<{
-      date: Date | string
-      inTime?: Date | string | null
-      outTime?: Date | string | null
-      inTimeFormatted?: string
-      outTimeFormatted?: string
-      hours: number
-    }>
   }>
 }
 
@@ -250,7 +241,7 @@ export function generateRunSummaryReportHTML(data: RunSummaryReportData): string
   </div>
   
   <div class="section">
-    <div class="section-title">Employee Summary</div>
+    <div class="section-title">Employee Totals</div>
     <table>
       <thead>
         <tr>
@@ -290,47 +281,6 @@ export function generateRunSummaryReportHTML(data: RunSummaryReportData): string
       </tfoot>
     </table>
   </div>
-
-  ${employees.some(emp => emp.detailedEntries && emp.detailedEntries.length > 0) ? `
-  <div class="section">
-    <div class="section-title">Detailed Time Entries by Employee</div>
-    ${employees.map((emp) => {
-      if (!emp.detailedEntries || emp.detailedEntries.length === 0) return ''
-      
-      return `
-      <div style="margin-bottom: 32px;">
-        <h3 style="font-size: 14px; font-weight: bold; margin-bottom: 8px; color: #333;">${emp.employeeName}</h3>
-        <table>
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>In Time</th>
-              <th>Out Time</th>
-              <th class="text-right">Hours</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${emp.detailedEntries.map((entry) => `
-            <tr>
-              <td>${formatDate(entry.date)}</td>
-              <td>${entry.inTimeFormatted || '-'}</td>
-              <td>${entry.outTimeFormatted || '-'}</td>
-              <td class="text-right">${entry.hours.toFixed(2)}</td>
-            </tr>
-            `).join('')}
-          </tbody>
-          <tfoot>
-            <tr style="font-weight: bold; background-color: #f0f0f0;">
-              <td colspan="3">Subtotal</td>
-              <td class="text-right">${emp.detailedEntries.reduce((sum, e) => sum + e.hours, 0).toFixed(2)}</td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-      `
-    }).join('')}
-  </div>
-  ` : ''}
   
   <div class="footer">
     Generated on ${format(new Date(), 'MMMM d, yyyy \'at\' h:mm:ss a')}

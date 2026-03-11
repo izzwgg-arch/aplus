@@ -1,0 +1,19 @@
+{
+  "name": "Smart Steps ABA Tracker",
+  "short_name": "Smart Steps",
+  "description": "2026 ABA data collection — data doesn't sleep.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#0a0a0a",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "48x48",
+      "type": "image/x-icon",
+      "purpose": "any"
+    }
+  ],
+  "categories": ["medical", "productivity"]
+}

@@ -5,10 +5,9 @@ import { prisma } from '@/lib/prisma'
 import { calculateUnits } from '@/lib/utils'
 import { detectTimesheetOverlaps } from '@/lib/server/timesheetOverlapValidation'
 import { startOfDay, endOfDay, eachDayOfInterval, format } from 'date-fns'
-import { parseDateOnly, isSaturdayInTimezone } from '@/lib/dateUtils'
+import { parseDateOnly } from '@/lib/dateUtils'
 import { getTimesheetVisibilityScope } from '@/lib/permissions'
 import { startPerfLog } from '@/lib/api-performance'
-import { generateTimesheetNumber } from '@/lib/timesheet-ids'
 
 export async function GET(request: NextRequest) {
   const perf = startPerfLog('GET /api/timesheets')
@@ -55,10 +54,7 @@ export async function GET(request: NextRequest) {
       }
     } else {
       // Active list: show only non-invoiced AND non-archived timesheets
-      // Build AND conditions to ensure all criteria are met
-      const activeConditions: any[] = [
-        { invoiceEntries: { none: {} } }, // No invoice entries = not invoiced
-      ]
+      where.invoiceEntries = { none: {} } // No invoice entries = not invoiced
       
       // Exclude archived timesheets using raw SQL
       const archivedIds = await prisma.$queryRawUnsafe<Array<{ id: string }>>(`
@@ -70,14 +66,7 @@ export async function GET(request: NextRequest) {
       const archivedIdList = archivedIds.map((r: any) => r.id)
       
       if (archivedIdList.length > 0) {
-        activeConditions.push({ id: { notIn: archivedIdList } })
-      }
-      
-      // Combine active conditions with existing where clause
-      if (where.AND) {
-        where.AND = [...where.AND, ...activeConditions]
-      } else {
-        where.AND = activeConditions
+        where.id = { notIn: archivedIdList }
       }
     }
     const clientId = searchParams.get('clientId')
@@ -87,24 +76,23 @@ export async function GET(request: NextRequest) {
     const userIdParam = searchParams.get('userId')
 
     if (search) {
-      const searchConditions = [
-        { client: { name: { contains: search, mode: 'insensitive' } } },
-        { provider: { name: { contains: search, mode: 'insensitive' } } },
-        // Search by timesheet ID (timesheetNumber)
-        { timesheetNumber: { contains: search, mode: 'insensitive' } },
-        // Also search by ID if it matches
-        { id: { contains: search, mode: 'insensitive' } },
-      ]
-
       // If where.OR already exists (for archive), combine with search
       if (where.OR) {
         where.AND = [
           { OR: where.OR },
-          { OR: searchConditions },
+          {
+            OR: [
+              { client: { name: { contains: search, mode: 'insensitive' } } },
+              { provider: { name: { contains: search, mode: 'insensitive' } } },
+            ]
+          }
         ]
         delete where.OR
       } else {
-        where.OR = searchConditions
+        where.OR = [
+          { client: { name: { contains: search, mode: 'insensitive' } } },
+          { provider: { name: { contains: search, mode: 'insensitive' } } },
+        ]
       }
     }
 
@@ -173,11 +161,6 @@ export async function GET(request: NextRequest) {
           bcba: true,
           insurance: true,
           entries: true,
-          invoice: {
-            select: {
-              invoiceNumber: true,
-            },
-          },
         },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
@@ -228,8 +211,6 @@ export async function POST(request: NextRequest) {
     } = data
 
     // Validation - BCBA timesheets don't require provider or insurance
-    // For BCBA timesheets, if insuranceId is not provided, get it from the client
-    let finalInsuranceId = insuranceId
     if (isBCBA) {
       // For BCBA timesheets, providerId is optional (use empty string as placeholder)
       if (!clientId || !bcbaId || !startDate || !endDate) {
@@ -239,19 +220,11 @@ export async function POST(request: NextRequest) {
         )
       }
       // BCBA timesheets require Insurance (with BCBA rates)
-      // If insuranceId is not provided, get it from the client
-      if (!finalInsuranceId) {
-        const client = await prisma.client.findUnique({
-          where: { id: clientId },
-          include: { insurance: true },
-        })
-        if (!client?.insuranceId) {
-          return NextResponse.json(
-            { error: 'Client must have insurance assigned for BCBA timesheets' },
-            { status: 400 }
-          )
-        }
-        finalInsuranceId = client.insuranceId
+      if (!insuranceId) {
+        return NextResponse.json(
+          { error: 'Insurance is required for BCBA timesheets' },
+          { status: 400 }
+        )
       }
     } else {
       // Regular timesheets require provider
@@ -263,17 +236,13 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // For BCBA timesheets, insuranceId should already be set from client above
-    // For regular timesheets, check if insuranceId is provided
-    if (!isBCBA && !insuranceId) {
+    // Both regular and BCBA timesheets require insurance
+    if (!insuranceId) {
       return NextResponse.json(
         { error: 'Insurance is required' },
         { status: 400 }
       )
     }
-    
-    // Use finalInsuranceId for BCBA, insuranceId for regular
-    const finalInsuranceIdForUse = isBCBA ? finalInsuranceId : insuranceId
 
     // For BCBA timesheets, use a placeholder provider or find first active provider
     let finalProviderId = providerId
@@ -295,7 +264,7 @@ export async function POST(request: NextRequest) {
     const [provider, client, insurance] = await Promise.all([
       finalProviderId ? prisma.provider.findUnique({ where: { id: finalProviderId } }) : Promise.resolve(null),
       prisma.client.findUnique({ where: { id: clientId } }),
-      finalInsuranceIdForUse ? prisma.insurance.findUnique({ where: { id: finalInsuranceIdForUse } }) : Promise.resolve(null),
+      insuranceId ? prisma.insurance.findUnique({ where: { id: insuranceId } }) : Promise.resolve(null),
     ])
 
     if (!client?.active) {
@@ -314,7 +283,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Only check insurance if it's provided (regular timesheets)
-    if (finalInsuranceIdForUse && !insurance?.active) {
+    if (insuranceId && !insurance?.active) {
       return NextResponse.json(
         { error: 'Insurance must be active' },
         { status: 400 }
@@ -424,20 +393,16 @@ export async function POST(request: NextRequest) {
       console.log('[OVERLAP] Skipped overlap validation for BCBA timesheet')
     }
 
-    // Generate timesheet number
-    const timesheetNumber = await generateTimesheetNumber(isBCBA === true)
-
     // Create timesheet
     // Use transaction to create timesheet and then update bcbaInsuranceId if needed (since Prisma client may not recognize it yet)
     const timesheet = await prisma.$transaction(async (tx) => {
       const newTimesheet = await tx.timesheet.create({
         data: {
-          timesheetNumber,
           userId: session.user.id,
           providerId: finalProviderId, // Use placeholder provider for BCBA timesheets
           clientId,
           bcbaId,
-          insuranceId: finalInsuranceIdForUse, // Required for both regular and BCBA timesheets
+          insuranceId: insuranceId, // Required for both regular and BCBA timesheets
           isBCBA: isBCBA === true,
           serviceType: serviceType || null,
           sessionData: sessionData || null,
