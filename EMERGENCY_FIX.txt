@@ -1,0 +1,23 @@
+================================================================================
+EMERGENCY FIX FOR SERVER - Copy and paste ALL of this into your server terminal
+================================================================================
+
+cd /var/www/aplus-center && mkdir -p .next && cat > .next/prerender-manifest.json << 'ENDOFFILE'
+{
+  "version": 4,
+  "routes": {},
+  "dynamicRoutes": {},
+  "notFoundRoutes": [],
+  "preview": {
+    "previewModeId": "",
+    "previewModeSigningKey": "",
+    "previewModeEncryptionKey": ""
+  }
+}
+ENDOFFILE
+pm2 restart aplus-center
+pm2 logs aplus-center --lines 20
+
+================================================================================
+After running, test: http://66.94.105.43:3000
+================================================================================

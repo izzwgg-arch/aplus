@@ -1,0 +1,63 @@
+═══════════════════════════════════════════════════════════════
+  A PLUS CENTER - DEPLOYMENT STEPS
+═══════════════════════════════════════════════════════════════
+
+✅ Deployment package created: aplus-center-deploy.zip
+
+═══════════════════════════════════════════════════════════════
+STEP 1: UPLOAD TO SERVER
+═══════════════════════════════════════════════════════════════
+
+Run this command in PowerShell:
+
+  scp aplus-center-deploy.zip root@66.94.105.43:/tmp/
+
+
+═══════════════════════════════════════════════════════════════
+STEP 2: SSH INTO SERVER
+═══════════════════════════════════════════════════════════════
+
+  ssh root@66.94.105.43
+
+
+═══════════════════════════════════════════════════════════════
+STEP 3: DEPLOY ON SERVER
+═══════════════════════════════════════════════════════════════
+
+Copy and paste these commands:
+
+cd /var/www/aplus-center
+unzip -o /tmp/aplus-center-deploy.zip
+npm install --production
+npx prisma generate
+npx prisma db push
+npm run build
+pm2 restart aplus-center
+pm2 logs aplus-center --lines 20
+
+
+═══════════════════════════════════════════════════════════════
+STEP 4: VERIFY
+═══════════════════════════════════════════════════════════════
+
+  curl http://localhost:3000
+  pm2 status
+
+Then open in browser: http://66.94.105.43:3000
+
+
+═══════════════════════════════════════════════════════════════
+IF FIRST TIME (Run these first):
+═══════════════════════════════════════════════════════════════
+
+mkdir -p /var/www/aplus-center
+mkdir -p /var/log/aplus-center
+cd /var/www/aplus-center
+# Create .env file with DATABASE_URL, NEXTAUTH_SECRET, etc.
+npm run create-admin admin@apluscenter.com "Admin@12345!"
+pm2 start deploy/pm2.config.js
+pm2 save
+pm2 startup
+
+
+═══════════════════════════════════════════════════════════════

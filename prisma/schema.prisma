@@ -1,0 +1,1088 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  USER
+  CUSTOM
+}
+
+enum TimesheetStatus {
+  DRAFT
+  APPROVED
+  REJECTED
+  QUEUED
+  EMAILED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  READY
+  SENT
+  PARTIALLY_PAID
+  PAID
+  VOID
+}
+
+enum InsuranceCodeServiceType {
+  Assessment
+  DirectCare
+  Supervision
+  TreatmentPlanning
+  ParentTraining
+}
+
+enum InsuranceCodeAppliesTo {
+  REGULAR
+  BCBA
+  BOTH
+}
+
+enum SignatureEntityType {
+  CLIENT
+  PROVIDER
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  APPROVE
+  REJECT
+  QUEUE
+  GENERATE
+  PAYMENT
+  ADJUSTMENT
+  LOGIN
+  EMAIL_SENT
+  EMAIL_FAILED
+  TIMESHEET_APPROVED
+  TIMESHEET_REJECTED
+  BCBA_TIMESHEET_APPROVED
+  BCBA_TIMESHEET_REJECTED
+  USER_PASSWORD_SET
+  USER_LOGIN
+}
+
+model User {
+  id                    String    @id @default(cuid())
+  username              String    @unique
+  email                 String    @unique
+  password              String
+  role                  UserRole  @default(USER)
+  customRoleId          String?
+  active                Boolean   @default(true)
+  activationStart       DateTime?
+  activationEnd         DateTime?
+  resetToken            String?
+  resetTokenExpiry      DateTime?
+  tempPasswordHash      String? // Temporary password hash for new users
+  tempPasswordExpiresAt DateTime? // Expiration for temp password
+  mustChangePassword    Boolean   @default(false)
+  failedLoginAttempts   Int       @default(0)
+  lockedUntil           DateTime?
+  lastLoginAt           DateTime? // Last successful login timestamp
+  lastSeenActivityAt    DateTime? // For admin activity badge tracking
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  deletedAt             DateTime?
+
+  timesheets                Timesheet[]
+  invoicesCreated           Invoice[]                 @relation("InvoiceCreator")
+  auditLogs                 AuditLog[]
+  notifications             Notification[]
+  activities                Activity[]                @relation("ActivityActor")
+  emailQueueItems           EmailQueueItem[]          @relation("EmailQueueCreator")
+  deletedEmailQueueItems    EmailQueueItem[]          @relation("EmailQueueDeleter")
+  formsCreated              FormDocument[]            @relation("FormCreator")
+  customRole                Role?                     @relation(fields: [customRoleId], references: [id])
+  timesheetVisibility       RoleTimesheetVisibility[]
+  communityInvoicesApproved CommunityInvoice[]        @relation("CommunityInvoiceApprover")
+  communityInvoicesRejected CommunityInvoice[]        @relation("CommunityInvoiceRejector")
+  communityInvoicesCreated  CommunityInvoice[]        @relation("CommunityInvoiceCreator")
+  // New Payroll Management relations (rebuilt from scratch)
+  payrollImportsCreated     PayrollImport[]           @relation("PayrollImportCreator")
+  payrollRunsCreated        PayrollRun[]              @relation("PayrollRunCreator")
+  payrollPaymentsCreated    PayrollPayment[]          @relation("PayrollPaymentCreator")
+  payrollReportsCreated     PayrollReportArtifact[]   @relation("PayrollReportCreator")
+  signatureImportBatches    SignatureImportBatch[]    @relation("SignatureImportBatchCreator")
+  signatureRequestTokens   SignatureRequestToken[]
+}
+
+model Role {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  description String?
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  // Community Classes permissions
+  canViewCommunityClasses           Boolean @default(false)
+  canViewCommunityClassesClasses    Boolean @default(false)
+  canViewCommunityClassesClients    Boolean @default(false)
+  canViewCommunityClassesInvoices   Boolean @default(false)
+  canViewCommunityClassesEmailQueue Boolean @default(false)
+
+  // Community Classes Email Queue granular permissions
+  communityEmailQueueView      Boolean @default(false)
+  communityEmailQueueSendNow   Boolean @default(false)
+  communityEmailQueueSchedule  Boolean @default(false)
+  communityEmailQueueDelete    Boolean @default(false)
+  communityEmailQueueAttachPdf Boolean @default(false)
+
+  permissions         RolePermission[]
+  dashboardVisibility RoleDashboardVisibility[]
+  timesheetVisibility RoleTimesheetVisibility[]
+  users               User[]
+}
+
+model Permission {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  category    String // e.g., "providers", "clients", "timesheets", "invoices", "users", "reports", "analytics"
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  roles RolePermission[]
+}
+
+model RolePermission {
+  id           String   @id @default(cuid())
+  roleId       String
+  permissionId String
+  canView      Boolean  @default(false)
+  canCreate    Boolean  @default(false)
+  canUpdate    Boolean  @default(false)
+  canDelete    Boolean  @default(false)
+  canApprove   Boolean  @default(false)
+  canExport    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+}
+
+model Provider {
+  id        String    @id @default(cuid())
+  name      String
+  email     String?
+  phone     String?
+  signature String? // Base64 or file path
+  signatureUpdatedAt DateTime?
+  dlb       String? // DLB field for BCBA timesheets
+  active    Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  timesheets           Timesheet[]
+  invoices             InvoiceEntry[]
+  visitAttestationRows VisitAttestationRow[]
+  formDocuments        FormDocument[]
+}
+
+model Client {
+  id          String    @id @default(cuid())
+  name        String
+  email       String?
+  phone       String?
+  address     String? // Client address for BCBA timesheets
+  idNumber    String? // Client ID number for BCBA timesheets
+  dlb         String? // DLB field for BCBA timesheets
+  insuranceId String
+  signature   String? // Base64 or file path
+  signatureUpdatedAt DateTime?
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  insurance             Insurance              @relation(fields: [insuranceId], references: [id])
+  timesheets            Timesheet[]
+  invoices              Invoice[]
+  parentTrainingSignIns ParentTrainingSignIn[]
+  parentABCData         ParentABCData[]
+  visitAttestations     VisitAttestation[]
+  formDocuments         FormDocument[]
+  insuranceCodeAuthorizations InsuranceCodeAuthorization[]
+}
+
+model BCBA {
+  id        String    @id @default(cuid())
+  name      String
+  email     String?
+  phone     String?
+  signature String? // Base64 or file path
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  timesheets Timesheet[]
+}
+
+model InsuranceCodeAuthorization {
+  id              String                  @id @default(cuid())
+  clientId        String
+  insuranceId     String
+  cptCode         String
+  codeName        String
+  serviceType     InsuranceCodeServiceType
+  appliesTo       InsuranceCodeAppliesTo
+  startDate       DateTime
+  endDate         DateTime
+  authorizedUnits Int
+  notes           String?
+  isActive        Boolean                 @default(true)
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
+  client    Client    @relation(fields: [clientId], references: [id])
+  insurance Insurance @relation(fields: [insuranceId], references: [id])
+
+  @@index([clientId])
+  @@index([insuranceId])
+  @@index([serviceType])
+  @@index([isActive])
+  @@unique([clientId, insuranceId, cptCode, serviceType, startDate, endDate, appliesTo, isActive])
+}
+
+model SignatureRequestToken {
+  id             String               @id @default(cuid())
+  entityType     SignatureEntityType
+  entityId       String
+  email          String
+  tokenHash      String               @unique
+  expiresAt      DateTime
+  usedAt         DateTime?
+  createdAt      DateTime             @default(now())
+  createdByUserId String
+
+  createdByUser User                 @relation(fields: [createdByUserId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([expiresAt])
+}
+
+model Insurance {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  ratePerUnit Decimal   @db.Decimal(10, 2) // Legacy field - kept for backward compatibility
+  // Regular Timesheet rates
+  regularRatePerUnit Decimal?   @db.Decimal(10, 2)
+  regularUnitMinutes Int?       @default(15)
+  // BCBA Timesheet rates
+  bcbaRatePerUnit    Decimal?   @db.Decimal(10, 2)
+  bcbaUnitMinutes    Int?       @default(15)
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  clients        Client[]
+  timesheets     Timesheet[]            @relation("TimesheetInsurance")
+  invoiceEntries InvoiceEntry[]
+  rateHistory    InsuranceRateHistory[]
+  insuranceCodeAuthorizations InsuranceCodeAuthorization[]
+}
+
+model BcbaInsurance {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  ratePerUnit Decimal   @db.Decimal(10, 2)
+  unitMinutes Int       @default(15) // Always 15 minutes per unit
+  active      Boolean   @default(true)
+  notes       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  timesheets Timesheet[] @relation("TimesheetBcbaInsurance")
+
+  @@index([name])
+  @@index([active, deletedAt])
+}
+
+model InsuranceRateHistory {
+  id            String    @id @default(cuid())
+  insuranceId   String
+  ratePerUnit   Decimal   @db.Decimal(10, 2)
+  effectiveFrom DateTime  @default(now())
+  effectiveTo   DateTime?
+  createdAt     DateTime  @default(now())
+
+  insurance Insurance @relation(fields: [insuranceId], references: [id])
+}
+
+model Timesheet {
+  id              String          @id @default(cuid())
+  timesheetNumber String?         @unique // T-1001 for regular, BT-1002 for BCBA
+  userId          String
+  providerId      String
+  clientId        String
+  bcbaId          String
+  insuranceId     String? // Optional for BCBA timesheets
+  isBCBA          Boolean         @default(false) // Flag to mark BCBA timesheets
+  serviceType     String? // Service Type for BCBA: Assessment, Direct Care, Supervision, Treatment Planning, Parent Training
+  sessionData     String? // Session Data/Analysis for BCBA: Session Notes, Client Data Analysis, Excel Export Action Plan
+  status          TimesheetStatus @default(DRAFT)
+  startDate       DateTime
+  endDate         DateTime
+  timezone        String          @default("America/New_York") // IANA timezone identifier
+  rejectionReason String?
+  approvedAt      DateTime?
+  rejectedAt      DateTime?
+  queuedAt        DateTime? // When timesheet was queued for email
+  emailedAt       DateTime? // When email was actually sent
+  invoicedAt      DateTime? // When timesheet was invoiced
+  invoiceId       String? // ID of the invoice this timesheet is linked to
+  archived        Boolean         @default(false) // Manual archive flag (user-driven archiving)
+  bcbaInsuranceId String? // BCBA Insurance ID for BCBA timesheets
+  lastEditedBy    String? // User ID who last edited
+  lastEditedAt    DateTime? // Timestamp of last edit
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  deletedAt       DateTime?
+
+  user           User             @relation(fields: [userId], references: [id])
+  provider       Provider         @relation(fields: [providerId], references: [id])
+  client         Client           @relation(fields: [clientId], references: [id])
+  bcba           BCBA             @relation(fields: [bcbaId], references: [id])
+  insurance      Insurance?       @relation("TimesheetInsurance", fields: [insuranceId], references: [id])
+  bcbaInsurance  BcbaInsurance?   @relation("TimesheetBcbaInsurance", fields: [bcbaInsuranceId], references: [id])
+  entries        TimesheetEntry[]
+  invoiceEntries InvoiceEntry[]
+  invoice        Invoice?         @relation("TimesheetInvoice", fields: [invoiceId], references: [id])
+
+  // Indexes for overlap detection queries
+  @@index([providerId, deletedAt])
+  @@index([clientId, deletedAt])
+  @@index([deletedAt])
+  @@index([isBCBA, deletedAt]) // Index for BCBA filtering
+  @@index([status, deletedAt]) // Index for status filtering
+  @@index([invoicedAt]) // Index for invoiced timesheets filtering
+  @@index([invoiceId]) // Index for invoice lookup
+  @@index([timesheetNumber]) // Index for timesheet number lookup
+  @@index([clientId]) // PERFORMANCE: Index for client filtering
+  @@index([providerId]) // PERFORMANCE: Index for provider filtering
+  @@index([bcbaId]) // PERFORMANCE: Index for BCBA filtering
+  @@index([status]) // PERFORMANCE: Index for status filtering
+  @@index([createdAt]) // PERFORMANCE: Index for date range queries
+  @@index([startDate, endDate]) // PERFORMANCE: Composite index for date range
+  @@index([invoiceId, deletedAt]) // PERFORMANCE: Composite index for archive queries
+  @@index([archived, deletedAt]) // Index for archive filtering
+  @@index([isBCBA, archived, deletedAt]) // Composite index for BCBA archive filtering
+}
+
+model TimesheetEntry {
+  id          String   @id @default(cuid())
+  timesheetId String
+  date        DateTime
+  startTime   String // HH:mm format (24-hour)
+  endTime     String // HH:mm format (24-hour)
+  minutes     Int
+  units       Decimal  @db.Decimal(10, 2) // minutes / 15, rounded up
+  notes       String?
+  overnight   Boolean  @default(false) // True if session crosses midnight
+  invoiced    Boolean  @default(false) // True if included in an invoice
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  timesheet Timesheet @relation(fields: [timesheetId], references: [id], onDelete: Cascade)
+
+  // Indexes for overlap detection queries
+  @@index([date])
+  @@index([timesheetId, date])
+}
+
+model Invoice {
+  id              String        @id @default(cuid())
+  invoiceNumber   String        @unique
+  clientId        String
+  status          InvoiceStatus @default(DRAFT)
+  startDate       DateTime
+  endDate         DateTime
+  totalAmount     Decimal       @db.Decimal(10, 2)
+  paidAmount      Decimal       @default(0) @db.Decimal(10, 2)
+  adjustments     Decimal       @default(0) @db.Decimal(10, 2)
+  outstanding     Decimal       @db.Decimal(10, 2)
+  checkNumber     String?
+  notes           String?
+  sentAt          DateTime?
+  version         Int           @default(1)
+  parentInvoiceId String? // For versioning
+  createdBy       String
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  deletedAt       DateTime?
+  viewToken       String?       @unique // Token for public invoice view
+  tokenExpiresAt  DateTime? // Token expiration date
+
+  client          Client              @relation(fields: [clientId], references: [id])
+  creator         User                @relation("InvoiceCreator", fields: [createdBy], references: [id])
+  parentInvoice   Invoice?            @relation("InvoiceVersion", fields: [parentInvoiceId], references: [id])
+  versions        Invoice[]           @relation("InvoiceVersion")
+  entries         InvoiceEntry[]
+  payments        Payment[]
+  adjustmentsList InvoiceAdjustment[]
+  timesheets      Timesheet[]         @relation("TimesheetInvoice")
+
+  @@index([viewToken])
+}
+
+model InvoiceEntry {
+  id          String   @id @default(cuid())
+  invoiceId   String
+  timesheetId String
+  providerId  String
+  insuranceId String
+  units       Decimal  @db.Decimal(10, 2)
+  rate        Decimal  @db.Decimal(10, 2) // Rate at time of invoice creation
+  amount      Decimal  @db.Decimal(10, 2)
+  createdAt   DateTime @default(now())
+
+  invoice   Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  timesheet Timesheet @relation(fields: [timesheetId], references: [id])
+  provider  Provider  @relation(fields: [providerId], references: [id])
+  insurance Insurance @relation(fields: [insuranceId], references: [id])
+}
+
+model Payment {
+  id              String    @id @default(cuid())
+  invoiceId       String
+  amount          Decimal   @db.Decimal(10, 2)
+  paymentDate     DateTime
+  referenceNumber String?
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+}
+
+model InvoiceAdjustment {
+  id        String   @id @default(cuid())
+  invoiceId String
+  amount    Decimal  @db.Decimal(10, 2) // Can be positive or negative
+  reason    String
+  createdAt DateTime @default(now())
+  createdBy String
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id         String      @id @default(cuid())
+  action     AuditAction
+  entityType String // Model name (e.g., 'Timesheet', 'User')
+  entityId   String
+  userId     String
+  oldValues  String? // JSON
+  newValues  String? // JSON
+  metadata   String? // JSON for additional context
+  createdAt  DateTime    @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([createdAt(sort: Desc)])
+  @@index([action])
+  @@index([userId])
+  @@index([entityType, entityId])
+}
+
+model Activity {
+  id          String   @id @default(cuid())
+  actionType  String // e.g., "LOGIN"
+  actorUserId String
+  actorEmail  String
+  actorRole   UserRole
+  ipAddress   String?
+  userAgent   String?
+  metadata    String? // JSON
+  createdAt   DateTime @default(now())
+
+  actor User @relation("ActivityActor", fields: [actorUserId], references: [id])
+
+  @@index([createdAt(sort: Desc)])
+  @@index([actionType])
+  @@index([actorUserId])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model ScheduledJob {
+  id        String    @id @default(cuid())
+  jobType   String // 'INVOICE_GENERATION'
+  schedule  String // Cron expression
+  lastRun   DateTime?
+  nextRun   DateTime
+  active    Boolean   @default(true)
+  metadata  String? // JSON: { success, invoicesCreated, clientsProcessed, errors, errorsCount, periodStart, periodEnd }
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model RoleDashboardVisibility {
+  id        String   @id @default(cuid())
+  roleId    String
+  section   String // e.g., "quickAccess.users", "quickAccess.analytics", "sections.pendingApprovals", "sections.recentActivity", "sections.recentInvoices"
+  visible   Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, section])
+}
+
+model RoleTimesheetVisibility {
+  id        String   @id @default(cuid())
+  roleId    String
+  userId    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, userId])
+}
+
+enum EmailQueueStatus {
+  QUEUED
+  SENDING
+  SENT
+  FAILED
+}
+
+enum EmailQueueEntityType {
+  REGULAR
+  BCBA
+  COMMUNITY_INVOICE
+}
+
+enum EmailQueueContext {
+  MAIN
+  COMMUNITY
+}
+
+enum CommunityClientStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum CommunityInvoiceStatus {
+  DRAFT
+  APPROVED
+  REJECTED
+  QUEUED
+  EMAILED
+  FAILED
+}
+
+model EmailQueueItem {
+  id              String               @id @default(cuid())
+  entityType      EmailQueueEntityType // REGULAR | BCBA | COMMUNITY_INVOICE
+  entityId        String // Timesheet ID or CommunityInvoice ID
+  queuedByUserId  String
+  queuedAt        DateTime             @default(now())
+  sentAt          DateTime?
+  batchId         String? // Batch ID for grouped sends
+  status          EmailQueueStatus     @default(QUEUED)
+  errorMessage    String? // Sanitized error message
+  deletedAt       DateTime? // Soft delete timestamp
+  deletedByUserId String? // User who deleted this item
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  // Email recipient fields
+  toEmail         String? // Primary recipient email (comma-separated for multiple)
+  ccEmails        String? // CC recipients (comma-separated)
+  bccEmails       String? // BCC recipients (comma-separated)
+  replyTo         String? // Reply-to email address
+  subject         String? // Email subject line
+  attempts        Int       @default(0) // Number of send attempts
+  lastError       String? // Last error message (more detailed than errorMessage)
+  scheduledSendAt DateTime? // Scheduled send time (for Community Classes email queue)
+
+  // Queue context and attachment fields
+  context            EmailQueueContext? // MAIN | COMMUNITY - distinguishes queue type
+  attachmentKey      String? // Storage key/path for additional PDF attachment
+  attachmentUrl      String? // URL to access additional PDF attachment
+  attachmentFilename String? // Original filename of additional PDF attachment
+
+  queuedBy  User  @relation("EmailQueueCreator", fields: [queuedByUserId], references: [id])
+  deletedBy User? @relation("EmailQueueDeleter", fields: [deletedByUserId], references: [id])
+
+  // Note: Removed unique constraint to allow re-queueing after soft delete
+  @@index([status, createdAt])
+  @@index([entityType, status])
+  @@index([batchId])
+  @@index([deletedAt])
+  @@index([entityType, entityId, deletedAt])
+  @@index([scheduledSendAt, status]) // Index for scheduled email processing
+}
+
+// Community Classes Module Models
+
+model CommunityClient {
+  id         String                @id @default(cuid())
+  firstName  String
+  lastName   String
+  email      String?
+  phone      String?
+  address    String?
+  city       String?
+  state      String?
+  zipCode    String?
+  medicaidId String?
+  status     CommunityClientStatus @default(ACTIVE)
+  createdAt  DateTime              @default(now())
+  updatedAt  DateTime              @updatedAt
+  deletedAt  DateTime?
+
+  invoices CommunityInvoice[]
+
+  @@index([status, deletedAt])
+  @@index([deletedAt])
+}
+
+model CommunityClass {
+  id          String    @id @default(cuid())
+  name        String
+  ratePerUnit Decimal   @db.Decimal(10, 2) // Rate per 30-minute unit
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  invoices CommunityInvoice[]
+
+  @@index([isActive, deletedAt])
+  @@index([deletedAt])
+}
+
+model CommunityInvoice {
+  id               String                 @id @default(cuid())
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  deletedAt        DateTime?
+  clientId         String
+  classId          String
+  units            Int // Number of 30-minute units
+  unitMinutes      Int                    @default(30) // Fixed at 30 minutes
+  ratePerUnit      Decimal                @db.Decimal(10, 2) // Snapshot at invoice time
+  totalAmount      Decimal                @db.Decimal(10, 2) // units * ratePerUnit
+  status           CommunityInvoiceStatus @default(DRAFT)
+  approvedAt       DateTime?
+  approvedByUserId String?
+  rejectedAt       DateTime?
+  rejectedByUserId String?
+  queuedAt         DateTime?
+  emailedAt        DateTime?
+  notes            String?
+  serviceDate      DateTime? // Optional service date
+  createdByUserId  String
+  viewToken        String?                @unique // Token for public invoice view
+  tokenExpiresAt   DateTime? // Token expiration date
+
+  client         CommunityClient @relation(fields: [clientId], references: [id])
+  class          CommunityClass  @relation(fields: [classId], references: [id])
+  approvedByUser User?           @relation("CommunityInvoiceApprover", fields: [approvedByUserId], references: [id])
+  rejectedByUser User?           @relation("CommunityInvoiceRejector", fields: [rejectedByUserId], references: [id])
+  createdByUser  User            @relation("CommunityInvoiceCreator", fields: [createdByUserId], references: [id])
+
+  @@index([status, createdAt])
+  @@index([clientId, deletedAt])
+  @@index([classId, deletedAt])
+  @@index([deletedAt])
+  @@index([viewToken])
+}
+
+// BCBA Forms Models
+model ParentTrainingSignIn {
+  id        String    @id @default(cuid())
+  clientId  String
+  month     Int // 1-12
+  year      Int // Full year (e.g., 2026)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  client Client                    @relation(fields: [clientId], references: [id])
+  rows   ParentTrainingSignInRow[]
+
+  @@unique([clientId, month, year, deletedAt])
+  @@index([clientId, deletedAt])
+  @@index([deletedAt])
+}
+
+model ParentTrainingSignInRow {
+  id          String   @id @default(cuid())
+  formId      String
+  serviceDate DateTime
+  parentName  String
+  signature   String? // Base64 data URL or image URL
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  form ParentTrainingSignIn @relation(fields: [formId], references: [id], onDelete: Cascade)
+
+  @@index([formId])
+}
+
+model ParentABCData {
+  id        String    @id @default(cuid())
+  clientId  String
+  month     Int // 1-12
+  year      Int // Full year
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  client Client             @relation(fields: [clientId], references: [id])
+  rows   ParentABCDataRow[]
+
+  @@unique([clientId, month, year, deletedAt])
+  @@index([clientId, deletedAt])
+  @@index([deletedAt])
+}
+
+model ParentABCDataRow {
+  id           String   @id @default(cuid())
+  formId       String
+  date         DateTime
+  startTime    String // HH:mm format
+  endTime      String // HH:mm format
+  antecedent   String // Dropdown value
+  behavior     String // Dropdown value
+  consequences String // Dropdown value
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  form ParentABCData @relation(fields: [formId], references: [id], onDelete: Cascade)
+
+  @@index([formId])
+}
+
+model VisitAttestation {
+  id        String    @id @default(cuid())
+  clientId  String
+  month     Int // 1-12
+  year      Int // Full year
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  client Client                @relation(fields: [clientId], references: [id])
+  rows   VisitAttestationRow[]
+
+  @@unique([clientId, month, year, deletedAt])
+  @@index([clientId, deletedAt])
+  @@index([deletedAt])
+}
+
+model VisitAttestationRow {
+  id              String   @id @default(cuid())
+  formId          String
+  date            DateTime
+  providerId      String
+  parentSignature String? // Base64 data URL or image URL
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  form     VisitAttestation @relation(fields: [formId], references: [id], onDelete: Cascade)
+  provider Provider         @relation(fields: [providerId], references: [id])
+
+  @@index([formId])
+  @@index([providerId])
+}
+
+enum FormType {
+  PARENT_TRAINING
+  PARENT_ABC
+  VISIT_ATTESTATION
+}
+
+model FormDocument {
+  id          String    @id @default(cuid())
+  type        FormType
+  clientId    String
+  providerId  String? // Required only for VISIT_ATTESTATION
+  month       Int // 1-12
+  year        Int // Full year (e.g., 2026)
+  behavior    String? // Only for PARENT_ABC (stored in header)
+  payload     Json // Contains rows array and header data
+  createdById String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  client    Client    @relation(fields: [clientId], references: [id])
+  provider  Provider? @relation(fields: [providerId], references: [id])
+  createdBy User      @relation("FormCreator", fields: [createdById], references: [id])
+
+  @@unique([type, clientId, providerId, month, year, deletedAt], name: "FormDocumentUnique")
+  @@index([clientId, deletedAt])
+  @@index([providerId, deletedAt])
+  @@index([type, deletedAt])
+  @@index([deletedAt])
+}
+
+// Payroll Management Models (Rebuilt from scratch)
+
+enum PayrollImportStatus {
+  DRAFT
+  FINALIZED
+}
+
+enum PayrollRunStatus {
+  DRAFT
+  APPROVED
+  PAID_PARTIAL
+  PAID_FULL
+}
+
+enum PayrollPaymentMethod {
+  CASH
+  CHECK
+  ZELLE
+  ACH
+  OTHER
+}
+
+enum PayrollReportType {
+  EMPLOYEE_MONTHLY
+  RUN_SUMMARY
+}
+
+// Employee Directory
+model PayrollEmployee {
+  id                String   @id @default(cuid())
+  fullName          String
+  email             String?
+  phone             String?
+  active            Boolean  @default(true)
+  defaultHourlyRate Decimal  @db.Decimal(10, 2)
+  overtimeRateHourly Decimal? @db.Decimal(10, 2)
+  overtimeStartTime Int? // Minutes since midnight (0-1439)
+  overtimeEnabled   Boolean  @default(false)
+  scannerExternalId String?
+  notes             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  runLines        PayrollRunLine[]
+  payments        PayrollPayment[]
+  reportArtifacts PayrollReportArtifact[]
+  importRows      PayrollImportRow[]
+
+  @@index([scannerExternalId])
+  @@index([active])
+}
+
+// Import Management
+model PayrollImport {
+  id               String              @id @default(cuid())
+  originalFileName String
+  uploadedByUserId String
+  uploadedAt       DateTime            @default(now())
+  status           PayrollImportStatus @default(DRAFT)
+  periodStart      DateTime?
+  periodEnd        DateTime?
+  mappingJson      Json // Stores column mapping configuration
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  uploadedBy User               @relation("PayrollImportCreator", fields: [uploadedByUserId], references: [id])
+  rows       PayrollImportRow[]
+  runs       PayrollRun[]
+
+  @@index([uploadedByUserId])
+  @@index([status])
+  @@index([periodStart, periodEnd])
+}
+
+// Import Row Data
+model PayrollImportRow {
+  id                    String    @id @default(cuid())
+  importId              String
+  rowIndex              Int
+  employeeNameRaw       String?
+  employeeExternalIdRaw String?
+  workDate              DateTime
+  inTime                DateTime?
+  outTime               DateTime?
+  minutesWorked         Int?
+  hoursWorked           Decimal?  @db.Decimal(10, 2)
+  linkedEmployeeId      String?
+  rawJson               Json // Entire row stored as JSON
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  import         PayrollImport    @relation(fields: [importId], references: [id], onDelete: Cascade)
+  linkedEmployee PayrollEmployee? @relation(fields: [linkedEmployeeId], references: [id])
+
+  @@index([importId])
+  @@index([linkedEmployeeId])
+  @@index([workDate])
+}
+
+// Payroll Runs
+model PayrollRun {
+  id              String           @id @default(cuid())
+  name            String
+  periodStart     DateTime
+  periodEnd       DateTime
+  createdByUserId String
+  status          PayrollRunStatus @default(DRAFT)
+  sourceImportId  String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  createdBy       User                    @relation("PayrollRunCreator", fields: [createdByUserId], references: [id])
+  sourceImport    PayrollImport?          @relation(fields: [sourceImportId], references: [id])
+  lines           PayrollRunLine[]
+  payments        PayrollPayment[]
+  reportArtifacts PayrollReportArtifact[]
+
+  @@index([createdByUserId])
+  @@index([status])
+  @@index([periodStart, periodEnd])
+  @@index([sourceImportId])
+}
+
+// Payroll Run Line (one per employee per run)
+model PayrollRunLine {
+  id             String   @id @default(cuid())
+  runId          String
+  employeeId     String
+  hourlyRateUsed Decimal  @db.Decimal(10, 2)
+  totalMinutes   Int
+  totalHours     Decimal  @db.Decimal(10, 2)
+  grossPay       Decimal  @db.Decimal(10, 2)
+  // Overtime breakdown
+  regularMinutes Int      @default(0)
+  overtimeMinutes Int    @default(0)
+  regularPay     Decimal  @default(0) @db.Decimal(10, 2)
+  overtimePay    Decimal  @default(0) @db.Decimal(10, 2)
+  overtimeRateUsed Decimal? @db.Decimal(10, 2)
+  amountPaid     Decimal  @default(0) @db.Decimal(10, 2)
+  amountOwed     Decimal  @db.Decimal(10, 2)
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  run      PayrollRun       @relation(fields: [runId], references: [id], onDelete: Cascade)
+  employee PayrollEmployee  @relation(fields: [employeeId], references: [id])
+  payments PayrollPayment[]
+
+  @@unique([runId, employeeId])
+  @@index([runId])
+  @@index([employeeId])
+}
+
+// Payments
+model PayrollPayment {
+  id          String               @id @default(cuid())
+  runId       String
+  employeeId  String
+  paidAt      DateTime
+  amount      Decimal              @db.Decimal(10, 2)
+  method      PayrollPaymentMethod
+  reference   String?
+  notes       String?
+  createdById String
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  run              PayrollRun      @relation(fields: [runId], references: [id], onDelete: Cascade)
+  employee         PayrollEmployee @relation(fields: [employeeId], references: [id])
+  createdBy        User            @relation("PayrollPaymentCreator", fields: [createdById], references: [id])
+  runLine          PayrollRunLine? @relation(fields: [payrollRunLineId], references: [id])
+  payrollRunLineId String?
+
+  @@index([runId])
+  @@index([employeeId])
+  @@index([paidAt])
+}
+
+// Report Artifacts
+model PayrollReportArtifact {
+  id                String            @id @default(cuid())
+  type              PayrollReportType
+  runId             String?
+  employeeId        String?
+  year              Int?
+  month             Int?
+  storageKeyOrPath  String
+  generatedByUserId String
+  generatedAt       DateTime          @default(now())
+
+  run         PayrollRun?      @relation(fields: [runId], references: [id], onDelete: Cascade)
+  employee    PayrollEmployee? @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  generatedBy User             @relation("PayrollReportCreator", fields: [generatedByUserId], references: [id])
+
+  @@index([type])
+  @@index([runId])
+  @@index([employeeId])
+  @@index([year, month])
+}
+
+// Signature Import Batch Tracking
+model SignatureImportBatch {
+  id            String                      @id @default(cuid())
+  createdAt     DateTime                    @default(now())
+  createdByUserId String
+  type          String                      @default("SIGNATURE_IMPORT")
+  notes         String?
+  items         SignatureImportBatchItem[]
+
+  createdBy     User                        @relation("SignatureImportBatchCreator", fields: [createdByUserId], references: [id])
+
+  @@index([createdAt(sort: Desc)])
+  @@index([createdByUserId])
+}
+
+model SignatureImportBatchItem {
+  id                    String                @id @default(cuid())
+  batchId               String
+  entityType            String // "CLIENT" or "PROVIDER"
+  entityId              String
+  originalSignatureUrl  String? // null if no signature existed before
+  newSignatureUrl       String
+  status                String // "SUCCESS", "FAILED", etc.
+  errorMessage          String?
+  createdAt             DateTime               @default(now())
+
+  batch                 SignatureImportBatch   @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([batchId])
+  @@index([entityType, entityId])
+}

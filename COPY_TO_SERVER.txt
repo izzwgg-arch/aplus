@@ -1,0 +1,35 @@
+================================================================================
+QUICK FIX FOR SERVER - Copy and paste these commands into your server terminal
+================================================================================
+
+SSH into your server first:
+  ssh root@66.94.105.43
+
+Then run these commands one by one:
+
+cd /var/www/aplus-center
+
+mkdir -p .next
+
+cat > .next/prerender-manifest.json << 'ENDOFFILE'
+{
+  "version": 4,
+  "routes": {},
+  "dynamicRoutes": {},
+  "notFoundRoutes": [],
+  "preview": {
+    "previewModeId": "",
+    "previewModeSigningKey": "",
+    "previewModeEncryptionKey": ""
+  }
+}
+ENDOFFILE
+
+pm2 restart aplus-center
+
+pm2 logs aplus-center --lines 20
+
+================================================================================
+That's it! The server should be working now.
+Test at: http://66.94.105.43:3000
+================================================================================

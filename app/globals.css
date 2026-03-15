@@ -1,0 +1,363 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --foreground-rgb: 0, 0, 0;
+  --background-start-rgb: 255, 251, 235;
+  --background-end-rgb: 254, 243, 199;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --foreground-rgb: 255, 255, 255;
+    --background-start-rgb: 0, 0, 0;
+    --background-end-rgb: 0, 0, 0;
+  }
+}
+
+body {
+  color: rgb(var(--foreground-rgb));
+  background: #0066cc !important;
+  min-height: 100vh;
+}
+
+/* Ensure all page containers use the global background */
+html {
+  background: #0066cc;
+}
+
+/* Adjust text colors for better contrast on blue background */
+body {
+  color: #ffffff;
+}
+
+/* Ensure white text on blue background for better readability - but only for direct body text */
+/* Don't override text in white cards/containers */
+body > *:not(.bg-white):not(input):not(textarea):not(select):not(.card) {
+  color: #ffffff;
+}
+
+/* Make all headers and subheaders white on blue background */
+h1, h2, h3, h4, h5, h6 {
+  color: #ffffff !important;
+}
+
+/* Override white header rule for elements with inline black color style - must come after white rule */
+h1[style*="color: #000000"],
+h1[style*="color:#000000"],
+h1[style*="color: rgb(0, 0, 0)"],
+h1[style*="color:rgb(0, 0, 0)"],
+h2[style*="color: #000000"],
+h2[style*="color:#000000"],
+h2[style*="color: rgb(0, 0, 0)"],
+h2[style*="color:rgb(0, 0, 0)"],
+h3[style*="color: #000000"],
+h3[style*="color:#000000"],
+h3[style*="color: rgb(0, 0, 0)"],
+h3[style*="color:rgb(0, 0, 0)"] {
+  color: #000000 !important;
+}
+
+/* Make paragraphs white on blue background (except in white containers) */
+p:not(.bg-white p):not(.card p):not([class*="bg-white"] p) {
+  color: #ffffff !important;
+}
+
+/* Override white paragraph rule for paragraphs with inline black color style - must come after white paragraph rule */
+p[style*="color: #000000"],
+p[style*="color:#000000"],
+p[style*="color: rgb(0, 0, 0)"],
+p[style*="color:rgb(0, 0, 0)"],
+.bg-gray-50 p[style*="color"],
+div[class*="bg-gray"] p[style*="color"],
+div.bg-gray-50 p[style*="color"],
+.email-queue-subheader,
+p.email-queue-subheader,
+.bg-gray-50 .email-queue-subheader,
+div[class*="bg-gray"] .email-queue-subheader,
+.bg-gray-50 p.email-queue-subheader,
+div[class*="bg-gray"] p.email-queue-subheader,
+div.bg-gray-50 p.email-queue-subheader,
+p.email-queue-subheader:not(.bg-white p):not(.card p):not([class*="bg-white"] p) {
+  color: #000000 !important;
+}
+
+/* Make all "Back to" links white on blue background */
+a[href*="/clients"],
+a[href*="/providers"],
+a[href*="/timesheets"],
+a[href*="/bcba-timesheets"],
+a[href*="/invoices"]:not([style*="color: #000000"]):not(.bg-white a):not([class*="bg-white"] a),
+a[href*="/bcbas"],
+a[href*="/insurance"],
+a[href*="/users"],
+a[href*="/roles"],
+a[href*="/community"] {
+  color: #ffffff !important;
+}
+
+a[href*="/clients"]:hover,
+a[href*="/providers"]:hover,
+a[href*="/timesheets"]:hover,
+a[href*="/bcba-timesheets"]:hover,
+a[href*="/invoices"]:hover,
+a[href*="/bcbas"]:hover,
+a[href*="/insurance"]:hover,
+a[href*="/users"]:hover,
+a[href*="/roles"]:hover,
+a[href*="/community"]:hover {
+  color: #e5e7eb !important; /* gray-200 */
+}
+
+/* Keep form inputs and cards with white backgrounds for readability */
+input,
+textarea,
+select,
+.bg-white,
+.card,
+[class*="bg-white"] {
+  background-color: #ffffff !important;
+  color: #1f2937 !important;
+}
+
+/* Ensure text in white containers is dark */
+.bg-white *,
+.card *,
+[class*="bg-white"] * {
+  color: #1f2937 !important;
+}
+
+/* Override: Force buttons with inline white color style to be white (even in white containers) */
+button[style*="color: #ffffff"],
+button[style*="color:#ffffff"],
+button[style*="color: rgb(255, 255, 255)"],
+button[style*="color:rgb(255, 255, 255)"],
+.bg-white button[style*="color: #ffffff"],
+.bg-white button[style*="color:#ffffff"],
+.bg-white button[style*="color: rgb(255, 255, 255)"],
+.bg-white button[style*="color:rgb(255, 255, 255)"],
+[class*="bg-white"] button[style*="color: #ffffff"],
+[class*="bg-white"] button[style*="color:#ffffff"],
+[class*="bg-white"] button[style*="color: rgb(255, 255, 255)"],
+[class*="bg-white"] button[style*="color:rgb(255, 255, 255)"],
+button[style*="color: #ffffff"] *,
+button[style*="color:#ffffff"] *,
+button[style*="color: rgb(255, 255, 255)"] *,
+button[style*="color:rgb(255, 255, 255)"] *,
+.bg-white button[style*="color: #ffffff"] *,
+.bg-white button[style*="color:#ffffff"] *,
+.bg-white button[style*="color: rgb(255, 255, 255)"] *,
+.bg-white button[style*="color:rgb(255, 255, 255)"] *,
+[class*="bg-white"] button[style*="color: #ffffff"] *,
+[class*="bg-white"] button[style*="color:#ffffff"] *,
+[class*="bg-white"] button[style*="color: rgb(255, 255, 255)"] *,
+[class*="bg-white"] button[style*="color:rgb(255, 255, 255)"] *,
+button[style*="color: #ffffff"] span[style*="color: #ffffff"],
+button[style*="color:#ffffff"] span[style*="color:#ffffff"],
+.bg-white button[style*="color: #ffffff"] span[style*="color: #ffffff"],
+.bg-white button[style*="color:#ffffff"] span[style*="color:#ffffff"],
+[class*="bg-white"] button[style*="color: #ffffff"] span[style*="color: #ffffff"],
+[class*="bg-white"] button[style*="color:#ffffff"] span[style*="color:#ffffff"] {
+  color: #ffffff !important;
+}
+
+/* Force invoice numbers and edit buttons to be black (override white link rule) */
+.bg-white td[style*="color: #000000"],
+.bg-white a[style*="color: #000000"],
+.bg-white span[style*="color: #000000"],
+.bg-white h1[style*="color: #000000"],
+.bg-white h2[style*="color: #000000"],
+.bg-white h3[style*="color: #000000"],
+[class*="bg-white"] td[style*="color: #000000"],
+[class*="bg-white"] a[style*="color: #000000"],
+[class*="bg-white"] span[style*="color: #000000"],
+[class*="bg-white"] h1[style*="color: #000000"],
+[class*="bg-white"] h2[style*="color: #000000"],
+[class*="bg-white"] h3[style*="color: #000000"],
+td[style*="color: #000000"],
+a[style*="color: #000000"],
+span[style*="color: #000000"],
+h1[style*="color: #000000"],
+h2[style*="color: #000000"],
+h3[style*="color: #000000"] {
+  color: #000000 !important;
+}
+
+/* Force edit buttons in dropdown menus to be black */
+.bg-white a[href*="/edit"][style*="color: #000000"],
+.bg-white a[href*="/invoices"][href*="/edit"][style*="color: #000000"],
+[class*="bg-white"] a[href*="/edit"][style*="color: #000000"],
+[class*="bg-white"] a[href*="/invoices"][href*="/edit"][style*="color: #000000"],
+a[href*="/edit"][style*="color: #000000"],
+a[href*="/invoices"][href*="/edit"][style*="color: #000000"] {
+  color: #000000 !important;
+}
+
+/* Override white link rule for edit links specifically - must be inside white containers */
+.bg-white a[href*="/invoices"][href*="/edit"],
+[class*="bg-white"] a[href*="/invoices"][href*="/edit"],
+div[class*="bg-white"] a[href*="/edit"],
+div.bg-white a[href*="/edit"] {
+  color: #000000 !important;
+}
+
+/* BCBA Service Type - Green color (override white container rule) */
+/* Must be more specific than .bg-white * to override */
+.bg-white .service-type-value,
+.print-preview-content .service-type-value,
+.service-type-value {
+  color: rgb(13, 148, 136) !important;
+}
+
+/* Headers in white containers should be dark (override the white header rule above) */
+.bg-white h1,
+.bg-white h2,
+.bg-white h3,
+.bg-white h4,
+.bg-white h5,
+.bg-white h6,
+.card h1,
+.card h2,
+.card h3,
+.card h4,
+.card h5,
+.card h6,
+[class*="bg-white"] h1,
+[class*="bg-white"] h2,
+[class*="bg-white"] h3,
+[class*="bg-white"] h4,
+[class*="bg-white"] h5,
+[class*="bg-white"] h6 {
+  color: #1f2937 !important;
+}
+
+/* Force email queue page headers to be black (override white header rule) */
+/* This must be very specific and come after the white header rule */
+.bg-gray-50 h1[style*="color"],
+.bg-gray-50 h2[style*="color"],
+.bg-gray-50 h3[style*="color"],
+.bg-gray-50 p[style*="color"],
+.bg-gray-50 .email-queue-subheader,
+.bg-gray-50 p.email-queue-subheader,
+div[class*="bg-gray"] h1[style*="color"],
+div[class*="bg-gray"] h2[style*="color"],
+div[class*="bg-gray"] h3[style*="color"],
+div[class*="bg-gray"] p[style*="color"],
+div[class*="bg-gray"] .email-queue-subheader,
+div[class*="bg-gray"] p.email-queue-subheader,
+div.bg-gray-50 h1[style*="color"],
+div.bg-gray-50 h2[style*="color"],
+div.bg-gray-50 h3[style*="color"],
+div.bg-gray-50 p[style*="color"],
+div.bg-gray-50 .email-queue-subheader,
+div.bg-gray-50 p.email-queue-subheader {
+  color: #000000 !important;
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+/* Print Styles */
+@media print {
+  @page {
+    margin: 0.5in;
+  }
+  
+  /* Hide everything by default */
+  body * {
+    visibility: hidden;
+  }
+  
+  /* Show only the print preview content */
+  .print-preview-content,
+  .print-preview-content * {
+    visibility: visible !important;
+  }
+  
+  /* Show form content for printing */
+  .print-form,
+  .print-form * {
+    visibility: visible !important;
+  }
+  
+  /* Ensure the print content container is visible and positioned correctly */
+  .print-preview-content {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    background: white !important;
+    color: black !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+  
+  /* Make sure all text in print preview is black and visible */
+  .print-preview-content * {
+    color: black !important;
+    background: transparent !important;
+  }
+  
+  /* Hide modal overlay and buttons */
+  .no-print {
+    display: none !important;
+    visibility: hidden !important;
+  }
+  
+  .no-print * {
+    display: none !important;
+    visibility: hidden !important;
+  }
+  
+  /* Hide the fixed overlay */
+  .fixed.inset-0 {
+    position: static !important;
+    background: transparent !important;
+  }
+  
+  /* Company Header - Prominent at top of print */
+  .print-company-header {
+    display: block !important;
+    margin-bottom: 1rem;
+    page-break-after: avoid;
+  }
+  
+  .print-company-header h1 {
+    font-size: 28px !important;
+    font-weight: 700 !important;
+    text-align: center !important;
+    color: #000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* BCBA Timesheet - Half page layout */
+  .bcba-print-layout {
+    max-width: 50% !important;
+    margin: 0 auto !important;
+  }
+
+  .bcba-info-grid {
+    font-size: 0.9rem !important;
+  }
+
+  /* BCBA Service Type - Green color in print */
+  .service-type-value {
+    color: rgb(13, 148, 136) !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
+
+/* FINAL OVERRIDE: Force email queue sub-headers to be black - highest priority */
+div.bg-gray-50 p.email-queue-subheader,
+div[class*="bg-gray"] p.email-queue-subheader,
+.bg-gray-50 p.email-queue-subheader,
+p.email-queue-subheader.email-queue-subheader,
+.email-queue-subheader.email-queue-subheader {
+  color: #000000 !important;
+}
