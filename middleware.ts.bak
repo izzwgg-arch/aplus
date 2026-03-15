@@ -42,8 +42,7 @@ export const config = {
      * - login (to allow login)
      * - forgot-password (to allow password reset)
      * - reset-password (to allow password reset)
-     * - healthz (system health check - no auth)
      */
-    '/((?!api/auth|api/public|public|portal/sign|healthz|_next/static|_next/image|favicon.ico|set-new-password|login|forgot-password|reset-password|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!api/auth|api/public|public|portal/sign|_next/static|_next/image|favicon.ico|set-new-password|login|forgot-password|reset-password|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 }

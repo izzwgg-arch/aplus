@@ -13,13 +13,11 @@ export default async function ReportsPage() {
     redirect('/login')
   }
 
-  // Check route access based on dashboard visibility
   const hasAccess = await canAccessRoute(session.user.id, '/reports')
   if (!hasAccess) {
     redirect('/dashboard?error=not-authorized')
   }
 
-  // Get filter options
   const [providers, clients, insurances, bcbas] = await Promise.all([
     prisma.provider.findMany({
       where: { active: true, deletedAt: null },
@@ -40,7 +38,6 @@ export default async function ReportsPage() {
     }),
   ])
 
-  // Check permissions for archive views
   const { getUserPermissions } = await import('@/lib/permissions')
   const permissions = await getUserPermissions(session.user.id)
   const canViewRegularArchive = permissions['reports.timesheetArchive.view']?.canView === true ||
@@ -49,6 +46,7 @@ export default async function ReportsPage() {
   const canViewBCBAArchive = permissions['reports.bcbaTimesheetArchive.view']?.canView === true ||
                              session.user.role === 'ADMIN' ||
                              session.user.role === 'SUPER_ADMIN'
+  const isAdmin = session.user.role === 'ADMIN' || session.user.role === 'SUPER_ADMIN'
 
   return (
     <div className="min-h-screen">
@@ -56,9 +54,8 @@ export default async function ReportsPage() {
       <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
         <div className="px-4 py-6 sm:px-0">
           <h1 className="text-3xl font-bold text-gray-900 mb-6">Reports</h1>
-          
-          {/* Archive Tiles */}
-          {(canViewRegularArchive || canViewBCBAArchive) && (
+
+          {(canViewRegularArchive || canViewBCBAArchive || isAdmin) && (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
               {canViewRegularArchive && (
                 <a
@@ -72,12 +69,8 @@ export default async function ReportsPage() {
                       </svg>
                     </div>
                     <div className="flex-1">
-                      <h3 className="text-lg font-semibold text-gray-900">
-                        Regular Timesheet Archive
-                      </h3>
-                      <p className="text-sm text-gray-600 mt-1">
-                        View invoiced regular timesheets
-                      </p>
+                      <h3 className="text-lg font-semibold text-gray-900">Regular Timesheet Archive</h3>
+                      <p className="text-sm text-gray-600 mt-1">View invoiced regular timesheets</p>
                     </div>
                   </div>
                 </a>
@@ -94,12 +87,26 @@ export default async function ReportsPage() {
                       </svg>
                     </div>
                     <div className="flex-1">
-                      <h3 className="text-lg font-semibold text-gray-900">
-                        BCBA Timesheet Archive
-                      </h3>
-                      <p className="text-sm text-gray-600 mt-1">
-                        View invoiced BCBA timesheets
-                      </p>
+                      <h3 className="text-lg font-semibold text-gray-900">BCBA Timesheet Archive</h3>
+                      <p className="text-sm text-gray-600 mt-1">View invoiced BCBA timesheets</p>
+                    </div>
+                  </div>
+                </a>
+              )}
+              {isAdmin && (
+                <a
+                  href="/ops-center"
+                  className="bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow cursor-pointer border-2 border-purple-100"
+                >
+                  <div className="flex items-center space-x-4">
+                    <div className="bg-purple-600 p-3 rounded-lg">
+                      <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18" />
+                      </svg>
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="text-lg font-semibold text-gray-900">System Ops Center</h3>
+                      <p className="text-sm text-gray-600 mt-1">System health, security events, alerts, and infrastructure monitoring</p>
                     </div>
                   </div>
                 </a>
@@ -118,4 +125,3 @@ export default async function ReportsPage() {
     </div>
   )
 }
-
