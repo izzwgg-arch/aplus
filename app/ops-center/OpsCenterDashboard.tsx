@@ -5,6 +5,7 @@ import { OverviewTab } from './tabs/OverviewTab'
 import { HealthTab } from './tabs/HealthTab'
 import { SecurityTab } from './tabs/SecurityTab'
 import { AlertsTab } from './tabs/AlertsTab'
+import { LogsTab } from './tabs/LogsTab'
 import { UpdatesTab } from './tabs/UpdatesTab'
 import { BackupsTab } from './tabs/BackupsTab'
 import { ServicesTab } from './tabs/ServicesTab'
@@ -17,16 +18,17 @@ import { SystemMetricsTab } from './tabs/SystemMetricsTab'
 const TABS = [
   { id: 'overview', label: 'Overview', icon: '📊' },
   { id: 'health', label: 'Health', icon: '❤️' },
+  { id: 'logs', label: 'Logs', icon: '📋' },
   { id: 'security', label: 'Security', icon: '🔒' },
   { id: 'alerts', label: 'Alerts', icon: '🚨' },
+  { id: 'intrusion', label: 'Intrusion', icon: '⚠️' },
   { id: 'updates', label: 'Updates', icon: '⬆️' },
   { id: 'backups', label: 'Backups', icon: '💾' },
   { id: 'services', label: 'Services', icon: '⚙️' },
   { id: 'ip-control', label: 'IP Control', icon: '🛡️' },
-  { id: 'settings', label: 'Settings', icon: '🔧' },
-  { id: 'audit', label: 'Audit History', icon: '📋' },
-  { id: 'intrusion', label: 'Intrusion', icon: '⚠️' },
   { id: 'metrics', label: 'Metrics', icon: '📈' },
+  { id: 'settings', label: 'Settings', icon: '🔧' },
+  { id: 'audit', label: 'Audit History', icon: '🗂️' },
 ]
 
 export function OpsCenterDashboard() {
@@ -47,6 +49,7 @@ export function OpsCenterDashboard() {
                   ? 'border-purple-600 text-purple-700 bg-purple-50'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                 }
+                ${tab.id === 'logs' ? 'font-semibold' : ''}
               `}
             >
               <span>{tab.icon}</span>
@@ -60,16 +63,17 @@ export function OpsCenterDashboard() {
       <div className="p-6">
         {activeTab === 'overview' && <OverviewTab />}
         {activeTab === 'health' && <HealthTab />}
+        {activeTab === 'logs' && <LogsTab />}
         {activeTab === 'security' && <SecurityTab />}
         {activeTab === 'alerts' && <AlertsTab />}
+        {activeTab === 'intrusion' && <IntrusionTimelineTab />}
         {activeTab === 'updates' && <UpdatesTab />}
         {activeTab === 'backups' && <BackupsTab />}
         {activeTab === 'services' && <ServicesTab />}
         {activeTab === 'ip-control' && <IPControlTab />}
+        {activeTab === 'metrics' && <SystemMetricsTab />}
         {activeTab === 'settings' && <SettingsTab />}
         {activeTab === 'audit' && <AuditHistoryTab />}
-        {activeTab === 'intrusion' && <IntrusionTimelineTab />}
-        {activeTab === 'metrics' && <SystemMetricsTab />}
       </div>
     </div>
   )

@@ -1086,3 +1086,39 @@ model SignatureImportBatchItem {
   @@index([batchId])
   @@index([entityType, entityId])
 }
+
+// ============================================================
+// Ops Center Event Logging
+// Added: ops-center-logging feature
+// Separate from business AuditLog - for system/ops observability
+// ============================================================
+
+model AppEventLog {
+  id              String   @id @default(cuid())
+  timestamp       DateTime @default(now())
+  level           String   // info | warning | error | critical
+  category        String   // APP_ACTIVITY | ERROR | SECURITY | AUTH | OPS_ACTION | SYSTEM | BREACH | API | BACKUP | HEALTH | ALERT | AUDIT
+  source          String   // e.g. "ops-center", "auth", "api", "crowdsec", "healthcheck", "backup"
+  eventType       String   // e.g. "IP_BANNED", "LOGIN_FAILED", "BACKUP_STARTED", "HEALTH_CHECK_FAIL"
+  message         String
+  actorUserId     String?  // user who performed the action
+  actorEmail      String?
+  actorRole       String?
+  route           String?  // API route or page path
+  ipAddress       String?  // client IP if safe and available
+  targetType      String?  // entity type if applicable
+  targetId        String?  // entity id if applicable
+  correlationId   String?  // request/trace ID
+  metadata        String?  // JSON - sanitized, max 2KB
+  status          String?  // success | failure | pending
+  createdAt       DateTime @default(now())
+
+  @@index([timestamp(sort: Desc)])
+  @@index([level])
+  @@index([category])
+  @@index([source])
+  @@index([actorUserId])
+  @@index([eventType])
+  @@index([createdAt(sort: Desc)])
+  @@map("appeventlog")
+}

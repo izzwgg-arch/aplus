@@ -57,6 +57,14 @@ export function OverviewTab() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
+  const [logSummary, setLogSummary] = useState<{
+    errorsLast24h: number
+    criticalLast24h: number
+    securityLast24h: number
+    breachLast24h: number
+    authFailLast1h: number
+    totalLogs: number
+  } | null>(null)
 
   const fetchStatus = useCallback(async () => {
     setLoading(true)
@@ -72,6 +80,11 @@ export function OverviewTab() {
     } finally {
       setLoading(false)
     }
+    // Fetch log summary (non-blocking)
+    try {
+      const lr = await fetch('/api/ops/logs/summary')
+      if (lr.ok) setLogSummary(await lr.json())
+    } catch {}
   }, [])
 
   useEffect(() => { fetchStatus() }, [fetchStatus])
@@ -128,12 +141,29 @@ export function OverviewTab() {
           </div>
 
           <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Resources</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             <MetricCard icon="🔥" label="CPU Load (1m)" value={data.cpuLoad} color="orange" />
             <MetricCard icon="💭" label="Memory Usage" value={data.memUsage} color="blue" />
             <MetricCard icon="💿" label="Disk Usage" value={data.diskUsage} color="purple" />
             <MetricCard icon="🔄" label="Swap" value={data.swapStatus} color="gray" />
           </div>
+
+          {logSummary && (
+            <>
+              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
+                <a href="#" onClick={e => { e.preventDefault(); }} className="hover:text-purple-600">
+                  Event Logs (Last 24h) ↗
+                </a>
+              </h3>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                <MetricCard icon="❌" label="Errors (24h)" value={String(logSummary.errorsLast24h + logSummary.criticalLast24h)} color={logSummary.errorsLast24h + logSummary.criticalLast24h > 0 ? 'red' : 'green'} />
+                <MetricCard icon="🛡️" label="Security Events (24h)" value={String(logSummary.securityLast24h)} color={logSummary.securityLast24h > 0 ? 'orange' : 'green'} />
+                <MetricCard icon="⚠️" label="Breach Events (24h)" value={String(logSummary.breachLast24h)} color={logSummary.breachLast24h > 0 ? 'red' : 'green'} />
+                <MetricCard icon="🔑" label="Auth Failures (1h)" value={String(logSummary.authFailLast1h)} color={logSummary.authFailLast1h > 5 ? 'red' : logSummary.authFailLast1h > 0 ? 'orange' : 'green'} />
+                <MetricCard icon="📋" label="Total Log Entries" value={logSummary.totalLogs.toLocaleString()} color="gray" />
+              </div>
+            </>
+          )}
         </>
       ) : null}
     </div>

@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { execSync } from 'child_process'
 import * as fs from 'fs'
+import { logSecurityEvent, logBreachEvent, logOpsAction } from '@/lib/ops-logger'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,7 +17,7 @@ function run(cmd: string): string {
   }
 }
 
-function logAction(action: string, ip: string, extra: string, user: string) {
+function legacyLogAction(action: string, ip: string, extra: string, user: string) {
   try {
     const logDir = '/opt/smartsteps-ops/logs'
     fs.mkdirSync(logDir, { recursive: true })
@@ -70,18 +71,43 @@ export async function POST(req: Request) {
   }
 
   const safeIP = ip.replace(/[^0-9./]/g, '')
+  const actorEmail = session.user.email || 'admin'
+  const actorRole = session.user.role
 
   if (action === 'ban') {
     const safeDuration = (duration || '24h').replace(/[^0-9hdm]/g, '')
     const safeReason = (reason || 'manual-admin-ban').replace(/[^a-zA-Z0-9_\-]/g, '').substring(0, 50)
     run(`cscli decisions add --ip ${safeIP} --duration ${safeDuration} --reason ${safeReason} --type ban 2>/dev/null`)
-    logAction('BAN', safeIP, `duration=${safeDuration} reason=${safeReason}`, session.user.email || 'admin')
+    legacyLogAction('BAN', safeIP, `duration=${safeDuration} reason=${safeReason}`, actorEmail)
+
+    // Log to AppEventLog
+    await logOpsAction('IP_BANNED', `Admin banned IP ${safeIP} for ${safeDuration} (${safeReason})`, {
+      actorEmail,
+      actorRole,
+      actorUserId: session.user.id,
+      ipAddress: safeIP,
+      route: '/api/ops/ip-control',
+      metadata: { ip: safeIP, duration: safeDuration, reason: safeReason },
+      status: 'success',
+    })
+
     return NextResponse.json({ success: true, message: `${safeIP} banned for ${safeDuration}` })
   }
 
   if (action === 'unban') {
     run(`cscli decisions delete --ip ${safeIP} 2>/dev/null`)
-    logAction('UNBAN', safeIP, '', session.user.email || 'admin')
+    legacyLogAction('UNBAN', safeIP, '', actorEmail)
+
+    await logOpsAction('IP_UNBANNED', `Admin unbanned IP ${safeIP}`, {
+      actorEmail,
+      actorRole,
+      actorUserId: session.user.id,
+      ipAddress: safeIP,
+      route: '/api/ops/ip-control',
+      metadata: { ip: safeIP },
+      status: 'success',
+    })
+
     return NextResponse.json({ success: true, message: `${safeIP} unbanned` })
   }
 
