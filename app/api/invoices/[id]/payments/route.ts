@@ -4,6 +4,7 @@ import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { Decimal } from '@prisma/client/runtime/library'
 import { logPayment } from '@/lib/audit'
+import { createAuditLog } from '@/lib/audit'
 
 export async function POST(
   request: NextRequest,
@@ -84,6 +85,17 @@ export async function POST(
       newPaidAmount: newPaidAmount.toString(),
       newStatus: newStatus,
     })
+
+    // Audit log: payment recorded
+    try {
+      await createAuditLog({
+        action: 'PAYMENT',
+        entityType: 'Payment',
+        entityId: result?.id || 'unknown',
+        userId: session.user.id,
+        newValues: { invoiceId: params.id, amount: result?.amount },
+      })
+    } catch {}
 
     return NextResponse.json(result, { status: 201 })
   } catch (error) {

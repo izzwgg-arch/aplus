@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { createAuditLog } from '@/lib/audit'
 
 export async function GET(request: NextRequest) {
   try {
@@ -54,6 +55,17 @@ export async function POST(request: NextRequest) {
       },
       include: { insurance: true },
     })
+
+    // Audit log: client created
+    try {
+      await createAuditLog({
+        action: 'CREATE',
+        entityType: 'Client',
+        entityId: client.id,
+        userId: session.user.id,
+        newValues: { name: client.name, email: client.email },
+      })
+    } catch {}
 
     return NextResponse.json(client, { status: 201 })
   } catch (error) {

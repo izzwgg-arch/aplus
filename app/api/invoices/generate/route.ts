@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { generateInvoicesForApprovedTimesheets } from '@/lib/jobs/invoiceGeneration'
 import { calculateWeeklyBillingPeriod } from '@/lib/billingPeriodUtils'
+import { createAuditLog } from '@/lib/audit'
 
 /**
  * POST /api/invoices/generate
@@ -48,7 +49,18 @@ export async function POST(request: NextRequest) {
     const result = await generateInvoicesForApprovedTimesheets(billingPeriod)
 
     if (result.success) {
-      return NextResponse.json({
+      // Audit log: invoice generation
+    try {
+      await createAuditLog({
+        action: 'GENERATE',
+        entityType: 'Invoice',
+        entityId: 'batch-generate',
+        userId: session.user.id,
+        newValues: { trigger: 'manual' },
+      })
+    } catch {}
+
+    return NextResponse.json({
         success: true,
         message: `Successfully generated ${result.invoicesCreated} invoice(s) for ${result.clientsProcessed} client(s)`,
         invoicesCreated: result.invoicesCreated,

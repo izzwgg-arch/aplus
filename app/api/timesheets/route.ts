@@ -9,6 +9,7 @@ import { parseDateOnly } from '@/lib/dateUtils'
 import { getTimesheetVisibilityScope } from '@/lib/permissions'
 import { startPerfLog } from '@/lib/api-performance'
 import { generateTimesheetNumber } from '@/lib/timesheet-ids'
+import { createAuditLog } from '@/lib/audit'
 
 export async function GET(request: NextRequest) {
   const perf = startPerfLog('GET /api/timesheets')
@@ -505,6 +506,24 @@ export async function POST(request: NextRequest) {
         throw error
       }
     }
+
+    // Audit log: timesheet created
+    try {
+      await createAuditLog({
+        action: 'CREATE',
+        entityType: isBCBA ? 'BCBATimesheet' : 'Timesheet',
+        entityId: timesheet?.id || 'unknown',
+        userId: session.user.id,
+        newValues: {
+          timesheetNumber: timesheet?.timesheetNumber,
+          clientName: timesheet?.client?.name,
+          providerName: timesheet?.provider?.name,
+          startDate, endDate,
+          entries: entries?.length || 0,
+          status: 'DRAFT',
+        },
+      })
+    } catch {}
 
     return NextResponse.json(timesheet, { status: 201 })
   } catch (error) {

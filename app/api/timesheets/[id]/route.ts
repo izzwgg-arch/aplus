@@ -6,6 +6,7 @@ import { calculateUnits } from '@/lib/utils'
 import { detectTimesheetOverlaps } from '@/lib/server/timesheetOverlapValidation'
 import { getTimesheetVisibilityScope, getUserPermissions } from '@/lib/permissions'
 import { parseDateOnly } from '@/lib/dateUtils'
+import { createAuditLog } from '@/lib/audit'
 
 export async function GET(
   request: NextRequest,

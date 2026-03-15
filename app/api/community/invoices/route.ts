@@ -4,6 +4,7 @@ import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { canAccessCommunitySection } from '@/lib/permissions'
 import { parseDateOnly } from '@/lib/dateUtils'
+import { createAuditLog } from '@/lib/audit'
 
 export async function GET(request: NextRequest) {
   try {
@@ -116,6 +117,17 @@ export async function POST(request: NextRequest) {
         ratePerUnit: invoice.class.ratePerUnit.toNumber(),
       },
     }
+
+    // Audit log: community invoice created
+    try {
+      await createAuditLog({
+        action: 'CREATE',
+        entityType: 'CommunityInvoice',
+        entityId: serializedInvoice?.id || 'unknown',
+        userId: session.user.id,
+        newValues: { status: 'CREATED' },
+      })
+    } catch {}
 
     return NextResponse.json(serializedInvoice, { status: 201 })
   } catch (error) {

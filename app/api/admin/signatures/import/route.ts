@@ -9,6 +9,7 @@ import * as XLSX from 'xlsx'
 import AdmZip from 'adm-zip'
 import { normalizeName, parseName, normalizeFullName } from '@/lib/signature-import/nameMatching'
 import { checkLibreOffice, convertEmfToPng, sanitizePath } from '@/lib/signatures/emfConvert'
+import { createAuditLog } from '@/lib/audit'
 
 const requestId = () => `import-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
 const UPLOAD_DIR = join(process.cwd(), 'uploads', 'signatures')
