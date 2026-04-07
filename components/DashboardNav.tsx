@@ -10,6 +10,8 @@ import {
 } from 'lucide-react'
 import { NotificationBell } from '@/components/notifications/NotificationBell'
 
+const APLUS_CENTER_URL = 'https://app.apluscenterinc.org/aplus'
+
 export function DashboardNav({ userRole }: { userRole: string }) {
   const pathname = usePathname()
   const router = useRouter()
@@ -55,6 +57,14 @@ export function DashboardNav({ userRole }: { userRole: string }) {
               <Home className="w-4 h-4" />
               <span>Home</span>
             </Link>
+
+            <a
+              href={APLUS_CENTER_URL}
+              className="flex items-center space-x-1 px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-800 hover:text-white transition-colors"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>A+ Center</span>
+            </a>
           </div>
 
           <div className="flex items-center space-x-4">
