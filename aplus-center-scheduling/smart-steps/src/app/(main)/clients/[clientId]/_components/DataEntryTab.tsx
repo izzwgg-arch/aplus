@@ -25,6 +25,7 @@ import {
   useABAStore,
   type TrialResultKey,
   type ActiveABCEntry,
+  type LocalTarget,
 } from "@/store/abaStore";
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
