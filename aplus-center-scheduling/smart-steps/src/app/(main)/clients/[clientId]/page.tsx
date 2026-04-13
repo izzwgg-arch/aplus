@@ -14,7 +14,7 @@ import {
   CheckCircle2, Circle, Clock, Star, Plus, Activity, StickyNote,
   BarChart2, LayoutGrid, Zap,
 } from "lucide-react";
-import { useState, Suspense } from "react";
+import { useState, Suspense, Component, type ReactNode, type ErrorInfo } from "react";
 import { toast } from "sonner";
 import { useSession } from "next-auth/react";
 import { TargetDetailPanel, type TargetPanelData } from "./_components/TargetDetailPanel";
@@ -80,6 +80,46 @@ const PHASE_COLORS: Record<string, string> = {
   GENERALIZATION: "bg-[var(--accent-purple)]/10 text-[var(--accent-purple)]",
   MASTERED: "bg-emerald-400/10 text-emerald-400",
 };
+
+/* ── Error boundary for tab content ── */
+
+class TabErrorBoundary extends Component<
+  { children: ReactNode; label: string },
+  { error: Error | null }
+> {
+  constructor(props: { children: ReactNode; label: string }) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error(`[${this.props.label}] crash:`, error, info);
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="rounded-2xl border border-[var(--accent-pink)]/40 bg-[var(--accent-pink)]/5 p-6">
+          <p className="text-sm font-semibold text-[var(--accent-pink)] mb-2">
+            Error in {this.props.label}
+          </p>
+          <pre className="text-xs text-zinc-400 whitespace-pre-wrap break-all font-mono bg-black/30 rounded-xl p-4 max-h-48 overflow-y-auto">
+            {this.state.error.message}
+            {"\n\n"}
+            {this.state.error.stack}
+          </pre>
+          <button
+            type="button"
+            onClick={() => this.setState({ error: null })}
+            className="mt-4 rounded-xl px-4 py-2 text-sm text-zinc-400 border border-[var(--glass-border)] hover:text-zinc-200 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 /* ── Schedule tab component ── */
 
@@ -541,7 +581,9 @@ function ClientHubInner() {
 
           {/* PROGRAMS & TARGETS TAB */}
           {activeTab === "programs" && (
-            <ProgramsTab clientId={clientId} onOpenTarget={handleOpenTarget} />
+            <TabErrorBoundary label="Programs & Targets">
+              <ProgramsTab clientId={clientId} onOpenTarget={handleOpenTarget} />
+            </TabErrorBoundary>
           )}
 
           {/* SESSIONS TAB */}
