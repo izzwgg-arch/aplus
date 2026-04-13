@@ -1,5 +1,4 @@
-// Smart Steps ABA Tracker — data doesn't sleep
-// Prisma schema for Postgres (Supabase / Vercel Postgres ready)
+// Smart Steps ABA Tracker — production Prisma schema
 
 generator client {
   provider = "prisma-client-js"
@@ -56,6 +55,24 @@ enum IntervalType {
   MOMENTARY
 }
 
+enum GoalStatus {
+  ACTIVE
+  ON_HOLD
+  MASTERED
+  ARCHIVED
+}
+
+enum ResponseType {
+  YES_NO
+  SCALE
+  NUMERIC
+  TEXT
+  SINGLE_SELECT
+  MULTI_SELECT
+  PERCENTAGE
+  PROMPT_LEVEL
+}
+
 model User {
   id            String    @id @default(cuid())
   email         String    @unique
@@ -69,27 +86,40 @@ model User {
   sessions      Session[]
   notes         Note[]
   auditEntries  AuditEntry[]
+  completedAssessments ClientAssessment[]
 }
 
 model Client {
-  id          String   @id @default(cuid())
-  name        String
-  photoUrl    String?
-  dob         DateTime
-  diagnosis   String[] // tags e.g. ["ASD", "ADHD"]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  assignments ClientAssignment[]
-  programs    Program[]
-  sessions    Session[]
-  notes       Note[]
+  id                String   @id @default(cuid())
+  name              String
+  photoUrl          String?
+  dob               DateTime
+  diagnosis         String[]
+  guardianName      String?
+  guardianEmail     String?
+  guardianPhone     String?
+  address           String?
+  school            String?
+  insuranceId       String?
+  intakeNotes       String?
+  isArchived        Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  assignments       ClientAssignment[]
+  programs          Program[]
+  parentGoals       ParentGoal[]
+  sessions          Session[]
+  notes             Note[]
+  attachments       Attachment[]
+  behaviorPlan      BehaviorPlan?
+  clientAssessments ClientAssessment[]
 }
 
 model ClientAssignment {
   id        String   @id @default(cuid())
   clientId  String
   userId    String
-  role      Role     // RBT or BCBA for this client
+  role      Role
   createdAt DateTime @default(now())
   client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -99,56 +129,111 @@ model ClientAssignment {
 }
 
 model Program {
-  id          String   @id @default(cuid())
+  id          String      @id @default(cuid())
   clientId    String
   name        String
-  domain      String   // Mand, Tact, Intraverbal, Social, ADL, etc.
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  domain      String
+  description String?
+  isActive    Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  client      Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
   targets     Target[]
+  parentGoals ParentGoal[]
 }
 
+// Long-term broad objective, e.g. "Improve Communication Skills"
+model ParentGoal {
+  id          String     @id @default(cuid())
+  clientId    String
+  programId   String?
+  title       String
+  description String?
+  domain      String?    // Communication, Self-Care, Social, Academic, etc.
+  status      GoalStatus @default(ACTIVE)
+  priority    Int        @default(0)
+  targetDate  DateTime?
+  notes       String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  client      Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  program     Program?   @relation(fields: [programId], references: [id], onDelete: SetNull)
+  subGoals    SubGoal[]
+  targets     Target[]   // targets can live directly under parent goal too
+  @@index([clientId])
+}
+
+// Medium-term objective under a parent goal, e.g. "Label 50 objects by name"
+model SubGoal {
+  id           String     @id @default(cuid())
+  parentGoalId String
+  title        String
+  description  String?
+  sortOrder    Int        @default(0)
+  status       GoalStatus @default(ACTIVE)
+  notes        String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  parentGoal   ParentGoal @relation(fields: [parentGoalId], references: [id], onDelete: Cascade)
+  targets      Target[]
+  @@index([parentGoalId])
+}
+
+// Measurable ABA target
 model Target {
-  id            String     @id @default(cuid())
-  programId     String
-  definition    String
-  targetType    TargetType
-  phase         Phase      @default(BASELINE)
-  masteryRule   Json?      // { thresholdPct, consecutiveDays, promptFade }
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
-  program       Program    @relation(fields: [programId], references: [id], onDelete: Cascade)
-  trials        Trial[]
+  id                    String      @id @default(cuid())
+  programId             String?     // Legacy link to Program
+  parentGoalId          String?     // Direct link to ParentGoal (if no subGoal)
+  subGoalId             String?     // Preferred: link via SubGoal
+  definition            String
+  targetType            String      @default("DISCRETE_TRIAL")
+  phase                 String      @default("BASELINE")
+  masteryRule           Json?       // { thresholdPct, consecutiveDays, promptFade }
+  promptHierarchy       String[]    @default([])
+  baseline              String?
+  isActive              Boolean     @default(true)
+  inMaintenance         Boolean     @default(false)
+  inGeneralization      Boolean     @default(false)
+  notes                 String?
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+  program               Program?    @relation(fields: [programId], references: [id], onDelete: SetNull)
+  parentGoal            ParentGoal? @relation(fields: [parentGoalId], references: [id], onDelete: Cascade)
+  subGoal               SubGoal?    @relation(fields: [subGoalId], references: [id], onDelete: Cascade)
+  trials                Trial[]
+  @@index([programId])
+  @@index([subGoalId])
+  @@index([parentGoalId])
 }
 
 model Session {
-  id          String    @id @default(cuid())
-  clientId    String
-  userId      String
-  startedAt   DateTime  @default(now())
-  endedAt     DateTime?
-  notes       String?
-  voiceNotes  String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  client      Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  trials      Trial[]
-  behaviors   BehaviorEvent[]
+  id                 String              @id @default(cuid())
+  clientId           String
+  userId             String
+  startedAt          DateTime            @default(now())
+  endedAt            DateTime?
+  notes              String?
+  voiceNotes         String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  client             Client              @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trials             Trial[]
+  behaviors          BehaviorEvent[]
+  intervalRecordings IntervalRecording[]
 }
 
 model Trial {
-  id          String       @id @default(cuid())
+  id          String      @id @default(cuid())
   sessionId   String
   targetId    String
-  result      TrialResult
-  promptLevel PromptLevel?
+  result      String      // CORRECT | INCORRECT | PROMPTED | NR | SKIP
+  promptLevel String?
   latencyMs   Int?
-  createdAt   DateTime     @default(now())
-  session     Session      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  target      Target       @relation(fields: [targetId], references: [id], onDelete: Cascade)
+  notes       String?
+  createdAt   DateTime    @default(now())
+  session     Session     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  target      Target      @relation(fields: [targetId], references: [id], onDelete: Cascade)
   @@index([sessionId])
   @@index([targetId])
 }
@@ -157,11 +242,12 @@ model BehaviorEvent {
   id          String   @id @default(cuid())
   sessionId   String
   type        String   // frequency, duration, latency, ABC
-  value       Float?   // count or seconds
+  value       Float?
   antecedent  String?
   behavior    String?
   consequence String?
-  intensity   String?  // mild, moderate, severe
+  intensity   String?
+  notes       String?
   createdAt   DateTime @default(now())
   session     Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   @@index([sessionId])
@@ -178,6 +264,138 @@ model Note {
   client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   @@index([clientId])
+}
+
+model Attachment {
+  id          String    @id @default(cuid())
+  clientId    String?
+  targetId    String?
+  sessionId   String?
+  behaviorId  String?
+  type        String
+  url         String
+  consent     Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  client      Client?   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  @@index([clientId])
+  @@index([sessionId])
+}
+
+model BehaviorPlan {
+  id                   String   @id @default(cuid())
+  clientId             String   @unique
+  targetBehavior       String
+  behaviorFunction     String
+  replacementBehavior  String?
+  preventionStrategies String?
+  teachingProcedures   String?
+  reinforcementPlan    String?
+  crisisPlan           String?
+  dataCollectionMethod String?
+  createdBy            String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  client               Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+}
+
+model IntervalRecording {
+  id          String   @id @default(cuid())
+  sessionId   String
+  targetId    String?
+  type        String
+  intervalSec Int      @default(10)
+  value       Float?
+  startedAt   DateTime
+  endedAt     DateTime?
+  notes       String?
+  createdAt   DateTime @default(now())
+  session     Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  @@index([sessionId])
+}
+
+// ─── Assessment System ───────────────────────────────────────────────────────
+
+// A reusable assessment instrument definition (e.g. VB-MAPP, ABLLS, custom)
+model AssessmentTemplate {
+  id            String              @id @default(cuid())
+  name          String
+  description   String?
+  category      String?             // Adaptive, Behavioral, Language, Academic, Custom
+  version       String              @default("1.0")
+  scoringMethod String?             // total_score, section_score, pass_fail, narrative
+  isActive      Boolean             @default(true)
+  createdBy     String?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  sections      AssessmentSection[]
+  clientAssessments ClientAssessment[]
+}
+
+// A section within a template (e.g. "Mand", "Tact", "Listener Responding")
+model AssessmentSection {
+  id           String             @id @default(cuid())
+  templateId   String
+  title        String
+  description  String?
+  sortOrder    Int                @default(0)
+  createdAt    DateTime           @default(now())
+  template     AssessmentTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  items        AssessmentItem[]
+  @@index([templateId])
+}
+
+// A single item/question within a section
+model AssessmentItem {
+  id            String                   @id @default(cuid())
+  sectionId     String
+  text          String                   // The question or skill description
+  description   String?                  // Operational definition / instructions
+  responseType  String                   // YES_NO | SCALE | NUMERIC | TEXT | SINGLE_SELECT | MULTI_SELECT | PERCENTAGE | PROMPT_LEVEL
+  options       Json?                    // For SINGLE_SELECT, MULTI_SELECT: ["Option A", "Option B", ...]
+  scoreValue    Float?                   // Max points for this item
+  sortOrder     Int                      @default(0)
+  isRequired    Boolean                  @default(false)
+  createdAt     DateTime                 @default(now())
+  section       AssessmentSection        @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  responses     ClientAssessmentResponse[]
+  @@index([sectionId])
+}
+
+// An instance of an assessment assigned to a client
+model ClientAssessment {
+  id            String                   @id @default(cuid())
+  clientId      String
+  templateId    String
+  completedById String?                  // User who filled it out
+  status        String                   @default("IN_PROGRESS") // IN_PROGRESS | COMPLETED | ARCHIVED
+  startedAt     DateTime                 @default(now())
+  completedAt   DateTime?
+  totalScore    Float?
+  notes         String?
+  createdAt     DateTime                 @default(now())
+  updatedAt     DateTime                 @updatedAt
+  client        Client                   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  template      AssessmentTemplate       @relation(fields: [templateId], references: [id])
+  completedBy   User?                    @relation(fields: [completedById], references: [id], onDelete: SetNull)
+  responses     ClientAssessmentResponse[]
+  @@index([clientId])
+  @@index([templateId])
+}
+
+// Individual item responses within a client assessment
+model ClientAssessmentResponse {
+  id                 String          @id @default(cuid())
+  clientAssessmentId String
+  itemId             String
+  responseValue      String?         // Stored as string; parsed based on responseType
+  responseScore      Float?          // Calculated score for this item
+  notes              String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  clientAssessment   ClientAssessment @relation(fields: [clientAssessmentId], references: [id], onDelete: Cascade)
+  item               AssessmentItem  @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  @@unique([clientAssessmentId, itemId])
+  @@index([clientAssessmentId])
 }
 
 model AuditEntry {

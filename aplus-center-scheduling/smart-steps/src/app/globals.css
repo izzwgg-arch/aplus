@@ -56,6 +56,24 @@ body {
   box-shadow: var(--glow-cyan);
 }
 
+.btn-secondary {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  color: var(--foreground);
+  font-weight: 500;
+  padding: 10px 20px;
+  border-radius: 12px;
+  transition: background 0.15s, border-color 0.15s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
 .btn-ghost {
   color: var(--foreground);
   border-radius: 10px;
@@ -65,6 +83,32 @@ body {
   background: var(--glass-bg);
 }
 
+/* Form inputs */
+.field-input {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  color: var(--foreground);
+  padding: 10px 12px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.field-input::placeholder {
+  color: #71717a;
+}
+.field-input:focus {
+  border-color: color-mix(in srgb, var(--accent-cyan) 50%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-cyan) 15%, transparent);
+}
+.field-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+select.field-input {
+  cursor: pointer;
+}
+
 /* data-doesnt-sleep: tap targets for one-handed UX */
 .tap-target {
   min-height: 48px;
@@ -72,6 +116,29 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+/* hide scrollbar utility */
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Offline indicator pulse */
+@keyframes ping-slow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.offline-pulse {
+  animation: ping-slow 2s ease-in-out infinite;
+}
+
+/* pb-safe for mobile bottom nav area */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 16px);
 }
 
 /* skeleton loading */

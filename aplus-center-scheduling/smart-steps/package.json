@@ -18,11 +18,14 @@
     "date-fns": "^4.1.0",
     "dexie": "^4.3.0",
     "framer-motion": "^12.35.2",
+    "lucide-react": "^0.468.0",
     "next": "16.1.6",
     "next-auth": "^5.0.0-beta.30",
     "prisma": "^6.9.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
+    "recharts": "^2.15.0",
+    "sonner": "^2.0.4",
     "zustand": "^5.0.11"
   },
   "devDependencies": {

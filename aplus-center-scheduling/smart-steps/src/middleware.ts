@@ -1,10 +1,10 @@
-import { NextResponse } from "next/server";
-import { auth } from "@/auth";
+// Middleware uses edge-safe auth (no Node.js crypto)
+import NextAuth from "next-auth";
+import { authConfig } from "@/auth.config";
 
-export default auth((req) => {
-  return NextResponse.next();
-});
+export const { auth: middleware } = NextAuth(authConfig);
+export default middleware;
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/auth|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/auth|api/sso|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
 };

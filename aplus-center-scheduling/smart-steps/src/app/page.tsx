@@ -2,22 +2,21 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { useSession, signIn } from "next-auth/react";
+import { useSession } from "next-auth/react";
 import { motion } from "framer-motion";
-
-const APLUS_TOKEN_EMAIL = "__aplus_token__";
 
 export default function SplashPage() {
   const router = useRouter();
   const { status } = useSession();
-  const [stats, setStats] = useState({ sessionsToday: 0, masteryStreak: 0 });
+  const [stats, setStats] = useState({ sessionsToday: 0, masteryStreak: 0, behaviorsLogged: 0 });
   const [tokenLoginDone, setTokenLoginDone] = useState(false);
 
   useEffect(() => {
-    setStats({ sessionsToday: 4, masteryStreak: 87 });
+    setStats({ sessionsToday: 4, masteryStreak: 87, behaviorsLogged: 187 });
   }, []);
 
-  // A+ Center SSO: if URL has #token=..., sign in with that token (no separate password)
+  // A+ Center SSO: if URL has #token=..., hand off to the server-side /api/sso route.
+  // That route verifies the JWT and sets the session cookie directly — no CSRF dance needed.
   useEffect(() => {
     if (typeof window === "undefined" || tokenLoginDone) return;
     const hash = window.location.hash?.replace(/^#/, "") || "";
@@ -25,10 +24,10 @@ export default function SplashPage() {
     const token = params.get("token");
     if (token) {
       setTokenLoginDone(true);
-      signIn("credentials", { email: APLUS_TOKEN_EMAIL, password: token, redirect: false }).then((res) => {
-        if (res?.ok) router.replace("/dashboard");
-        else router.replace("/login");
-      });
+      // Hard navigate to server-side SSO handler (verifies JWT + sets cookie + redirects to dashboard)
+      window.location.replace(
+        `/smart-steps/api/sso?token=${encodeURIComponent(token)}`
+      );
       return;
     }
   }, [router, tokenLoginDone]);
@@ -39,7 +38,7 @@ export default function SplashPage() {
       if (status === "authenticated") router.replace("/dashboard");
       else if (status === "unauthenticated") router.replace("/login");
       else router.replace("/dashboard");
-    }, 2200);
+    }, 3000);
     return () => clearTimeout(t);
   }, [router, status, tokenLoginDone]);
 
@@ -63,10 +62,11 @@ export default function SplashPage() {
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.3 }}
-          className="flex gap-6 text-sm"
+          className="flex flex-wrap justify-center gap-4 text-sm"
         >
           <span className="text-[var(--accent-cyan)]">Sessions today: {stats.sessionsToday}</span>
           <span className="text-[var(--accent-pink)]">Mastery streak: 🔥 {stats.masteryStreak}%</span>
+          <span className="text-[var(--accent-purple)]">Behaviors logged: {stats.behaviorsLogged}</span>
         </motion.div>
         <motion.div
           animate={{ opacity: [0.3, 1, 0.3] }}

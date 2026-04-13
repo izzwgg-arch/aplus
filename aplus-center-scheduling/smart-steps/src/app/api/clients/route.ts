@@ -1,27 +1,49 @@
 import { NextResponse } from "next/server";
+import { auth } from "@/auth";
 import { prisma } from "@/lib/db";
 
-function mockClients() {
-  return [
-    { id: "1", name: "Alex J.", photoUrl: null, dob: "2018-05-12", age: 7, diagnosis: ["ASD"], assignedRbt: "Jordan", assignedBcba: "Dr. Smith", lastSession: "2h ago", progressPct: 78 },
-    { id: "2", name: "Sam K.", photoUrl: null, dob: "2019-11-03", age: 6, diagnosis: ["ASD", "ADHD"], assignedRbt: "Casey", assignedBcba: "Dr. Smith", lastSession: "1d ago", progressPct: 92 },
-    { id: "3", name: "Riley M.", photoUrl: null, dob: "2017-02-28", age: 8, diagnosis: ["ASD"], assignedRbt: "Jordan", assignedBcba: undefined, lastSession: "Today", progressPct: 65 },
-  ];
-}
-
 export async function GET() {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
+    const role = (session.user as { role?: string }).role;
+    const isAdmin = role === "ADMIN" || role === "BCBA";
+
     const clients = await prisma.client.findMany({
+      where: {
+        isArchived: false,
+        ...(isAdmin
+          ? {}
+          : { assignments: { some: { userId: session.user!.id } } }),
+      },
       orderBy: { updatedAt: "desc" },
       include: {
-        assignments: { include: { user: { select: { name: true } } } },
+        assignments: { include: { user: { select: { name: true, role: true } } } },
+        sessions: { take: 1, orderBy: { startedAt: "desc" } },
       },
     });
+
     const now = new Date();
     const list = clients.map((c) => {
-      const age = now.getFullYear() - c.dob.getFullYear();
+      const birthYear = c.dob.getFullYear();
+      const birthMonth = c.dob.getMonth();
+      const birthDay = c.dob.getDate();
+      let age = now.getFullYear() - birthYear;
+      if (now.getMonth() < birthMonth || (now.getMonth() === birthMonth && now.getDate() < birthDay)) age--;
+
       const rbt = c.assignments.find((a) => a.role === "RBT")?.user?.name;
       const bcba = c.assignments.find((a) => a.role === "BCBA")?.user?.name;
+      const lastS = c.sessions[0];
+      let lastSession: string | undefined;
+      if (lastS) {
+        const diff = now.getTime() - lastS.startedAt.getTime();
+        if (diff < 3600000) lastSession = `${Math.floor(diff / 60000)}m ago`;
+        else if (diff < 86400000) lastSession = "Today";
+        else lastSession = `${Math.floor(diff / 86400000)}d ago`;
+      }
       return {
         id: c.id,
         name: c.name,
@@ -31,12 +53,59 @@ export async function GET() {
         diagnosis: c.diagnosis,
         assignedRbt: rbt ?? undefined,
         assignedBcba: bcba ?? undefined,
-        lastSession: null,
+        lastSession,
         progressPct: 0,
+        isArchived: c.isArchived,
       };
     });
-    return NextResponse.json(list.length ? list : mockClients());
-  } catch {
-    return NextResponse.json(mockClients());
+    return NextResponse.json(list);
+  } catch (err) {
+    console.error("GET /api/clients error:", err);
+    return NextResponse.json({ error: "Failed to load clients" }, { status: 500 });
+  }
+}
+
+export async function POST(req: Request) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const role = (session.user as { role?: string }).role;
+  if (role !== "ADMIN" && role !== "BCBA") {
+    return NextResponse.json({ error: "Only BCBA or Admin can create clients" }, { status: 403 });
+  }
+
+  try {
+    const body = await req.json();
+    const { name, dob, diagnosis, guardianName, guardianEmail, guardianPhone, address, school, insuranceId, intakeNotes } = body;
+
+    if (!name?.trim()) return NextResponse.json({ error: "Name is required" }, { status: 400 });
+    if (!dob) return NextResponse.json({ error: "Date of birth is required" }, { status: 400 });
+
+    const dobDate = new Date(dob);
+    if (isNaN(dobDate.getTime())) {
+      return NextResponse.json({ error: "Invalid date of birth" }, { status: 400 });
+    }
+
+    const client = await prisma.client.create({
+      data: {
+        name: name.trim(),
+        dob: dobDate,
+        diagnosis: Array.isArray(diagnosis) ? diagnosis.filter(Boolean) : [],
+        guardianName: guardianName?.trim() || null,
+        guardianEmail: guardianEmail?.trim() || null,
+        guardianPhone: guardianPhone?.trim() || null,
+        address: address?.trim() || null,
+        school: school?.trim() || null,
+        insuranceId: insuranceId?.trim() || null,
+        intakeNotes: intakeNotes?.trim() || null,
+      },
+    });
+
+    return NextResponse.json(client, { status: 201 });
+  } catch (err) {
+    console.error("POST /api/clients error:", err);
+    return NextResponse.json({ error: "Failed to create client" }, { status: 500 });
   }
 }
