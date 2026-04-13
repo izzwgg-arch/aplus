@@ -872,7 +872,7 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
                             ? "text-white ring-1"
                             : "bg-[var(--glass-bg)] text-zinc-400 hover:text-zinc-200"
                         }`}
-                        style={filterCatId === cat.id ? { background: cat.color ?? "var(--accent-cyan)", ringColor: cat.color } : {}}
+                        style={filterCatId === cat.id ? { background: cat.color ?? "var(--accent-cyan)" } : {}}
                       >
                         <span
                           className="h-2 w-2 rounded-full shrink-0"
