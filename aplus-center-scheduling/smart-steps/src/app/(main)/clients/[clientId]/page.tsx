@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import { useSession } from "next-auth/react";
 import { TargetDetailPanel, type TargetPanelData } from "./_components/TargetDetailPanel";
 import { ProgramsTab } from "./_components/ProgramsTab";
+import { DataEntryTab } from "./_components/DataEntryTab";
 
 /* ── Types ── */
 
@@ -63,12 +64,13 @@ type GoalSummary = {
 };
 
 const TABS = [
-  { id: "overview", label: "Overview", icon: LayoutGrid },
-  { id: "programs", label: "Programs & Targets", icon: Target },
-  { id: "sessions", label: "Sessions", icon: Activity },
-  { id: "schedule", label: "Schedule", icon: Calendar },
-  { id: "graphs", label: "Graphs", icon: BarChart2 },
-  { id: "notes", label: "Notes", icon: StickyNote },
+  { id: "overview",    label: "Overview",          icon: LayoutGrid },
+  { id: "data-entry",  label: "Data Entry",         icon: Zap        },
+  { id: "programs",    label: "Goals & Targets",    icon: Target     },
+  { id: "sessions",    label: "Sessions",           icon: Activity   },
+  { id: "schedule",    label: "Schedule",           icon: Calendar   },
+  { id: "graphs",      label: "Graphs",             icon: BarChart2  },
+  { id: "notes",       label: "Notes",              icon: StickyNote },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -424,13 +426,14 @@ function ClientHubInner() {
             <Edit2 className="h-4 w-4" />
             Edit
           </Link>
-          <Link
-            href={`/clients/${clientId}/session/new`}
+          <button
+            type="button"
+            onClick={() => setTab("data-entry")}
             className="btn-primary tap-target inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold"
           >
             <Zap className="h-4 w-4" />
-            Start Session
-          </Link>
+            Data Entry
+          </button>
         </div>
       </motion.div>
 
@@ -556,7 +559,7 @@ function ClientHubInner() {
                   { href: `/clients/${clientId}/programs`, icon: Target, label: "Goals & Targets", sub: "Skill areas, programs & targets", color: "var(--accent-cyan)" },
                   { href: `/clients/${clientId}/assessments`, icon: ClipboardList, label: "Assessments", sub: "Assign and complete", color: "var(--accent-purple)" },
                   { href: `/clients/${clientId}/behavior-plan`, icon: Brain, label: "Behavior Plan", sub: "BIP and interventions", color: "#34d399" },
-                  { href: `/clients/${clientId}/session/new`, icon: Zap, label: "Start Session", sub: "Collect data now", color: "#f59e0b" },
+                  { href: `/clients/${clientId}?tab=data-entry`, icon: Zap, label: "Data Entry", sub: "Live session recording", color: "#f59e0b" },
                   { href: `/reports?clientId=${clientId}`, icon: FileText, label: "Reports", sub: "Export and analyze", color: "#a78bfa" },
                 ].map((item) => (
                   <Link key={item.href} href={item.href}>
@@ -579,9 +582,16 @@ function ClientHubInner() {
             </div>
           )}
 
-          {/* PROGRAMS & TARGETS TAB */}
+          {/* DATA ENTRY TAB */}
+          {activeTab === "data-entry" && (
+            <TabErrorBoundary label="Data Entry">
+              <DataEntryTab clientId={clientId} />
+            </TabErrorBoundary>
+          )}
+
+          {/* GOALS & TARGETS TAB */}
           {activeTab === "programs" && (
-            <TabErrorBoundary label="Programs & Targets">
+            <TabErrorBoundary label="Goals & Targets">
               <ProgramsTab clientId={clientId} onOpenTarget={handleOpenTarget} />
             </TabErrorBoundary>
           )}
@@ -593,23 +603,25 @@ function ClientHubInner() {
                 <p className="text-sm text-zinc-500">
                   {sessions.length} recent session{sessions.length !== 1 ? "s" : ""}
                 </p>
-                <Link
-                  href={`/clients/${clientId}/session/new`}
+                <button
+                  type="button"
+                  onClick={() => setTab("data-entry")}
                   className="btn-primary tap-target inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold"
                 >
                   <Zap className="h-4 w-4" /> New Session
-                </Link>
+                </button>
               </div>
               {sessions.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-[var(--glass-border)] py-12 text-center">
                   <Activity className="h-10 w-10 text-zinc-600 mx-auto mb-3" />
                   <p className="text-zinc-400 font-medium mb-1">No sessions recorded yet</p>
-                  <Link
-                    href={`/clients/${clientId}/session/new`}
+                  <button
+                    type="button"
+                    onClick={() => setTab("data-entry")}
                     className="btn-primary inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold mt-4"
                   >
                     <Zap className="h-4 w-4" /> Start first session
-                  </Link>
+                  </button>
                 </div>
               ) : (
                 <div className="space-y-2">
