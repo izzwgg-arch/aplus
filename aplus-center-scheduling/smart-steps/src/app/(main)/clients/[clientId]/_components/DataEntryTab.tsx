@@ -526,17 +526,15 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
 
   /* ── End session ── */
   const endSession = useCallback(async () => {
-    const effectiveSessionId = sessionId ?? localSessionId;
-    if (!effectiveSessionId || isSaving) return;
+    const sid = sessionId ?? localSessionId;
+    if (!sid || isSaving) return;
     setIsSaving(true);
 
     const endedAt = new Date().toISOString();
-    // Use effectiveSessionId throughout this function
-    const sessionId = effectiveSessionId; // shadow outer
 
     try {
       // Patch session end time
-      await fetch(`/smart-steps/api/sessions/${sessionId}`, {
+      await fetch(`/smart-steps/api/sessions/${sid}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ endedAt }),
@@ -548,17 +546,16 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            sessionId,
+            sessionId: sid,
             trials: trials.map((t) => ({
-              targetId:   t.targetId,
-              result:     t.result,
+              targetId:    t.targetId,
+              result:      t.result,
               promptLevel: t.promptLevel,
             })),
           }),
         }).catch((e: unknown) => {
-          // Queue to Dexie for offline sync
           trials.forEach((t) => queueTrial({
-            sessionId: sessionId!, targetId: t.targetId, result: t.result,
+            sessionId: sid, targetId: t.targetId, result: t.result,
             promptLevel: t.promptLevel, createdAt: new Date(t.at).toISOString(),
           }).catch(() => {}));
           throw e;
@@ -571,7 +568,7 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            sessionId,
+            sessionId: sid,
             events: abcEntries.map((e) => ({
               type: "ABC", antecedent: e.antecedent,
               behavior: e.behavior, consequence: e.consequence, intensity: e.intensity,
@@ -942,9 +939,10 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
             <button
               type="button"
               onClick={async () => {
+                const offlineId = sessionId ?? localSessionId ?? "offline";
                 for (const t of trials) {
                   await queueTrial({
-                    sessionId: sessionId ?? "offline",
+                    sessionId: offlineId,
                     targetId: t.targetId, result: t.result,
                     promptLevel: t.promptLevel,
                     createdAt: new Date(t.at).toISOString(),
