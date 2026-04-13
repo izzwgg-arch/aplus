@@ -16,18 +16,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Play, Pause, Timer, Save, CloudOff, Plus, Minus, RefreshCcw,
-  Activity, X, ChevronRight, CheckCircle2, XCircle, Zap,
-  BarChart2, Layers, Target as TargetIcon, Clock, ArrowLeft,
+  Activity, X, CheckCircle2, Zap, Layers, Target as TargetIcon, Clock,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { db, queueTrial, queueBehavior } from "@/lib/dexie";
+import { queueTrial, queueBehavior } from "@/lib/dexie";
 import {
   useABAStore,
-  type LocalCategory,
-  type LocalProgram,
-  type LocalTarget,
   type TrialResultKey,
+  type ActiveABCEntry,
 } from "@/store/abaStore";
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
@@ -509,7 +506,7 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
       storeAddABC(localSessionId, {
         antecedent: abcForm.antecedent, behavior: abcForm.behavior,
         consequence: abcForm.consequence,
-        intensity: abcForm.intensity as import("@/store/abaStore").ActiveABCEntry["intensity"],
+        intensity: abcForm.intensity as ActiveABCEntry["intensity"],
         recordedAt: now,
       });
     }
@@ -528,10 +525,13 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
 
   /* ── End session ── */
   const endSession = useCallback(async () => {
-    if (!sessionId || isSaving) return;
+    const effectiveSessionId = sessionId ?? localSessionId;
+    if (!effectiveSessionId || isSaving) return;
     setIsSaving(true);
 
     const endedAt = new Date().toISOString();
+    // Use effectiveSessionId throughout this function
+    const sessionId = effectiveSessionId; // shadow outer
 
     try {
       // Patch session end time
