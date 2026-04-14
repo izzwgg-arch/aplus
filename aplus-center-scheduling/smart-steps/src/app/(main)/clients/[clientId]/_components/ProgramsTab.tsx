@@ -1,21 +1,19 @@
 "use client";
 
-/**
- * ProgramsTab — 2-level navigation
- *
- *  Level 1 (default): Accordion list of Categories, each expanded to show
- *                     its Skills as sub-rows.  Skills are sub-categories.
- *  Level 2:           Goals & Targets inside a selected Skill.
- *
- * Data lives entirely in the Zustand ABA store (localStorage-persisted).
- * No data is ever deleted — only the UI is reorganised.
- */
-
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  ArrowLeft, Plus, ChevronDown, ChevronRight,
-  Layers, Target as TargetIcon, Pencil, Trash2, X,
+  ArrowLeft,
+  BarChart2,
+  Calendar,
+  ChevronRight,
+  Layers,
+  Pencil,
+  Plus,
+  Target as TargetIcon,
+  Trophy,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -25,181 +23,325 @@ import {
   type LocalCategory,
   type LocalProgram,
   type LocalTarget,
-  type Phase,
+  type PromptLevel,
 } from "@/store/abaStore";
 import type { TargetPanelData } from "./TargetDetailPanel";
 
-/* ─── Constants ──────────────────────────────────────────────────────────── */
-
-const PHASES: Phase[] = ["BASELINE","ACQUISITION","MAINTENANCE","GENERALIZATION","MASTERED"];
-
-const PHASE_STYLE: Record<Phase, string> = {
-  BASELINE:       "bg-zinc-500/15 text-zinc-300",
-  ACQUISITION:    "bg-cyan-400/15 text-cyan-300",
-  MAINTENANCE:    "bg-amber-400/15 text-amber-300",
-  GENERALIZATION: "bg-purple-400/15 text-purple-300",
-  MASTERED:       "bg-emerald-400/15 text-emerald-300",
-};
-
 const CATEGORY_COLORS = [
-  "#06b6d4","#a855f7","#ec4899","#f59e0b","#10b981",
-  "#3b82f6","#f97316","#8b5cf6","#14b8a6","#ef4444",
+  "#06b6d4",
+  "#a855f7",
+  "#ec4899",
+  "#f59e0b",
+  "#10b981",
+  "#3b82f6",
+  "#f97316",
+  "#8b5cf6",
+  "#14b8a6",
+  "#ef4444",
 ];
 
 const CATEGORY_PRESETS = [
-  "Language & Communication","Social Skills","Manding (Requesting)",
-  "Tacting (Labeling)","Intraverbal","Self-Care / Daily Living",
-  "Fine Motor Skills","Gross Motor Skills","Academic / Pre-Academic",
-  "Behavior Reduction","Play & Leisure","Cognitive Skills",
+  "Language & Communication",
+  "Social Skills",
+  "Adaptive Behavior",
+  "Receptive Language",
+  "Expressive Language",
+  "Behavior Reduction",
+  "Play & Leisure",
+  "Academic / Pre-Academic",
 ];
 
 const TARGET_TYPE_OPTIONS = [
-  { value: "DISCRETE_TRIAL",        label: "Discrete Trial Training (DTT)" },
-  { value: "TASK_ANALYSIS_FWD",     label: "Task Analysis — Forward Chaining" },
-  { value: "TASK_ANALYSIS_BWD",     label: "Task Analysis — Backward Chaining" },
-  { value: "TASK_ANALYSIS_TOTAL",   label: "Task Analysis — Total Task" },
-  { value: "DURATION",              label: "Duration Recording" },
-  { value: "LATENCY",               label: "Latency Recording" },
-  { value: "FREQUENCY",             label: "Frequency / Event Recording" },
-  { value: "COLD_PROBE",            label: "Cold Probe" },
-  { value: "OTHER",                 label: "Other" },
+  { value: "DISCRETE_TRIAL", label: "Discrete Trial Training" },
+  { value: "TASK_ANALYSIS_FWD", label: "Task Analysis - Forward" },
+  { value: "TASK_ANALYSIS_BWD", label: "Task Analysis - Backward" },
+  { value: "TASK_ANALYSIS_TOTAL", label: "Task Analysis - Total Task" },
+  { value: "DURATION", label: "Duration" },
+  { value: "LATENCY", label: "Latency" },
+  { value: "FREQUENCY", label: "Frequency" },
+  { value: "PARTIAL_INTERVAL", label: "Partial Interval" },
+  { value: "WHOLE_INTERVAL", label: "Whole Interval" },
+  { value: "MOMENTARY_TIME_SAMPLE", label: "Momentary Time Sample" },
+  { value: "COLD_PROBE", label: "Cold Probe" },
+  { value: "OTHER", label: "Other" },
 ];
 
+const STATUS_OPTIONS = [
+  { value: "active", label: "Active" },
+  { value: "mastered", label: "Mastered" },
+  { value: "paused", label: "Paused" },
+] as const;
+
+const UNASSIGNED_SKILL_PREFIX = "__unassigned__:";
+
+type SkillAreaItem = {
+  id: string;
+  name: string;
+  description?: string;
+  goalCount: number;
+  masteredCount: number;
+  isUnassigned: boolean;
+  skill: LocalProgram | null;
+};
+
+type ViewState =
+  | { level: "categories" }
+  | { level: "skills"; categoryId: string }
+  | { level: "goals"; categoryId: string; skillId: string }
+  | { level: "goal"; categoryId: string; skillId: string; goalId: string };
+
+type GoalStatus = "active" | "mastered" | "paused";
+
 function makeId() {
-  return `local-${Date.now()}-${Math.random().toString(36).slice(2,7)}`;
+  return `local-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
-/* ─── Skeleton ───────────────────────────────────────────────────────────── */
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function isUnassignedSkillId(skillId: string) {
+  return skillId.startsWith(UNASSIGNED_SKILL_PREFIX);
+}
+
+function countGoalProgress(trials: Array<{ result: string }>) {
+  const total = trials.length;
+  const correct = trials.filter((trial) => trial.result === "CORRECT" || trial.result === "INDEPENDENT").length;
+  return {
+    total,
+    correct,
+    pct: total > 0 ? Math.round((correct / total) * 100) : null,
+  };
+}
 
 function Skeleton() {
   return (
     <div className="space-y-3">
-      {[1,2,3].map(i => (
+      {[1, 2, 3].map((i) => (
         <div key={i} className="glass-card skeleton h-20 rounded-2xl" />
       ))}
     </div>
   );
 }
 
-/* ─── Category modal (add / edit) ───────────────────────────────────────── */
+function Breadcrumbs({
+  category,
+  skillLabel,
+  goalTitle,
+  onGoCategories,
+  onGoSkills,
+  onGoGoals,
+}: {
+  category?: string | null;
+  skillLabel?: string | null;
+  goalTitle?: string | null;
+  onGoCategories: () => void;
+  onGoSkills?: () => void;
+  onGoGoals?: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-1.5 text-xs text-zinc-500 flex-wrap">
+      <button type="button" onClick={onGoCategories} className="hover:text-[var(--accent-cyan)] transition-colors">
+        Goals &amp; Targets
+      </button>
+      {category && (
+        <>
+          <ChevronRight className="h-3 w-3 shrink-0" />
+          {onGoSkills ? (
+            <button type="button" onClick={onGoSkills} className="hover:text-[var(--accent-cyan)] transition-colors">
+              {category}
+            </button>
+          ) : (
+            <span className="text-zinc-300">{category}</span>
+          )}
+        </>
+      )}
+      {skillLabel && (
+        <>
+          <ChevronRight className="h-3 w-3 shrink-0" />
+          {onGoGoals ? (
+            <button type="button" onClick={onGoGoals} className="hover:text-[var(--accent-cyan)] transition-colors">
+              {skillLabel}
+            </button>
+          ) : (
+            <span className="text-zinc-300">{skillLabel}</span>
+          )}
+        </>
+      )}
+      {goalTitle && (
+        <>
+          <ChevronRight className="h-3 w-3 shrink-0" />
+          <span className="text-zinc-300">{goalTitle}</span>
+        </>
+      )}
+    </div>
+  );
+}
 
 function CategoryModal({
-  clientId, editCat, onClose, onSaved,
+  clientId,
+  category,
+  onClose,
 }: {
   clientId: string;
-  editCat: LocalCategory | null;
+  category: LocalCategory | null;
   onClose: () => void;
-  onSaved: () => void;
 }) {
-  const addCategory    = useABAStore(s => s.addCategory);
-  const updateCategory = useABAStore(s => s.updateCategory);
+  const addCategory = useABAStore((s) => s.addCategory);
+  const updateCategory = useABAStore((s) => s.updateCategory);
+  const setCategoryServerId = useABAStore((s) => s.setCategoryServerId);
 
-  const [name,        setName]        = useState(editCat?.name ?? "");
-  const [color,       setColor]       = useState(editCat?.color ?? CATEGORY_COLORS[0]);
-  const [description, setDescription] = useState(editCat?.description ?? "");
-  const [saving,      setSaving]      = useState(false);
+  const [name, setName] = useState(category?.name ?? "");
+  const [description, setDescription] = useState(category?.description ?? "");
+  const [color, setColor] = useState(category?.color ?? CATEGORY_COLORS[0]);
+  const [saving, setSaving] = useState(false);
 
-  async function save(e: React.FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!name.trim() || saving) return;
     setSaving(true);
-    const now = new Date().toISOString();
 
-    if (editCat) {
-      updateCategory(editCat.id, { name: name.trim(), color, description: description.trim() });
-      if (editCat.serverId) {
-        await fetch(`/smart-steps/api/programs/${editCat.serverId}`, {
+    const trimmedName = name.trim();
+    const trimmedDescription = description.trim();
+
+    if (category) {
+      updateCategory(category.id, {
+        name: trimmedName,
+        description: trimmedDescription,
+        color,
+      });
+
+      if (category.serverId) {
+        await fetch(`/smart-steps/api/programs/${category.serverId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: name.trim(), description: description.trim() }),
+          body: JSON.stringify({
+            name: trimmedName,
+            domain: trimmedName,
+          }),
         }).catch(() => {});
       }
+
       toast.success("Category updated");
     } else {
-      const id = makeId();
-      addCategory({ id, clientId, name: name.trim(), color, description: description.trim(), createdAt: now, synced: false });
+      const localId = makeId();
+      addCategory({
+        id: localId,
+        clientId,
+        name: trimmedName,
+        description: trimmedDescription,
+        color,
+        createdAt: new Date().toISOString(),
+        synced: false,
+      });
+
       fetch("/smart-steps/api/programs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId, name: name.trim(), domain: name.trim(), description: description.trim() }),
+        body: JSON.stringify({
+          clientId,
+          name: trimmedName,
+          domain: trimmedName,
+          description: trimmedDescription,
+        }),
       })
-        .then(r => r.json())
-        .then(d => { if (d?.id) useABAStore.getState().setCategoryServerId(id, d.id); })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data?.id) setCategoryServerId(localId, data.id);
+        })
         .catch(() => {});
+
       toast.success("Category created");
     }
 
     setSaving(false);
-    onSaved();
     onClose();
   }
 
   return (
     <motion.div
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/75 backdrop-blur-sm"
-      onClick={e => e.target === e.currentTarget && onClose()}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/75 backdrop-blur-sm p-0 sm:p-4"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <motion.div
-        initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
+        initial={{ y: "100%" }}
+        animate={{ y: 0 }}
+        exit={{ y: "100%" }}
         transition={{ type: "spring", damping: 28, stiffness: 260 }}
-        className="glass-card w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl border border-[var(--glass-border)] flex flex-col max-h-[90vh]"
+        className="glass-card w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl border border-[var(--glass-border)]"
       >
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--glass-border)] shrink-0">
-          <h2 className="font-bold text-[var(--foreground)] flex items-center gap-2">
-            <Layers className="h-4 w-4 text-[var(--accent-cyan)]" />
-            {editCat ? "Edit Category" : "New Category"}
-          </h2>
-          <button onClick={onClose} className="rounded-xl p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-white/10">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--glass-border)]">
+          <h2 className="font-bold text-[var(--foreground)]">{category ? "Edit Category" : "New Category"}</h2>
+          <button type="button" onClick={onClose} className="rounded-xl p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-white/10">
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <form onSubmit={save} className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+        <form onSubmit={handleSubmit} className="px-5 py-4 space-y-4">
           <div>
             <label className="block text-sm font-medium text-zinc-300 mb-1.5">
-              Name <span className="text-[var(--accent-pink)]">*</span>
+              Category Name <span className="text-[var(--accent-pink)]">*</span>
             </label>
             <input
-              autoFocus type="text" value={name} required
-              onChange={e => setName(e.target.value)}
+              autoFocus
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Language & Communication"
               className="field-input w-full"
+              required
             />
           </div>
 
           <div className="flex flex-wrap gap-1.5">
-            {CATEGORY_PRESETS.map(p => (
-              <button key={p} type="button" onClick={() => setName(p)}
-                className="rounded-full border border-[var(--glass-border)] px-2.5 py-1 text-xs text-zinc-400 hover:border-[var(--accent-cyan)]/50 hover:text-[var(--accent-cyan)] transition-colors">
-                {p}
+            {CATEGORY_PRESETS.map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                onClick={() => setName(preset)}
+                className="rounded-full border border-[var(--glass-border)] px-2.5 py-1 text-xs text-zinc-400 hover:border-[var(--accent-cyan)]/50 hover:text-[var(--accent-cyan)] transition-colors"
+              >
+                {preset}
               </button>
             ))}
           </div>
 
           <div>
+            <label className="block text-sm font-medium text-zinc-300 mb-1.5">Description</label>
+            <textarea
+              rows={2}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Optional category notes"
+              className="field-input w-full resize-none"
+            />
+          </div>
+
+          <div>
             <label className="block text-sm font-medium text-zinc-300 mb-2">Color</label>
-            <div className="flex gap-2 flex-wrap">
-              {CATEGORY_COLORS.map(c => (
-                <button key={c} type="button" onClick={() => setColor(c)}
-                  className={`h-8 w-8 rounded-xl transition-all ${color === c ? "ring-2 ring-white ring-offset-2 ring-offset-[var(--background)] scale-110" : "hover:scale-105"}`}
-                  style={{ background: c }} />
+            <div className="flex flex-wrap gap-2">
+              {CATEGORY_COLORS.map((swatch) => (
+                <button
+                  key={swatch}
+                  type="button"
+                  onClick={() => setColor(swatch)}
+                  className={`h-8 w-8 rounded-xl ${color === swatch ? "ring-2 ring-white ring-offset-2 ring-offset-[var(--background)]" : ""}`}
+                  style={{ background: swatch }}
+                />
               ))}
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-zinc-300 mb-1.5">Description (optional)</label>
-            <textarea rows={2} value={description} onChange={e => setDescription(e.target.value)}
-              placeholder="Brief description…" className="field-input w-full resize-none" />
-          </div>
-
           <div className="flex gap-3 pt-1">
-            <button type="submit" disabled={saving}
-              className="btn-primary flex-1 rounded-xl py-3 font-bold disabled:opacity-60">
-              {saving ? "Saving…" : editCat ? "Save Changes" : "Create Category"}
+            <button type="submit" disabled={saving} className="btn-primary flex-1 rounded-xl py-3 font-bold disabled:opacity-60">
+              {saving ? "Saving..." : category ? "Save Category" : "Create Category"}
             </button>
-            <button type="button" onClick={onClose} className="btn-secondary rounded-xl px-5 py-3">Cancel</button>
+            <button type="button" onClick={onClose} className="btn-secondary rounded-xl px-5 py-3">
+              Cancel
+            </button>
           </div>
         </form>
       </motion.div>
@@ -207,102 +349,145 @@ function CategoryModal({
   );
 }
 
-/* ─── Skill modal (add) ──────────────────────────────────────────────────── */
-
-function SkillModal({
-  clientId, categoryId, categoryName, editSkill, onClose, onSaved,
+function SkillAreaModal({
+  clientId,
+  category,
+  skill,
+  onClose,
 }: {
   clientId: string;
-  categoryId: string;
-  categoryName: string;
-  editSkill: LocalProgram | null;
+  category: LocalCategory;
+  skill: LocalProgram | null;
   onClose: () => void;
-  onSaved: () => void;
 }) {
-  const addProgram    = useABAStore(s => s.addProgram);
-  const updateProgram = useABAStore(s => s.updateProgram);
+  const addProgram = useABAStore((s) => s.addProgram);
+  const updateProgram = useABAStore((s) => s.updateProgram);
+  const setProgramServerId = useABAStore((s) => s.setProgramServerId);
 
-  const [name,        setName]        = useState(editSkill?.name ?? "");
-  const [description, setDescription] = useState(editSkill?.description ?? "");
-  const [saving,      setSaving]      = useState(false);
+  const [name, setName] = useState(skill?.name ?? "");
+  const [description, setDescription] = useState(skill?.description ?? "");
+  const [saving, setSaving] = useState(false);
 
-  async function save(e: React.FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!name.trim() || saving) return;
     setSaving(true);
-    const now = new Date().toISOString();
 
-    if (editSkill) {
-      updateProgram(editSkill.id, { name: name.trim(), description: description.trim() });
-      toast.success("Skill updated");
+    const trimmedName = name.trim();
+    const trimmedDescription = description.trim();
+
+    if (skill) {
+      updateProgram(skill.id, {
+        name: trimmedName,
+        description: trimmedDescription,
+      });
+
+      if (skill.serverId) {
+        await fetch(`/smart-steps/api/clients/${clientId}/goals/${skill.serverId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: trimmedName,
+            description: trimmedDescription,
+            domain: category.name,
+          }),
+        }).catch(() => {});
+      }
+
+      toast.success("Skill area updated");
     } else {
-      const id = makeId();
-      addProgram({ id, categoryId, clientId, name: name.trim(), description: description.trim(), createdAt: now, synced: false });
+      const localId = makeId();
+      addProgram({
+        id: localId,
+        categoryId: category.id,
+        clientId,
+        name: trimmedName,
+        description: trimmedDescription,
+        createdAt: new Date().toISOString(),
+        synced: false,
+      });
+
       fetch(`/smart-steps/api/clients/${clientId}/goals`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: name.trim(), description: description.trim(), domain: categoryName }),
+        body: JSON.stringify({
+          title: trimmedName,
+          description: trimmedDescription,
+          domain: category.name,
+        }),
       })
-        .then(r => r.json())
-        .then(d => { if (d?.id) useABAStore.getState().setProgramServerId(id, d.id); })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data?.id) setProgramServerId(localId, data.id);
+        })
         .catch(() => {});
-      toast.success("Skill created");
+
+      toast.success("Skill area created");
     }
 
     setSaving(false);
-    onSaved();
     onClose();
   }
 
   return (
     <motion.div
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/75 backdrop-blur-sm"
-      onClick={e => e.target === e.currentTarget && onClose()}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/75 backdrop-blur-sm p-0 sm:p-4"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <motion.div
-        initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
+        initial={{ y: "100%" }}
+        animate={{ y: 0 }}
+        exit={{ y: "100%" }}
         transition={{ type: "spring", damping: 28, stiffness: 260 }}
-        className="glass-card w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl border border-[var(--glass-border)] flex flex-col max-h-[90vh]"
+        className="glass-card w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl border border-[var(--glass-border)]"
       >
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--glass-border)] shrink-0">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--glass-border)]">
           <div>
-            <h2 className="font-bold text-[var(--foreground)] flex items-center gap-2">
-              <Layers className="h-4 w-4 text-[var(--accent-purple)]" />
-              {editSkill ? "Edit Skill" : "New Skill"}
-            </h2>
-            <p className="text-xs text-zinc-500 mt-0.5">
-              under: <span className="text-zinc-300">{categoryName}</span>
-            </p>
+            <h2 className="font-bold text-[var(--foreground)]">{skill ? "Edit Skill Area" : "New Skill Area"}</h2>
+            <p className="text-xs text-zinc-500 mt-0.5">Inside {category.name}</p>
           </div>
-          <button onClick={onClose} className="rounded-xl p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-white/10">
+          <button type="button" onClick={onClose} className="rounded-xl p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-white/10">
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <form onSubmit={save} className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+        <form onSubmit={handleSubmit} className="px-5 py-4 space-y-4">
           <div>
             <label className="block text-sm font-medium text-zinc-300 mb-1.5">
-              Skill Name <span className="text-[var(--accent-pink)]">*</span>
+              Skill Area Name <span className="text-[var(--accent-pink)]">*</span>
             </label>
             <input
-              autoFocus type="text" value={name} required
-              onChange={e => setName(e.target.value)}
-              placeholder="e.g. Expressive Language, Behavior"
+              autoFocus
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Receptive Language"
               className="field-input w-full"
+              required
             />
           </div>
+
           <div>
-            <label className="block text-sm font-medium text-zinc-300 mb-1.5">Description (optional)</label>
-            <textarea rows={2} value={description} onChange={e => setDescription(e.target.value)}
-              placeholder="Brief description…" className="field-input w-full resize-none" />
+            <label className="block text-sm font-medium text-zinc-300 mb-1.5">Description</label>
+            <textarea
+              rows={2}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Optional skill area notes"
+              className="field-input w-full resize-none"
+            />
           </div>
+
           <div className="flex gap-3 pt-1">
-            <button type="submit" disabled={saving}
-              className="btn-primary flex-1 rounded-xl py-3 font-bold disabled:opacity-60">
-              {saving ? "Saving…" : editSkill ? "Save Changes" : "Create Skill"}
+            <button type="submit" disabled={saving} className="btn-primary flex-1 rounded-xl py-3 font-bold disabled:opacity-60">
+              {saving ? "Saving..." : skill ? "Save Skill Area" : "Create Skill Area"}
             </button>
-            <button type="button" onClick={onClose} className="btn-secondary rounded-xl px-5 py-3">Cancel</button>
+            <button type="button" onClick={onClose} className="btn-secondary rounded-xl px-5 py-3">
+              Cancel
+            </button>
           </div>
         </form>
       </motion.div>
@@ -310,136 +495,306 @@ function SkillModal({
   );
 }
 
-/* ─── Goal modal (add / link) ────────────────────────────────────────────── */
-
 function GoalModal({
-  clientId, categoryId, skillId, skillName, onClose, onSaved,
+  clientId,
+  category,
+  skill,
+  goal,
+  onClose,
 }: {
   clientId: string;
-  categoryId: string;
-  skillId: string;
-  skillName: string;
+  category: LocalCategory;
+  skill: LocalProgram;
+  goal: LocalTarget | null;
   onClose: () => void;
-  onSaved: () => void;
 }) {
-  const addTarget = useABAStore(s => s.addTarget);
+  const addTarget = useABAStore((s) => s.addTarget);
+  const updateTarget = useABAStore((s) => s.updateTarget);
+  const setTargetServerId = useABAStore((s) => s.setTargetServerId);
 
-  const [title,   setTitle]   = useState("");
-  const [opDef,   setOpDef]   = useState("");
-  const [type,    setType]    = useState("DISCRETE_TRIAL");
-  const [phase,   setPhase]   = useState<Phase>("BASELINE");
-  const [saving,  setSaving]  = useState(false);
+  const [title, setTitle] = useState(goal?.title ?? "");
+  const [description, setDescription] = useState(goal?.description ?? goal?.operationalDefinition ?? "");
+  const [dateOpened, setDateOpened] = useState(goal?.masteryCriteria.openedDate ?? todayIso());
+  const [dateMastered, setDateMastered] = useState(goal?.masteryCriteria.masteredDate ?? "");
+  const [baselineLevel, setBaselineLevel] = useState(goal?.baselineLevel ?? "");
+  const [masteryPercentage, setMasteryPercentage] = useState(goal?.masteryCriteria.percentage ?? 80);
+  const [requiredTrials, setRequiredTrials] = useState(goal?.masteryCriteria.minTrialsPerSession ?? 5);
+  const [requiredPrompts, setRequiredPrompts] = useState(goal?.requiredPrompts ?? "");
+  const [status, setStatus] = useState<GoalStatus>(goal?.status ?? (goal?.phase === "MASTERED" ? "mastered" : "active"));
+  const [manualMaster, setManualMaster] = useState((goal?.status ?? (goal?.phase === "MASTERED" ? "mastered" : "active")) === "mastered");
+  const [targetType, setTargetType] = useState<LocalTarget["targetType"]>(goal?.targetType ?? "DISCRETE_TRIAL");
+  const [saving, setSaving] = useState(false);
 
-  async function save(e: React.FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!title.trim() || saving) return;
     setSaving(true);
-    const id  = makeId();
+
     const now = new Date().toISOString();
+    const resolvedStatus: GoalStatus = manualMaster ? "mastered" : status;
+    const resolvedMasteredDate = resolvedStatus === "mastered" ? (dateMastered || todayIso()) : null;
+    const resolvedPhase = resolvedStatus === "mastered" ? "MASTERED" : goal?.phase ?? "ACQUISITION";
+    const masteryCriteria = {
+      ...(goal?.masteryCriteria ?? defaultMastery()),
+      percentage: masteryPercentage,
+      minTrialsPerSession: requiredTrials,
+      openedDate: dateOpened || null,
+      masteredDate: resolvedMasteredDate,
+    };
 
-    addTarget({
-      id, programId: skillId, categoryId, clientId,
+    const localPatch: Partial<LocalTarget> = {
       title: title.trim(),
-      operationalDefinition: opDef.trim(),
-      targetType: type as LocalTarget["targetType"],
-      phase,
-      masteryCriteria: defaultMastery(),
-      promptLevels: defaultPromptLevels(),
-      isActive: true,
-      createdAt: now, updatedAt: now, synced: false,
-    });
+      description: description.trim(),
+      operationalDefinition: description.trim(),
+      baselineLevel: baselineLevel.trim(),
+      requiredPrompts: requiredPrompts.trim(),
+      status: resolvedStatus,
+      targetType: targetType as LocalTarget["targetType"],
+      phase: resolvedPhase,
+      masteryCriteria,
+      updatedAt: now,
+    };
 
-    // Sync to server
-    const parentServerId = useABAStore.getState().programs.find(p => p.id === skillId)?.serverId ?? null;
-    fetch("/smart-steps/api/targets", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    if (goal) {
+      updateTarget(goal.id, localPatch);
+
+      if (goal.serverId) {
+        await fetch(`/smart-steps/api/targets/${goal.serverId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            definition: title.trim(),
+            targetType,
+            phase: resolvedPhase,
+            masteryRule: {
+              percentage: masteryPercentage,
+              minTrialsPerSession: requiredTrials,
+              openedDate: dateOpened || null,
+              masteredDate: resolvedMasteredDate,
+              requiredPrompts: requiredPrompts.trim() || null,
+              status: resolvedStatus,
+            },
+            promptHierarchy: defaultPromptLevels().map((item) => item.name),
+            baseline: baselineLevel.trim() || null,
+            notes: description.trim() || null,
+            isActive: true,
+          }),
+        }).catch(() => {});
+      }
+
+      toast.success("Goal updated");
+    } else {
+      const localId = makeId();
+      addTarget({
+        id: localId,
+        programId: skill.id,
+        categoryId: category.id,
         clientId,
-        parentGoalId: parentServerId,
         title: title.trim(),
-        operationalDefinition: opDef.trim(),
-        targetType: type,
-        phase,
-      }),
-    })
-      .then(r => r.json())
-      .then(d => { if (d?.id) useABAStore.getState().setTargetServerId(id, d.id); })
-      .catch(() => {});
+        description: description.trim(),
+        operationalDefinition: description.trim(),
+        baselineLevel: baselineLevel.trim(),
+        requiredPrompts: requiredPrompts.trim(),
+        status: resolvedStatus,
+        targetType: targetType as LocalTarget["targetType"],
+        phase: resolvedPhase,
+        masteryCriteria,
+        promptLevels: defaultPromptLevels(),
+        isActive: true,
+        createdAt: now,
+        updatedAt: now,
+        synced: false,
+      });
 
-    toast.success("Goal created");
+      const parentGoalId = skill.serverId ?? null;
+      fetch("/smart-steps/api/targets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          definition: title.trim(),
+          operationalDefinition: description.trim(),
+          targetType,
+          phase: resolvedPhase,
+          masteryRule: {
+            percentage: masteryPercentage,
+            minTrialsPerSession: requiredTrials,
+            openedDate: dateOpened || null,
+            masteredDate: resolvedMasteredDate,
+            requiredPrompts: requiredPrompts.trim() || null,
+            status: resolvedStatus,
+          },
+          promptHierarchy: defaultPromptLevels().map((item) => item.name),
+          baseline: baselineLevel.trim() || null,
+          notes: description.trim() || null,
+          parentGoalId,
+        }),
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data?.id) setTargetServerId(localId, data.id);
+        })
+        .catch(() => {});
+
+      toast.success("Goal created");
+    }
+
     setSaving(false);
-    onSaved();
     onClose();
   }
 
   return (
     <motion.div
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/75 backdrop-blur-sm"
-      onClick={e => e.target === e.currentTarget && onClose()}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/75 backdrop-blur-sm p-0 sm:p-4"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <motion.div
-        initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
+        initial={{ y: "100%" }}
+        animate={{ y: 0 }}
+        exit={{ y: "100%" }}
         transition={{ type: "spring", damping: 28, stiffness: 260 }}
-        className="glass-card w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl border border-[var(--glass-border)] flex flex-col max-h-[92vh]"
+        className="glass-card w-full sm:max-w-2xl rounded-t-2xl sm:rounded-2xl border border-[var(--glass-border)]"
       >
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--glass-border)] shrink-0">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--glass-border)]">
           <div>
-            <h2 className="font-bold text-[var(--foreground)] flex items-center gap-2">
-              <TargetIcon className="h-4 w-4 text-[var(--accent-purple)]" />
-              New Goal / Target
-            </h2>
+            <h2 className="font-bold text-[var(--foreground)]">{goal ? "Edit Goal" : "New Goal"}</h2>
             <p className="text-xs text-zinc-500 mt-0.5">
-              under skill: <span className="text-zinc-300">{skillName}</span>
+              {category.name} / {skill.name}
             </p>
           </div>
-          <button onClick={onClose} className="rounded-xl p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-white/10">
+          <button type="button" onClick={onClose} className="rounded-xl p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-white/10">
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <form onSubmit={save} className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-zinc-300 mb-1.5">
-              Goal / Target Title <span className="text-[var(--accent-pink)]">*</span>
-            </label>
+        <form onSubmit={handleSubmit} className="px-5 py-4 space-y-4 max-h-[85vh] overflow-y-auto">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-zinc-300 mb-1.5">
+                Goal Title <span className="text-[var(--accent-pink)]">*</span>
+              </label>
+              <input
+                autoFocus
+                type="text"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Client will follow 1-step instructions with prompts"
+                className="field-input w-full"
+                required
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-zinc-300 mb-1.5">Description</label>
+              <textarea
+                rows={3}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Optional ABA description / operational definition"
+                className="field-input w-full resize-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-zinc-300 mb-1.5">Date Opened</label>
+              <input type="date" value={dateOpened} onChange={(e) => setDateOpened(e.target.value)} className="field-input w-full" />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-zinc-300 mb-1.5">Date Mastered</label>
+              <input type="date" value={dateMastered} onChange={(e) => setDateMastered(e.target.value)} className="field-input w-full" />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-zinc-300 mb-1.5">Baseline Level</label>
+              <input
+                type="text"
+                value={baselineLevel}
+                onChange={(e) => setBaselineLevel(e.target.value)}
+                placeholder="e.g. 20%, 1/5 trials"
+                className="field-input w-full"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-zinc-300 mb-1.5">Tracking Type</label>
+              <select value={targetType} onChange={(e) => setTargetType(e.target.value as LocalTarget["targetType"])} className="field-input w-full">
+                {TARGET_TYPE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-zinc-300 mb-1.5">Mastery Percentage</label>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={masteryPercentage}
+                onChange={(e) => setMasteryPercentage(Number(e.target.value))}
+                className="field-input w-full"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-zinc-300 mb-1.5">Required Trials</label>
+              <input
+                type="number"
+                min={1}
+                value={requiredTrials}
+                onChange={(e) => setRequiredTrials(Number(e.target.value))}
+                className="field-input w-full"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-zinc-300 mb-1.5">Required Prompts</label>
+              <input
+                type="text"
+                value={requiredPrompts}
+                onChange={(e) => setRequiredPrompts(e.target.value)}
+                placeholder="Optional prompt requirement"
+                className="field-input w-full"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-zinc-300 mb-1.5">Status</label>
+              <select value={status} onChange={(e) => setStatus(e.target.value as GoalStatus)} className="field-input w-full">
+                {STATUS_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <label className="flex items-center justify-between rounded-xl border border-[var(--glass-border)] px-4 py-3 cursor-pointer">
+            <div>
+              <p className="text-sm font-medium text-zinc-200">Manual Master Toggle</p>
+              <p className="text-xs text-zinc-500">Mark this goal as mastered manually.</p>
+            </div>
             <input
-              autoFocus type="text" value={title} required
-              onChange={e => setTitle(e.target.value)}
-              placeholder="e.g. Responds to name when called (3/3 trials)"
-              className="field-input w-full"
+              type="checkbox"
+              checked={manualMaster}
+              onChange={(e) => setManualMaster(e.target.checked)}
+              className="accent-emerald-400 h-4 w-4"
             />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-zinc-300 mb-1.5">Operational Definition</label>
-            <textarea rows={2} value={opDef} onChange={e => setOpDef(e.target.value)}
-              placeholder="How this goal is measured…" className="field-input w-full resize-none" />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-1.5">Type</label>
-              <select value={type} onChange={e => setType(e.target.value)} className="field-input w-full">
-                {TARGET_TYPE_OPTIONS.map(t => (
-                  <option key={t.value} value={t.value}>{t.label}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-1.5">Initial Phase</label>
-              <select value={phase} onChange={e => setPhase(e.target.value as Phase)} className="field-input w-full">
-                {PHASES.map(p => (
-                  <option key={p} value={p}>{p.charAt(0) + p.slice(1).toLowerCase()}</option>
-                ))}
-              </select>
-            </div>
-          </div>
+          </label>
+
           <div className="flex gap-3 pt-1">
-            <button type="submit" disabled={saving}
-              className="btn-primary flex-1 rounded-xl py-3 font-bold disabled:opacity-60">
-              {saving ? "Saving…" : "Create Goal"}
+            <button type="submit" disabled={saving} className="btn-primary flex-1 rounded-xl py-3 font-bold disabled:opacity-60">
+              {saving ? "Saving..." : goal ? "Save Goal" : "Create Goal"}
             </button>
-            <button type="button" onClick={onClose} className="btn-secondary rounded-xl px-5 py-3">Cancel</button>
+            <button type="button" onClick={onClose} className="btn-secondary rounded-xl px-5 py-3">
+              Cancel
+            </button>
           </div>
         </form>
       </motion.div>
@@ -447,586 +802,620 @@ function GoalModal({
   );
 }
 
-/* ─── Goal card (inside skill view) ─────────────────────────────────────── */
-
-function GoalCard({
-  goal,
-  onOpen,
-  onDelete,
-  onPhaseChange,
-}: {
-  goal: LocalTarget;
-  onOpen: () => void;
-  onDelete: () => void;
-  onPhaseChange: (p: Phase) => void;
-}) {
-  const [phaseOpen, setPhaseOpen] = useState(false);
-  const phase = (goal.phase ?? "BASELINE") as Phase;
-
-  return (
-    <div className="flex items-center gap-3 px-4 py-3 hover:bg-white/[0.03] rounded-xl transition-colors group">
-      <div
-        className="h-8 w-8 shrink-0 rounded-xl bg-[var(--accent-cyan)]/10 flex items-center justify-center cursor-pointer"
-        onClick={onOpen}
-      >
-        <TargetIcon className="h-4 w-4 text-[var(--accent-cyan)]" />
-      </div>
-
-      <div className="flex-1 min-w-0 cursor-pointer" onClick={onOpen}>
-        <p className="text-sm font-medium text-[var(--foreground)] leading-snug truncate">
-          {goal.title ?? "Untitled goal"}
-        </p>
-        {goal.operationalDefinition && (
-          <p className="text-xs text-zinc-500 truncate">{goal.operationalDefinition}</p>
-        )}
-      </div>
-
-      {/* Phase badge */}
-      <div className="relative shrink-0">
-        <button
-          type="button"
-          onClick={e => { e.stopPropagation(); setPhaseOpen(v => !v); }}
-          className={`rounded-full px-2 py-0.5 text-xs font-medium ${PHASE_STYLE[phase]}`}
-        >
-          {phase.charAt(0) + phase.slice(1).toLowerCase()}
-        </button>
-        <AnimatePresence>
-          {phaseOpen && (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 4 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="absolute right-0 top-8 z-30 glass-card rounded-xl border border-[var(--glass-border)] p-1 min-w-[150px] shadow-xl"
-            >
-              {PHASES.map(p => (
-                <button
-                  key={p} type="button"
-                  onClick={e => { e.stopPropagation(); onPhaseChange(p); setPhaseOpen(false); }}
-                  className={`flex items-center gap-2 w-full rounded-lg px-3 py-2 text-xs text-left hover:bg-white/10 transition-colors ${p === phase ? "text-[var(--accent-cyan)]" : "text-zinc-300"}`}
-                >
-                  <div className={`h-2 w-2 rounded-full ${
-                    p === "BASELINE" ? "bg-zinc-400" :
-                    p === "ACQUISITION" ? "bg-cyan-400" :
-                    p === "MAINTENANCE" ? "bg-amber-400" :
-                    p === "GENERALIZATION" ? "bg-purple-400" : "bg-emerald-400"
-                  }`} />
-                  {p.charAt(0) + p.slice(1).toLowerCase()}
-                </button>
-              ))}
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-
-      {/* Actions */}
-      <button
-        type="button"
-        onClick={e => { e.stopPropagation(); onDelete(); }}
-        className="shrink-0 rounded-lg p-1.5 text-zinc-600 hover:text-[var(--accent-pink)] hover:bg-[var(--accent-pink)]/10 opacity-0 group-hover:opacity-100 transition-all"
-      >
-        <Trash2 className="h-3.5 w-3.5" />
-      </button>
-    </div>
-  );
-}
-
-/* ─── Category accordion card (Level 1) ─────────────────────────────────── */
-
-function CategorySection({
-  category,
-  skills,
-  allTargets,
-  expanded,
-  onToggle,
-  onEditCat,
-  onDeleteCat,
-  onAddSkill,
-  onEditSkill,
-  onDeleteSkill,
-  onOpenSkillGoals,
-}: {
-  category: LocalCategory;
-  skills: LocalProgram[];
-  allTargets: LocalTarget[];
-  expanded: boolean;
-  onToggle: () => void;
-  onEditCat: () => void;
-  onDeleteCat: () => void;
-  onAddSkill: () => void;
-  onEditSkill: (s: LocalProgram) => void;
-  onDeleteSkill: (s: LocalProgram) => void;
-  onOpenSkillGoals: (s: LocalProgram) => void;
-}) {
-  const totalGoals    = allTargets.filter(t => skills.some(s => s.id === t.programId) && (t.isActive ?? true)).length;
-  const masteredGoals = allTargets.filter(t => skills.some(s => s.id === t.programId) && t.phase === "MASTERED").length;
-
-  return (
-    <div className="glass-card rounded-2xl border border-[var(--glass-border)] overflow-hidden">
-      {/* Category header */}
-      <div
-        className="flex items-center gap-3 px-4 py-3.5 cursor-pointer hover:bg-white/[0.02] transition-colors group"
-        onClick={onToggle}
-      >
-        {/* Color dot */}
-        <div
-          className="h-9 w-9 shrink-0 rounded-xl flex items-center justify-center text-white font-bold text-sm"
-          style={{ background: category.color ?? "#06b6d4" }}
-        >
-          {(category.name ?? "?").charAt(0).toUpperCase()}
-        </div>
-
-        <div className="flex-1 min-w-0">
-          <p className="font-semibold text-[var(--foreground)] text-sm">{category.name}</p>
-          <p className="text-xs text-zinc-500">
-            {skills.length} skill{skills.length !== 1 ? "s" : ""}
-            {totalGoals > 0 && ` · ${totalGoals} goal${totalGoals !== 1 ? "s" : ""}`}
-            {masteredGoals > 0 && ` · ${masteredGoals} mastered`}
-          </p>
-        </div>
-
-        {/* Edit / delete (only show on hover) */}
-        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
-          <button type="button" onClick={onEditCat}
-            className="rounded-lg p-1.5 text-zinc-600 hover:text-[var(--accent-cyan)] hover:bg-[var(--accent-cyan)]/10 transition-all">
-            <Pencil className="h-3.5 w-3.5" />
-          </button>
-          <button type="button" onClick={onDeleteCat}
-            className="rounded-lg p-1.5 text-zinc-600 hover:text-[var(--accent-pink)] hover:bg-[var(--accent-pink)]/10 transition-all">
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
-        </div>
-
-        <motion.div animate={{ rotate: expanded ? 180 : 0 }} transition={{ duration: 0.2 }}>
-          <ChevronDown className="h-4 w-4 text-zinc-500 shrink-0" />
-        </motion.div>
-      </div>
-
-      {/* Expanded: skills list */}
-      <AnimatePresence initial={false}>
-        {expanded && (
-          <motion.div
-            key="skills"
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="overflow-hidden"
-          >
-            <div className="border-t border-[var(--glass-border)]">
-              {skills.length === 0 ? (
-                <div className="px-4 py-5 text-center">
-                  <p className="text-xs text-zinc-500 mb-3">No skills yet in this category</p>
-                  <button type="button" onClick={e => { e.stopPropagation(); onAddSkill(); }}
-                    className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--accent-purple)]/40 bg-[var(--accent-purple)]/10 px-3 py-2 text-xs font-semibold text-[var(--accent-purple)]">
-                    <Plus className="h-3.5 w-3.5" /> Add First Skill
-                  </button>
-                </div>
-              ) : (
-                <>
-                  {skills.map(skill => {
-                    const goalCount    = allTargets.filter(t => t.programId === skill.id && (t.isActive ?? true)).length;
-                    const masteredCnt  = allTargets.filter(t => t.programId === skill.id && t.phase === "MASTERED").length;
-                    const pct          = goalCount > 0 ? Math.round((masteredCnt / goalCount) * 100) : 0;
-
-                    return (
-                      <div key={skill.id}
-                        className="flex items-center gap-3 px-4 py-3 border-b border-[var(--glass-border)] last:border-b-0 hover:bg-white/[0.02] transition-colors cursor-pointer group/skill"
-                        onClick={() => onOpenSkillGoals(skill)}
-                      >
-                        {/* Indent line */}
-                        <div className="flex items-center gap-2 shrink-0 ml-2">
-                          <div className="h-4 w-px bg-[var(--glass-border)]" />
-                          <Layers className="h-4 w-4 text-[var(--accent-purple)]" />
-                        </div>
-
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-zinc-200">{skill.name}</p>
-                          <div className="flex items-center gap-2 mt-0.5">
-                            <span className="text-xs text-zinc-500">
-                              {goalCount} goal{goalCount !== 1 ? "s" : ""}
-                            </span>
-                            {masteredCnt > 0 && (
-                              <span className="text-xs text-emerald-400">{masteredCnt} mastered</span>
-                            )}
-                          </div>
-                          {goalCount > 0 && (
-                            <div className="mt-1 h-1 w-24 rounded-full bg-[var(--glass-border)]">
-                              <div
-                                className="h-full rounded-full bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-purple)]"
-                                style={{ width: `${pct}%` }}
-                              />
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Skill edit/delete */}
-                        <div className="flex items-center gap-0.5 opacity-0 group-hover/skill:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
-                          <button type="button" onClick={() => onEditSkill(skill)}
-                            className="rounded-lg p-1.5 text-zinc-600 hover:text-[var(--accent-cyan)] hover:bg-[var(--accent-cyan)]/10 transition-all">
-                            <Pencil className="h-3.5 w-3.5" />
-                          </button>
-                          <button type="button" onClick={() => onDeleteSkill(skill)}
-                            className="rounded-lg p-1.5 text-zinc-600 hover:text-[var(--accent-pink)] hover:bg-[var(--accent-pink)]/10 transition-all">
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-
-                        <ChevronRight className="h-4 w-4 text-zinc-600 shrink-0" />
-                      </div>
-                    );
-                  })}
-
-                  {/* Add skill row */}
-                  <button type="button" onClick={e => { e.stopPropagation(); onAddSkill(); }}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-3 text-xs text-zinc-500 hover:text-[var(--accent-purple)] hover:bg-white/[0.02] transition-colors">
-                    <Plus className="h-3.5 w-3.5" /> Add Skill
-                  </button>
-                </>
-              )}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
-/* ─── Goals view (Level 2) ───────────────────────────────────────────────── */
-
-function GoalsView({
-  skill,
-  category,
+function GoalDetailView({
   clientId,
-  allTargets,
+  category,
+  skill,
+  goal,
   onBack,
+  onEdit,
   onOpenTarget,
-  onRefresh,
 }: {
-  skill: LocalProgram;
-  category: LocalCategory | null;
   clientId: string;
-  allTargets: LocalTarget[];
+  category: LocalCategory;
+  skill: LocalProgram | null;
+  goal: LocalTarget;
   onBack: () => void;
-  onOpenTarget: (t: TargetPanelData) => void;
-  onRefresh: () => void;
+  onEdit: () => void;
+  onOpenTarget: (target: TargetPanelData) => void;
 }) {
-  const removeTarget   = useABAStore(s => s.removeTarget);
-  const setTargetPhase = useABAStore(s => s.setTargetPhase);
-  const [showAddGoal, setShowAddGoal] = useState(false);
+  const targetApiId = goal.serverId ?? (goal.id.startsWith("local-") ? null : goal.id);
+  const { data } = useQuery<{ trials: Array<{ result: string }> }>({
+    queryKey: ["goal-progress", targetApiId],
+    queryFn: async () => {
+      if (!targetApiId) return { trials: [] };
+      const res = await fetch(`/smart-steps/api/targets/${targetApiId}`);
+      if (!res.ok) return { trials: [] };
+      return res.json();
+    },
+    enabled: !!targetApiId,
+    staleTime: 15000,
+  });
 
-  const goals = allTargets.filter(t => t.programId === skill.id && (t.isActive ?? true));
-
-  function deleteGoal(goal: LocalTarget) {
-    if (!confirm(`Remove "${goal.title ?? "this goal"}"?`)) return;
-    removeTarget(goal.id);
-    toast.success("Goal removed");
-    onRefresh();
-  }
+  const progress = countGoalProgress(data?.trials ?? []);
+  const status = goal.status ?? (goal.phase === "MASTERED" ? "mastered" : "active");
 
   return (
-    <motion.div
-      initial={{ opacity: 0, x: 12 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: 12 }}
-      className="space-y-4"
-    >
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <button type="button" onClick={onBack}
-          className="tap-target rounded-xl p-2 text-zinc-400 hover:bg-[var(--glass-bg)] hover:text-[var(--foreground)] transition-colors">
-          <ArrowLeft className="h-4 w-4" />
-        </button>
-        <div className="flex-1 min-w-0">
-          {category && (
-            <p className="text-xs text-zinc-500 truncate">{category.name}</p>
-          )}
-          <h3 className="font-bold text-[var(--foreground)] text-base flex items-center gap-2">
-            <Layers className="h-4 w-4 text-[var(--accent-purple)] shrink-0" />
-            {skill.name}
-          </h3>
-        </div>
-        <button type="button" onClick={() => setShowAddGoal(true)}
-          className="flex items-center gap-1.5 rounded-xl border border-[var(--accent-pink)]/40 bg-[var(--accent-pink)]/10 px-3 py-2 text-xs font-semibold text-[var(--accent-pink)] hover:bg-[var(--accent-pink)]/20 transition-colors">
-          <Plus className="h-3.5 w-3.5" /> Add Goal
-        </button>
-      </div>
-
-      {/* Stats bar */}
-      {goals.length > 0 && (
-        <div className="grid grid-cols-3 gap-3">
-          {[
-            { label: "Total",    value: goals.length,                                            color: "var(--foreground)" },
-            { label: "Active",   value: goals.filter(t => t.phase !== "MASTERED").length,        color: "var(--accent-cyan)" },
-            { label: "Mastered", value: goals.filter(t => t.phase === "MASTERED").length,        color: "#34d399" },
-          ].map(s => (
-            <div key={s.label} className="glass-card rounded-xl p-3 text-center">
-              <p className="text-xl font-bold" style={{ color: s.color }}>{s.value}</p>
-              <p className="text-xs text-zinc-600">{s.label}</p>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Goal list */}
-      {goals.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-[var(--glass-border)] py-14 text-center">
-          <TargetIcon className="h-10 w-10 text-zinc-700 mx-auto mb-3" />
-          <p className="text-zinc-400 font-medium mb-1">No goals yet</p>
-          <p className="text-zinc-600 text-sm mb-5 max-w-xs mx-auto">
-            Add goals and targets that will be tracked during ABA sessions.
-          </p>
-          <button type="button" onClick={() => setShowAddGoal(true)}
-            className="inline-flex items-center gap-2 rounded-xl border border-[var(--accent-pink)]/40 bg-[var(--accent-pink)]/10 px-5 py-2.5 text-sm font-semibold text-[var(--accent-pink)]">
-            <Plus className="h-4 w-4" /> Add First Goal
+    <motion.div initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 12 }} className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <button type="button" onClick={onBack} className="tap-target rounded-xl p-2 text-zinc-400 hover:bg-[var(--glass-bg)] hover:text-[var(--foreground)] transition-colors">
+            <ArrowLeft className="h-4 w-4" />
           </button>
+          <div className="min-w-0">
+            <p className="text-xs text-zinc-500 truncate">
+              {category.name} / {skill?.name ?? "Unassigned Goals"}
+            </p>
+            <h3 className="font-bold text-[var(--foreground)] text-base truncate">{goal.title}</h3>
+          </div>
         </div>
-      ) : (
-        <div className="glass-card rounded-2xl border border-[var(--glass-border)] divide-y divide-[var(--glass-border)]">
-          {goals.map(goal => (
-            <GoalCard
-              key={goal.id}
-              goal={goal}
-              onOpen={() => onOpenTarget({
+        <div className="flex items-center gap-2 shrink-0">
+          <button type="button" onClick={onEdit} className="flex items-center gap-1.5 rounded-xl border border-[var(--glass-border)] px-3 py-2 text-xs font-semibold text-zinc-300 hover:border-[var(--accent-cyan)]/40 hover:text-[var(--accent-cyan)] transition-colors">
+            <Pencil className="h-3.5 w-3.5" /> Edit
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              onOpenTarget({
                 id: goal.id,
+                serverId: goal.serverId,
                 title: goal.title,
                 operationalDefinition: goal.operationalDefinition,
                 targetType: goal.targetType,
                 phase: goal.phase,
                 masteryCriteria: goal.masteryCriteria,
-                promptLevels: goal.promptLevels,
-                categoryId: goal.categoryId,
-                programId: goal.programId,
-                clientId: goal.clientId,
-                serverId: goal.serverId,
-              } as TargetPanelData)}
-              onDelete={() => deleteGoal(goal)}
-              onPhaseChange={p => { setTargetPhase(goal.id, p); onRefresh(); }}
-            />
-          ))}
-          <button type="button" onClick={() => setShowAddGoal(true)}
-            className="w-full flex items-center justify-center gap-2 px-4 py-3 text-xs text-zinc-500 hover:text-[var(--accent-pink)] hover:bg-white/[0.02] transition-colors">
-            <Plus className="h-3.5 w-3.5" /> Add Another Goal
+                promptLevels: goal.promptLevels as PromptLevel[],
+              })
+            }
+            className="flex items-center gap-1.5 rounded-xl border border-[var(--accent-cyan)]/40 bg-[var(--accent-cyan)]/10 px-3 py-2 text-xs font-semibold text-[var(--accent-cyan)] hover:bg-[var(--accent-cyan)]/20 transition-colors"
+          >
+            <BarChart2 className="h-3.5 w-3.5" /> View Data
           </button>
         </div>
-      )}
+      </div>
 
-      {/* Add goal modal */}
-      <AnimatePresence>
-        {showAddGoal && category && (
-          <GoalModal
-            clientId={clientId}
-            categoryId={category.id}
-            skillId={skill.id}
-            skillName={skill.name}
-            onClose={() => setShowAddGoal(false)}
-            onSaved={onRefresh}
-          />
-        )}
-        {showAddGoal && !category && (
-          <GoalModal
-            clientId={clientId}
-            categoryId={skill.categoryId}
-            skillId={skill.id}
-            skillName={skill.name}
-            onClose={() => setShowAddGoal(false)}
-            onSaved={onRefresh}
-          />
-        )}
-      </AnimatePresence>
+      <div className="grid gap-3 sm:grid-cols-4">
+        <div className="glass-card rounded-2xl p-4 text-center">
+          <p className={`text-2xl font-bold ${progress.pct !== null && progress.pct >= goal.masteryCriteria.percentage ? "text-emerald-400" : "text-[var(--accent-cyan)]"}`}>
+            {progress.pct !== null ? `${progress.pct}%` : "--"}
+          </p>
+          <p className="text-xs text-zinc-500">Current Progress</p>
+        </div>
+        <div className="glass-card rounded-2xl p-4 text-center">
+          <p className="text-2xl font-bold text-zinc-200">{goal.masteryCriteria.percentage}%</p>
+          <p className="text-xs text-zinc-500">Mastery Goal</p>
+        </div>
+        <div className="glass-card rounded-2xl p-4 text-center">
+          <p className="text-2xl font-bold text-zinc-200">{goal.masteryCriteria.minTrialsPerSession}</p>
+          <p className="text-xs text-zinc-500">Required Trials</p>
+        </div>
+        <div className="glass-card rounded-2xl p-4 text-center">
+          <p className={`text-2xl font-bold ${status === "mastered" ? "text-emerald-400" : status === "paused" ? "text-amber-400" : "text-zinc-200"}`}>
+            {status}
+          </p>
+          <p className="text-xs text-zinc-500">Status</p>
+        </div>
+      </div>
+
+      <div className="glass-card rounded-2xl p-5 space-y-4">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <p className="text-xs text-zinc-500 mb-1">Description</p>
+            <p className="text-sm text-zinc-200">{goal.description || goal.operationalDefinition || "No description yet"}</p>
+          </div>
+          <div>
+            <p className="text-xs text-zinc-500 mb-1">Tracking Type</p>
+            <p className="text-sm text-zinc-200">{goal.targetType}</p>
+          </div>
+          <div>
+            <p className="text-xs text-zinc-500 mb-1">Date Opened</p>
+            <p className="text-sm text-zinc-200">{goal.masteryCriteria.openedDate || "--"}</p>
+          </div>
+          <div>
+            <p className="text-xs text-zinc-500 mb-1">Date Mastered</p>
+            <p className="text-sm text-zinc-200">{goal.masteryCriteria.masteredDate || "--"}</p>
+          </div>
+          <div>
+            <p className="text-xs text-zinc-500 mb-1">Baseline Level</p>
+            <p className="text-sm text-zinc-200">{goal.baselineLevel || "--"}</p>
+          </div>
+          <div>
+            <p className="text-xs text-zinc-500 mb-1">Required Prompts</p>
+            <p className="text-sm text-zinc-200">{goal.requiredPrompts || "--"}</p>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-[var(--glass-border)] p-4 bg-[var(--glass-bg)]/40">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-sm font-semibold text-zinc-300 flex items-center gap-2">
+              <Trophy className="h-4 w-4 text-emerald-400" />
+              Progress Summary
+            </p>
+            <span className="text-xs text-zinc-500">{progress.total} total trials</span>
+          </div>
+          <div className="h-2 w-full rounded-full bg-[var(--glass-border)] overflow-hidden">
+            <div
+              className={`h-full rounded-full ${progress.pct !== null && progress.pct >= goal.masteryCriteria.percentage ? "bg-emerald-400" : "bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-purple)]"}`}
+              style={{ width: `${Math.max(0, Math.min(progress.pct ?? 0, 100))}%` }}
+            />
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-[var(--glass-border)] p-4 bg-[var(--glass-bg)]/30">
+          <p className="text-sm font-semibold text-zinc-300 mb-2 flex items-center gap-2">
+            <Calendar className="h-4 w-4 text-[var(--accent-cyan)]" />
+            Tracking Fields
+          </p>
+          <div className="grid gap-3 sm:grid-cols-3 text-sm">
+            <div>
+              <p className="text-xs text-zinc-500 mb-1">Current Progress</p>
+              <p className="text-zinc-200">{progress.pct !== null ? `${progress.pct}%` : "No data yet"}</p>
+            </div>
+            <div>
+              <p className="text-xs text-zinc-500 mb-1">Mastery Percentage</p>
+              <p className="text-zinc-200">{goal.masteryCriteria.percentage}%</p>
+            </div>
+            <div>
+              <p className="text-xs text-zinc-500 mb-1">Required Trials</p>
+              <p className="text-zinc-200">{goal.masteryCriteria.minTrialsPerSession}</p>
+            </div>
+          </div>
+        </div>
+      </div>
     </motion.div>
   );
 }
-
-/* ─── Main ProgramsTab ───────────────────────────────────────────────────── */
 
 export function ProgramsTab({
   clientId,
   onOpenTarget,
 }: {
   clientId: string;
-  onOpenTarget: (t: TargetPanelData) => void;
+  onOpenTarget: (target: TargetPanelData) => void;
 }) {
   const [hydrated, setHydrated] = useState(false);
+  const [view, setView] = useState<ViewState>({ level: "categories" });
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const [showSkillModal, setShowSkillModal] = useState(false);
+  const [showGoalModal, setShowGoalModal] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<LocalCategory | null>(null);
+  const [editingSkill, setEditingSkill] = useState<LocalProgram | null>(null);
+  const [editingGoal, setEditingGoal] = useState<LocalTarget | null>(null);
+
+  const categories = useABAStore((s) => (s.categories ?? []).filter((item) => item.clientId === clientId));
+  const skills = useABAStore((s) => (s.programs ?? []).filter((item) => item.clientId === clientId));
+  const goals = useABAStore((s) => (s.targets ?? []).filter((item) => item.clientId === clientId && item.isActive !== false));
+
   useEffect(() => setHydrated(true), []);
 
-  // View state: "list" = accordion, "goals" = goals inside a skill
-  const [view,          setView]          = useState<"list" | "goals">("list");
-  const [selectedSkill, setSelectedSkill] = useState<LocalProgram | null>(null);
+  const selectedCategory = view.level !== "categories"
+    ? categories.find((item) => item.id === view.categoryId) ?? null
+    : null;
 
-  // Expanded category ids (accordion state)
-  const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set());
+  const selectedSkill = view.level === "goals" || view.level === "goal"
+    ? skills.find((item) => item.id === view.skillId) ?? null
+    : null;
 
-  // Modal state
-  const [showCatModal,   setShowCatModal]   = useState(false);
-  const [editingCat,     setEditingCat]     = useState<LocalCategory | null>(null);
-  const [showSkillModal, setShowSkillModal] = useState(false);
-  const [editingSkill,   setEditingSkill]   = useState<LocalProgram | null>(null);
-  const [skillCatId,     setSkillCatId]     = useState<string>("");
-  const [tick,           setTick]           = useState(0);
+  const selectedGoal = view.level === "goal"
+    ? goals.find((item) => item.id === view.goalId) ?? null
+    : null;
 
-  // Store
-  const categories   = useABAStore(s => (s.categories ?? []).filter(c => c.clientId === clientId));
-  const allPrograms  = useABAStore(s => s.programs ?? []);
-  const allTargets   = useABAStore(s => s.targets ?? []);
-  const removeCategory = useABAStore(s => s.removeCategory);
-  const removeProgram  = useABAStore(s => s.removeProgram);
+  const categorySkills = useMemo(() => {
+    if (!selectedCategory) return [];
+    return skills.filter((item) => item.categoryId === selectedCategory.id);
+  }, [selectedCategory, skills]);
 
-  function refresh() { setTick(t => t + 1); }
+  const categoryGoals = useMemo(() => {
+    if (!selectedCategory) return [];
+    return goals.filter((item) => item.categoryId === selectedCategory.id);
+  }, [selectedCategory, goals]);
 
-  function toggleCat(id: string) {
-    setExpandedCats(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
+  const unassignedCategoryGoals = useMemo(() => {
+    if (!selectedCategory) return [];
+    return categoryGoals.filter((item) => !item.programId);
+  }, [categoryGoals, selectedCategory]);
+
+  const skillAreaItems = useMemo<SkillAreaItem[]>(() => {
+    if (!selectedCategory) return [];
+    const items: SkillAreaItem[] = categorySkills.map((skill) => {
+      const skillGoals = goals.filter((goal) => goal.programId === skill.id);
+      return {
+        id: skill.id,
+        name: skill.name,
+        description: skill.description,
+        goalCount: skillGoals.length,
+        masteredCount: skillGoals.filter((goal) => (goal.status ?? (goal.phase === "MASTERED" ? "mastered" : "active")) === "mastered").length,
+        isUnassigned: false,
+        skill,
+      };
     });
-  }
 
-  function openSkillGoals(skill: LocalProgram) {
-    setSelectedSkill(skill);
-    setView("goals");
-  }
+    if (unassignedCategoryGoals.length > 0) {
+      items.push({
+        id: `${UNASSIGNED_SKILL_PREFIX}${selectedCategory.id}`,
+        name: "Unassigned Goals",
+        description: "Existing goals not yet linked to a skill area",
+        goalCount: unassignedCategoryGoals.length,
+        masteredCount: unassignedCategoryGoals.filter((goal) => (goal.status ?? (goal.phase === "MASTERED" ? "mastered" : "active")) === "mastered").length,
+        isUnassigned: true,
+        skill: null,
+      });
+    }
 
-  function goBack() {
-    setView("list");
-    setSelectedSkill(null);
-  }
+    return items;
+  }, [categorySkills, goals, selectedCategory, unassignedCategoryGoals]);
 
-  function openAddSkill(catId: string) {
-    setSkillCatId(catId);
-    setEditingSkill(null);
-    setShowSkillModal(true);
-  }
-
-  function handleEditSkill(skill: LocalProgram) {
-    setSkillCatId(skill.categoryId);
-    setEditingSkill(skill);
-    setShowSkillModal(true);
-  }
-
-  function handleDeleteCat(cat: LocalCategory) {
-    if (!confirm(`Remove category "${cat.name ?? "this category"}" and all its skills?`)) return;
-    removeCategory(cat.id);
-    toast.success("Category removed");
-    refresh();
-  }
-
-  function handleDeleteSkill(skill: LocalProgram) {
-    if (!confirm(`Remove skill "${skill.name ?? "this skill"}"?`)) return;
-    removeProgram(skill.id);
-    toast.success("Skill removed");
-    refresh();
-  }
+  const visibleGoals = useMemo(() => {
+    if (view.level !== "goals" && view.level !== "goal") return [];
+    if (isUnassignedSkillId(view.skillId)) {
+      return goals.filter((goal) => goal.categoryId === view.categoryId && !goal.programId);
+    }
+    return goals.filter((goal) => goal.programId === view.skillId);
+  }, [goals, view]);
 
   if (!hydrated) return <Skeleton />;
 
-  // Totals for header
-  const totalGoals    = allTargets.filter(t => t.clientId === clientId && (t.isActive ?? true)).length;
-  const masteredGoals = allTargets.filter(t => t.clientId === clientId && t.phase === "MASTERED").length;
-
   return (
-    <div className="space-y-4" key={tick}>
-      {/* ── Goals view (Level 2) ── */}
+    <div className="space-y-4">
+      <Breadcrumbs
+        category={selectedCategory?.name}
+        skillLabel={
+          view.level === "goals" || view.level === "goal"
+            ? (isUnassignedSkillId(view.skillId) ? "Unassigned Goals" : selectedSkill?.name ?? null)
+            : null
+        }
+        goalTitle={view.level === "goal" ? selectedGoal?.title ?? null : null}
+        onGoCategories={() => setView({ level: "categories" })}
+        onGoSkills={view.level === "goals" || view.level === "goal" ? () => selectedCategory && setView({ level: "skills", categoryId: selectedCategory.id }) : undefined}
+        onGoGoals={view.level === "goal" ? () => selectedCategory && setView({ level: "goals", categoryId: selectedCategory.id, skillId: view.skillId }) : undefined}
+      />
+
       <AnimatePresence mode="wait">
-        {view === "goals" && selectedSkill ? (
-          <GoalsView
-            key="goals-view"
-            skill={selectedSkill}
-            category={categories.find(c => c.id === selectedSkill.categoryId) ?? null}
-            clientId={clientId}
-            allTargets={allTargets}
-            onBack={goBack}
-            onOpenTarget={onOpenTarget}
-            onRefresh={refresh}
-          />
-        ) : (
-          <motion.div
-            key="list-view"
-            initial={{ opacity: 0, x: -12 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -12 }}
-            className="space-y-4"
-          >
-            {/* Header */}
+        {view.level === "categories" && (
+          <motion.div key="categories" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} className="space-y-4">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h3 className="font-bold text-[var(--foreground)] text-base">Goals &amp; Targets</h3>
-                {totalGoals > 0 && (
-                  <p className="text-xs text-zinc-500">
-                    {totalGoals} active · {masteredGoals} mastered
-                  </p>
-                )}
+                <p className="text-xs text-zinc-500">{categories.length} categories</p>
               </div>
-              <button type="button"
-                onClick={() => { setEditingCat(null); setShowCatModal(true); }}
-                className="flex items-center gap-1.5 rounded-xl border border-[var(--accent-cyan)]/40 bg-[var(--accent-cyan)]/10 px-3 py-2 text-xs font-semibold text-[var(--accent-cyan)] hover:bg-[var(--accent-cyan)]/20 transition-colors">
-                <Plus className="h-3.5 w-3.5" /> + Category
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingCategory(null);
+                  setShowCategoryModal(true);
+                }}
+                className="flex items-center gap-1.5 rounded-xl border border-[var(--accent-cyan)]/40 bg-[var(--accent-cyan)]/10 px-3 py-2 text-xs font-semibold text-[var(--accent-cyan)] hover:bg-[var(--accent-cyan)]/20 transition-colors"
+              >
+                <Plus className="h-3.5 w-3.5" /> Add Category
               </button>
             </div>
 
-            {/* Empty state */}
             {categories.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-[var(--glass-border)] py-16 text-center">
                 <Layers className="h-12 w-12 text-zinc-700 mx-auto mb-3" />
                 <p className="text-zinc-400 font-semibold mb-1">No categories yet</p>
                 <p className="text-zinc-600 text-sm mb-5 max-w-xs mx-auto">
-                  Start by creating a <strong className="text-zinc-400">Category</strong> like &ldquo;Language &amp; Communication&rdquo;, then add skills and goals inside.
+                  Create a category first, then click into it to add skill areas and goals.
                 </p>
-                <button type="button" onClick={() => setShowCatModal(true)}
-                  className="inline-flex items-center gap-2 rounded-xl border border-[var(--accent-cyan)]/40 bg-[var(--accent-cyan)]/10 px-5 py-2.5 text-sm font-semibold text-[var(--accent-cyan)]">
-                  <Plus className="h-4 w-4" /> Add First Category
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingCategory(null);
+                    setShowCategoryModal(true);
+                  }}
+                  className="inline-flex items-center gap-2 rounded-xl border border-[var(--accent-cyan)]/40 bg-[var(--accent-cyan)]/10 px-5 py-2.5 text-sm font-semibold text-[var(--accent-cyan)]"
+                >
+                  <Plus className="h-4 w-4" /> Create First Category
                 </button>
               </div>
             ) : (
-              <>
-                {categories.map(cat => {
-                  const skills = allPrograms.filter(p => p.categoryId === cat.id && p.clientId === clientId);
+              <div className="space-y-3">
+                {categories.map((category) => {
+                  const skillCount = skills.filter((item) => item.categoryId === category.id).length;
+                  const goalCount = goals.filter((item) => item.categoryId === category.id).length;
                   return (
-                    <CategorySection
-                      key={cat.id}
-                      category={cat}
-                      skills={skills}
-                      allTargets={allTargets}
-                      expanded={expandedCats.has(cat.id)}
-                      onToggle={() => toggleCat(cat.id)}
-                      onEditCat={() => { setEditingCat(cat); setShowCatModal(true); }}
-                      onDeleteCat={() => handleDeleteCat(cat)}
-                      onAddSkill={() => openAddSkill(cat.id)}
-                      onEditSkill={handleEditSkill}
-                      onDeleteSkill={handleDeleteSkill}
-                      onOpenSkillGoals={openSkillGoals}
-                    />
+                    <button
+                      key={category.id}
+                      type="button"
+                      onClick={() => setView({ level: "skills", categoryId: category.id })}
+                      className="w-full glass-card rounded-2xl border border-[var(--glass-border)] p-4 text-left hover:border-[var(--accent-cyan)]/40 hover:bg-white/[0.02] transition-all cursor-pointer"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div
+                          className="h-10 w-10 rounded-xl flex items-center justify-center text-white font-bold text-sm shrink-0"
+                          style={{ background: category.color ?? "#06b6d4" }}
+                        >
+                          {(category.name ?? "?").charAt(0).toUpperCase()}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-[var(--foreground)] text-sm">{category.name}</p>
+                          <p className="text-xs text-zinc-500">
+                            {skillCount} skill areas · {goalCount} goals
+                          </p>
+                          {category.description && <p className="text-xs text-zinc-600 truncate mt-0.5">{category.description}</p>}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingCategory(category);
+                              setShowCategoryModal(true);
+                            }}
+                            className="rounded-lg p-1.5 text-zinc-500 hover:text-[var(--accent-cyan)] hover:bg-[var(--accent-cyan)]/10 transition-colors"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                          <ChevronRight className="h-4 w-4 text-zinc-600" />
+                        </div>
+                      </div>
+                    </button>
                   );
                 })}
-
-                <button type="button"
-                  onClick={() => { setEditingCat(null); setShowCatModal(true); }}
-                  className="w-full flex items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--glass-border)] px-4 py-3 text-sm text-zinc-500 hover:border-[var(--accent-cyan)]/50 hover:text-[var(--accent-cyan)] transition-colors">
-                  <Plus className="h-4 w-4" /> Add Another Category
-                </button>
-              </>
+              </div>
             )}
           </motion.div>
         )}
-      </AnimatePresence>
 
-      {/* ── Modals ── */}
-      <AnimatePresence>
-        {showCatModal && (
-          <CategoryModal
+        {view.level === "skills" && selectedCategory && (
+          <motion.div key="skills" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }} className="space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <button
+                  type="button"
+                  onClick={() => setView({ level: "categories" })}
+                  className="tap-target rounded-xl p-2 text-zinc-400 hover:bg-[var(--glass-bg)] hover:text-[var(--foreground)] transition-colors"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                </button>
+                <div className="min-w-0">
+                  <h3 className="font-bold text-[var(--foreground)] text-base truncate">{selectedCategory.name}</h3>
+                  <p className="text-xs text-zinc-500">{skillAreaItems.length} skill areas</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingCategory(selectedCategory);
+                    setShowCategoryModal(true);
+                  }}
+                  className="flex items-center gap-1.5 rounded-xl border border-[var(--glass-border)] px-3 py-2 text-xs font-semibold text-zinc-300 hover:border-[var(--accent-cyan)]/40 hover:text-[var(--accent-cyan)] transition-colors"
+                >
+                  <Pencil className="h-3.5 w-3.5" /> Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingSkill(null);
+                    setShowSkillModal(true);
+                  }}
+                  className="flex items-center gap-1.5 rounded-xl border border-[var(--accent-purple)]/40 bg-[var(--accent-purple)]/10 px-3 py-2 text-xs font-semibold text-[var(--accent-purple)] hover:bg-[var(--accent-purple)]/20 transition-colors"
+                >
+                  <Plus className="h-3.5 w-3.5" /> Add Skill Area
+                </button>
+              </div>
+            </div>
+
+            {skillAreaItems.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-[var(--glass-border)] py-16 text-center">
+                <Layers className="h-12 w-12 text-zinc-700 mx-auto mb-3" />
+                <p className="text-zinc-400 font-semibold mb-1">No skill areas yet</p>
+                <p className="text-zinc-600 text-sm mb-5 max-w-xs mx-auto">
+                  Add a skill area inside this category, then click it to manage goals.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingSkill(null);
+                    setShowSkillModal(true);
+                  }}
+                  className="inline-flex items-center gap-2 rounded-xl border border-[var(--accent-purple)]/40 bg-[var(--accent-purple)]/10 px-5 py-2.5 text-sm font-semibold text-[var(--accent-purple)]"
+                >
+                  <Plus className="h-4 w-4" /> Add First Skill Area
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {skillAreaItems.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setView({ level: "goals", categoryId: selectedCategory.id, skillId: item.id })}
+                    className="w-full glass-card rounded-2xl border border-[var(--glass-border)] p-4 text-left hover:border-[var(--accent-purple)]/40 hover:bg-white/[0.02] transition-all cursor-pointer"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="h-10 w-10 rounded-xl bg-[var(--accent-purple)]/10 flex items-center justify-center shrink-0">
+                        <Layers className="h-5 w-5 text-[var(--accent-purple)]" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-[var(--foreground)] text-sm">{item.name}</p>
+                        <p className="text-xs text-zinc-500">
+                          {item.goalCount} goals · {item.masteredCount} mastered
+                        </p>
+                        {item.description && <p className="text-xs text-zinc-600 truncate mt-0.5">{item.description}</p>}
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {!item.isUnassigned && item.skill && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingSkill(item.skill);
+                              setShowSkillModal(true);
+                            }}
+                            className="rounded-lg p-1.5 text-zinc-500 hover:text-[var(--accent-cyan)] hover:bg-[var(--accent-cyan)]/10 transition-colors"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                        <ChevronRight className="h-4 w-4 text-zinc-600" />
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </motion.div>
+        )}
+
+        {view.level === "goals" && selectedCategory && (
+          <motion.div key="goals" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }} className="space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <button
+                  type="button"
+                  onClick={() => setView({ level: "skills", categoryId: selectedCategory.id })}
+                  className="tap-target rounded-xl p-2 text-zinc-400 hover:bg-[var(--glass-bg)] hover:text-[var(--foreground)] transition-colors"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                </button>
+                <div className="min-w-0">
+                  <h3 className="font-bold text-[var(--foreground)] text-base truncate">
+                    {isUnassignedSkillId(view.skillId) ? "Unassigned Goals" : selectedSkill?.name ?? "Goals"}
+                  </h3>
+                  <p className="text-xs text-zinc-500">{visibleGoals.length} goals</p>
+                </div>
+              </div>
+              {!isUnassignedSkillId(view.skillId) && selectedSkill && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingGoal(null);
+                    setShowGoalModal(true);
+                  }}
+                  className="flex items-center gap-1.5 rounded-xl border border-[var(--accent-pink)]/40 bg-[var(--accent-pink)]/10 px-3 py-2 text-xs font-semibold text-[var(--accent-pink)] hover:bg-[var(--accent-pink)]/20 transition-colors"
+                >
+                  <Plus className="h-3.5 w-3.5" /> Add Goal
+                </button>
+              )}
+            </div>
+
+            {visibleGoals.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-[var(--glass-border)] py-16 text-center">
+                <TargetIcon className="h-12 w-12 text-zinc-700 mx-auto mb-3" />
+                <p className="text-zinc-400 font-semibold mb-1">No goals yet</p>
+                <p className="text-zinc-600 text-sm mb-5 max-w-xs mx-auto">
+                  Create goals inside this skill area to begin tracking progress.
+                </p>
+                {!isUnassignedSkillId(view.skillId) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingGoal(null);
+                      setShowGoalModal(true);
+                    }}
+                    className="inline-flex items-center gap-2 rounded-xl border border-[var(--accent-pink)]/40 bg-[var(--accent-pink)]/10 px-5 py-2.5 text-sm font-semibold text-[var(--accent-pink)]"
+                  >
+                    <Plus className="h-4 w-4" /> Add First Goal
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {visibleGoals.map((goal) => {
+                  const status = goal.status ?? (goal.phase === "MASTERED" ? "mastered" : "active");
+                  return (
+                    <button
+                      key={goal.id}
+                      type="button"
+                      onClick={() => setView({ level: "goal", categoryId: selectedCategory.id, skillId: view.skillId, goalId: goal.id })}
+                      className="w-full glass-card rounded-2xl border border-[var(--glass-border)] p-4 text-left hover:border-[var(--accent-cyan)]/40 hover:bg-white/[0.02] transition-all cursor-pointer"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="h-10 w-10 rounded-xl bg-[var(--accent-cyan)]/10 flex items-center justify-center shrink-0">
+                          <TargetIcon className="h-5 w-5 text-[var(--accent-cyan)]" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-[var(--foreground)] text-sm">{goal.title}</p>
+                          <p className="text-xs text-zinc-500">
+                            {status} · mastery {goal.masteryCriteria.percentage}% · trials {goal.masteryCriteria.minTrialsPerSession}
+                          </p>
+                          {(goal.description || goal.operationalDefinition) && (
+                            <p className="text-xs text-zinc-600 truncate mt-0.5">{goal.description || goal.operationalDefinition}</p>
+                          )}
+                        </div>
+                        <ChevronRight className="h-4 w-4 text-zinc-600 shrink-0" />
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </motion.div>
+        )}
+
+        {view.level === "goal" && selectedCategory && selectedGoal && (
+          <GoalDetailView
+            key="goal"
             clientId={clientId}
-            editCat={editingCat}
-            onClose={() => { setShowCatModal(false); setEditingCat(null); }}
-            onSaved={refresh}
+            category={selectedCategory}
+            skill={selectedSkill}
+            goal={selectedGoal}
+            onBack={() => setView({ level: "goals", categoryId: view.categoryId, skillId: view.skillId })}
+            onEdit={() => {
+              setEditingGoal(selectedGoal);
+              setShowGoalModal(true);
+            }}
+            onOpenTarget={onOpenTarget}
           />
         )}
-        {showSkillModal && skillCatId && (
-          <SkillModal
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showCategoryModal && (
+          <CategoryModal
             clientId={clientId}
-            categoryId={skillCatId}
-            categoryName={categories.find(c => c.id === skillCatId)?.name ?? ""}
-            editSkill={editingSkill}
-            onClose={() => { setShowSkillModal(false); setEditingSkill(null); }}
-            onSaved={refresh}
+            category={editingCategory}
+            onClose={() => {
+              setShowCategoryModal(false);
+              setEditingCategory(null);
+            }}
+          />
+        )}
+
+        {showSkillModal && selectedCategory && (
+          <SkillAreaModal
+            clientId={clientId}
+            category={selectedCategory}
+            skill={editingSkill}
+            onClose={() => {
+              setShowSkillModal(false);
+              setEditingSkill(null);
+            }}
+          />
+        )}
+
+        {showGoalModal && selectedCategory && selectedSkill && !isUnassignedSkillId(selectedSkill.id) && (
+          <GoalModal
+            clientId={clientId}
+            category={selectedCategory}
+            skill={selectedSkill}
+            goal={editingGoal}
+            onClose={() => {
+              setShowGoalModal(false);
+              setEditingGoal(null);
+            }}
+          />
+        )}
+
+        {showGoalModal && selectedCategory && view.level === "goals" && !isUnassignedSkillId(view.skillId) && !selectedSkill && (
+          <GoalModal
+            clientId={clientId}
+            category={selectedCategory}
+            skill={{
+              id: view.skillId,
+              name: "",
+              categoryId: selectedCategory.id,
+              clientId,
+              createdAt: new Date().toISOString(),
+              synced: false,
+            }}
+            goal={editingGoal}
+            onClose={() => {
+              setShowGoalModal(false);
+              setEditingGoal(null);
+            }}
           />
         )}
       </AnimatePresence>
