@@ -556,7 +556,7 @@ function ClientHubInner() {
               {/* Nav grid */}
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {[
-                  { href: `/clients/${clientId}/programs`, icon: Target, label: "Goals & Targets", sub: "Skill areas, programs & targets", color: "var(--accent-cyan)" },
+                  { href: `/clients/${clientId}?tab=programs`, icon: Target, label: "Goals & Targets", sub: "Category, skill areas & goals", color: "var(--accent-cyan)" },
                   { href: `/clients/${clientId}/assessments`, icon: ClipboardList, label: "Assessments", sub: "Assign and complete", color: "var(--accent-purple)" },
                   { href: `/clients/${clientId}/behavior-plan`, icon: Brain, label: "Behavior Plan", sub: "BIP and interventions", color: "#34d399" },
                   { href: `/clients/${clientId}?tab=data-entry`, icon: Zap, label: "Data Entry", sub: "Live session recording", color: "#f59e0b" },
