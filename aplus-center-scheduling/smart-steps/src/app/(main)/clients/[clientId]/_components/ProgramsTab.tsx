@@ -114,6 +114,18 @@ function countGoalProgress(trials: Array<{ result: string }>) {
   };
 }
 
+function isCategory(value: unknown): value is LocalCategory {
+  return !!value && typeof value === "object" && "id" in value && "clientId" in value && "name" in value;
+}
+
+function isSkill(value: unknown): value is LocalProgram {
+  return !!value && typeof value === "object" && "id" in value && "clientId" in value && "categoryId" in value && "name" in value;
+}
+
+function isGoal(value: unknown): value is LocalTarget {
+  return !!value && typeof value === "object" && "id" in value && "clientId" in value && "categoryId" in value && "title" in value;
+}
+
 function Skeleton() {
   return (
     <div className="space-y-3">
@@ -982,9 +994,9 @@ export function ProgramsTab({
   const [editingSkill, setEditingSkill] = useState<LocalProgram | null>(null);
   const [editingGoal, setEditingGoal] = useState<LocalTarget | null>(null);
 
-  const categories = useABAStore((s) => (s.categories ?? []).filter((item) => item.clientId === clientId));
-  const skills = useABAStore((s) => (s.programs ?? []).filter((item) => item.clientId === clientId));
-  const goals = useABAStore((s) => (s.targets ?? []).filter((item) => item.clientId === clientId && item.isActive !== false));
+  const categories = useABAStore((s) => (s.categories ?? []).filter(isCategory).filter((item) => item.clientId === clientId));
+  const skills = useABAStore((s) => (s.programs ?? []).filter(isSkill).filter((item) => item.clientId === clientId));
+  const goals = useABAStore((s) => (s.targets ?? []).filter(isGoal).filter((item) => item.clientId === clientId && item.isActive !== false));
 
   useEffect(() => setHydrated(true), []);
 

@@ -14,7 +14,7 @@ import {
   CheckCircle2, Circle, Clock, Star, Plus, Activity, StickyNote,
   BarChart2, LayoutGrid, Zap,
 } from "lucide-react";
-import { useState, Suspense, Component, type ReactNode, type ErrorInfo } from "react";
+import { useState, useEffect, Suspense, Component, type ReactNode, type ErrorInfo } from "react";
 import { toast } from "sonner";
 import { useSession } from "next-auth/react";
 import { TargetDetailPanel, type TargetPanelData } from "./_components/TargetDetailPanel";
@@ -264,6 +264,10 @@ function ClientHubInner() {
     setActiveTab(t);
     router.replace(`/clients/${clientId}?tab=${t}`, { scroll: false });
   }
+
+  useEffect(() => {
+    setActiveTab(tabParam ?? "overview");
+  }, [tabParam]);
 
   function handleOpenTarget(t: TargetPanelData) {
     setSelectedTarget(t);
