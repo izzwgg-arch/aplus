@@ -90,15 +90,19 @@ const IFIELD_STYLE = "font-family:Arial,sans-serif;font-size:14px;color:#1e293b;
 
 function loadIFieldsScript(cb) {
   if (window.ifields) { cb(); return; }
+  function waitForIfields() {
+    if (window.ifields) { cb(); return; }
+    setTimeout(waitForIfields, 50);
+  }
   if (document.getElementById("sola-ifields-script")) {
-    document.getElementById("sola-ifields-script").addEventListener("load", cb);
+    waitForIfields();
     return;
   }
   const s = document.createElement("script");
   s.id = "sola-ifields-script";
   s.src = "https://cdn.cardknox.com/ifields/2.15.2302.0801/ifields.min.js";
   s.async = true;
-  s.onload = cb;
+  s.onload = waitForIfields;
   document.head.appendChild(s);
 }
 
@@ -149,12 +153,9 @@ export default function PaymentsPage() {
   // iFields state for the Charge Card modal
   const [iFieldsKey,   setIFieldsKey]   = useState(null);
   const [iFieldsError, setIFieldsError] = useState(null);
-  const [iScriptReady, setIScriptReady] = useState(false);
-  const [iCardReady,   setICardReady]   = useState(false);
-  const [iCvvReady,    setICvvReady]    = useState(false);
-  const iInitializedRef = useRef(false);
+  const [iReady,       setIReady]       = useState(false);  // true after setAccount called
+  const iInitializedRef  = useRef(false);
   const iTokenResolveRef = useRef(null);
-  const iFormReady = iScriptReady && iCardReady && iCvvReady;
 
   const selectedInvoice = useMemo(() => invoices.find((invoice) => invoice.id === chargeForm.invoiceId) || null, [invoices, chargeForm.invoiceId]);
   const selectedClientInvoices = useMemo(() => invoices.filter((invoice) => !chargeForm.clientId || invoice.clientId === chargeForm.clientId), [invoices, chargeForm.clientId]);
@@ -216,24 +217,25 @@ export default function PaymentsPage() {
   }, [showCharge]);
 
   useEffect(() => {
-    if (!iFieldsKey || !showCharge) return;
-    loadIFieldsScript(() => setIScriptReady(true));
-  }, [iFieldsKey, showCharge]);
-
-  useEffect(() => {
-    if (!iScriptReady || !iFieldsKey || !iCardReady || !iCvvReady) return;
-    if (iInitializedRef.current) return;
-    if (!window.ifields) return;
+    if (!iFieldsKey || iInitializedRef.current) return;
     iInitializedRef.current = true;
-    window.ifields.setAccount(iFieldsKey, "APlus Center", "1.0");
-    window.ifields.setStyle(IFIELD_STYLE);
-    window.ifields.addIfieldCallback("token", (data) => {
-      if (iTokenResolveRef.current) {
-        iTokenResolveRef.current(data);
-        iTokenResolveRef.current = null;
+    loadIFieldsScript(() => {
+      try {
+        window.ifields.setAccount(iFieldsKey, "APlus Center", "1.0");
+        window.ifields.setStyle(IFIELD_STYLE);
+        window.ifields.addIfieldCallback("token", (data) => {
+          if (iTokenResolveRef.current) {
+            iTokenResolveRef.current(data);
+            iTokenResolveRef.current = null;
+          }
+        });
+        setIReady(true);
+      } catch (e) {
+        console.error("[ifields-payments] init error", e);
+        setIFieldsError("Card form failed to initialize — please refresh.");
       }
     });
-  }, [iScriptReady, iFieldsKey, iCardReady, iCvvReady]);
+  }, [iFieldsKey]);
 
   function getChargeToken() {
     return new Promise((resolve, reject) => {
@@ -250,9 +252,7 @@ export default function PaymentsPage() {
     setShowCharge(false);
     setChargeForm(initialChargeForm);
     iInitializedRef.current = false;
-    setICardReady(false);
-    setICvvReady(false);
-    setIScriptReady(false);
+    setIReady(false);
   }
 
   const submitCharge = async (event) => {
@@ -605,20 +605,14 @@ export default function PaymentsPage() {
                 {/* Card Number */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1.5">Card Number <span className="text-red-500">*</span></label>
-                  <div className={`relative border rounded-lg bg-white overflow-hidden ${iFormReady ? "border-slate-300" : "border-slate-200"}`} style={{ height: "44px" }}>
+                  <div className="border border-slate-300 rounded-lg bg-white overflow-hidden" style={{ height: "44px" }}>
                     <iframe
                       data-ifields-id="card-number"
                       data-ifields-placeholder="•••• •••• •••• ••••"
                       src={IFIELD_URL}
                       title="Card number"
-                      onLoad={() => setICardReady(true)}
                       style={{ width: "100%", height: "44px", border: "none", display: "block", padding: "0 12px" }}
                     />
-                    {!iFormReady && (
-                      <div className="absolute inset-0 flex items-center px-3 bg-white pointer-events-none">
-                        <span className="text-sm text-slate-300 animate-pulse">Loading…</span>
-                      </div>
-                    )}
                   </div>
                 </div>
 
@@ -626,20 +620,14 @@ export default function PaymentsPage() {
                   {/* CVV */}
                   <div>
                     <label className="block text-xs font-semibold text-slate-600 mb-1.5">CVV <span className="text-red-500">*</span></label>
-                    <div className={`relative border rounded-lg bg-white overflow-hidden ${iFormReady ? "border-slate-300" : "border-slate-200"}`} style={{ height: "44px" }}>
+                    <div className="border border-slate-300 rounded-lg bg-white overflow-hidden" style={{ height: "44px" }}>
                       <iframe
                         data-ifields-id="cvv"
                         data-ifields-placeholder="•••"
                         src={IFIELD_URL}
                         title="CVV"
-                        onLoad={() => setICvvReady(true)}
                         style={{ width: "100%", height: "44px", border: "none", display: "block", padding: "0 12px" }}
                       />
-                      {!iFormReady && (
-                        <div className="absolute inset-0 flex items-center px-3 bg-white pointer-events-none">
-                          <span className="text-sm text-slate-300 animate-pulse">…</span>
-                        </div>
-                      )}
                     </div>
                   </div>
                   {/* Expiry */}
@@ -683,9 +671,9 @@ export default function PaymentsPage() {
                 <button
                   type="submit"
                   className="btn-primary px-6 py-2.5 text-sm"
-                  disabled={processing || !iFormReady || !chargeForm.amount}
+                  disabled={processing || !iReady || !chargeForm.amount}
                 >
-                  {processing ? "Processing…" : !iFormReady ? "Loading…" : `Charge ${chargeForm.amount ? money(chargeForm.amount) : ""}`}
+                  {processing ? "Processing…" : !iReady ? "Initializing…" : `Charge ${chargeForm.amount ? money(chargeForm.amount) : ""}`}
                 </button>
               </div>
             </form>

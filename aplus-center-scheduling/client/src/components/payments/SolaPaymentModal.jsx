@@ -45,96 +45,92 @@ function TabBtn({ active, onClick, children }) {
   );
 }
 
-/* ─── iFields loader ────────────────────────────────────────────────────────── */
+/* ─── iFields loader — waits for window.ifields to actually be available ──── */
 
 function loadIFieldsScript(callback) {
+  // Already loaded
+  if (window.ifields) { callback(); return; }
+
+  function waitForIfields() {
+    if (window.ifields) { callback(); return; }
+    setTimeout(waitForIfields, 50);
+  }
+
+  // Script tag already injected — just wait for window.ifields
   if (document.getElementById("sola-ifields-script")) {
-    callback();
+    waitForIfields();
     return;
   }
+
   const script  = document.createElement("script");
   script.id     = "sola-ifields-script";
   script.src    = IFIELDS_SCRIPT_URL;
   script.async  = true;
-  script.onload = callback;
+  script.onload = waitForIfields;
   document.head.appendChild(script);
 }
 
-/* ─── IFields card iframe URL ───────────────────────────────────────────────── */
-const IFIELD_URL = "https://cdn.cardknox.com/ifields/2.15.2302.0801/ifield.htm";
-const IFIELD_STYLE = [
-  "font-family:Arial,sans-serif",
-  "font-size:14px",
-  "color:#1e293b",
-  "background:#ffffff",
-  "width:100%",
-  "border:none",
-  "outline:none",
-  "padding:0",
-].join(";");
+/* ─── iFields constants ─────────────────────────────────────────────────────── */
+const IFIELD_URL   = "https://cdn.cardknox.com/ifields/2.15.2302.0801/ifield.htm";
+const IFIELD_STYLE = "font-family:Arial,sans-serif;font-size:14px;color:#1e293b;background:#ffffff;width:100%;border:none;outline:none;padding:2px 0;";
 
 /* ─── CardNotPresentForm ────────────────────────────────────────────────────── */
 
 function CardNotPresentForm({ invoice, clientId, onSuccess, onError, disabled }) {
-  const [iFieldsKey, setIFieldsKey]   = useState(null);
-  const [keyError,   setKeyError]     = useState(null);
-  const [loading,    setLoading]      = useState(false);
-  const [scriptReady,   setScriptReady]  = useState(false);
-  const [cardReady,     setCardReady]    = useState(false);
-  const [cvvReady,      setCvvReady]     = useState(false);
+  const [iFieldsKey, setIFieldsKey] = useState(null);
+  const [keyError,   setKeyError]   = useState(null);
+  const [ready,      setReady]      = useState(false);   // true once setAccount called
+  const [loading,    setLoading]    = useState(false);
   const [billingName, setBillingName] = useState("");
   const [billingZip,  setBillingZip]  = useState("");
   const tokenResolveRef = useRef(null);
-  const initializedRef  = useRef(false);
+  const initRef         = useRef(false);
 
-  // 1. Fetch iFields key from backend
+  // 1. Fetch iFields public key from backend
   useEffect(() => {
     api.get("/payments/sola-ifields-key")
       .then((res) => setIFieldsKey(res.data.iFieldsKey))
       .catch((err) => {
-        const msg = err?.response?.data?.error || "Could not load payment form. Check Sola credentials in Settings.";
+        const msg = err?.response?.data?.error || "Could not load payment form — check Sola credentials in Settings.";
         setKeyError(msg);
         onError(msg);
       });
   }, []);
 
-  // 2. Load iFields script once we have the key
+  // 2. Once key arrives, load script then call setAccount
+  //    ifields.js handles iframe communication internally — no need to wait for iframe onLoad
   useEffect(() => {
-    if (!iFieldsKey) return;
-    loadIFieldsScript(() => setScriptReady(true));
+    if (!iFieldsKey || initRef.current) return;
+    initRef.current = true;
+    loadIFieldsScript(() => {
+      try {
+        window.ifields.setAccount(iFieldsKey, "APlus Center", "1.0");
+        window.ifields.setStyle(IFIELD_STYLE);
+        window.ifields.addIfieldCallback("token", (data) => {
+          if (tokenResolveRef.current) {
+            tokenResolveRef.current(data);
+            tokenResolveRef.current = null;
+          }
+        });
+        setReady(true);
+      } catch (e) {
+        console.error("[ifields] init error", e);
+        onError("Card form failed to initialize — please refresh and try again.");
+      }
+    });
   }, [iFieldsKey]);
-
-  // 3. Initialise iFields ONLY after script + BOTH iframes are loaded
-  useEffect(() => {
-    if (!scriptReady || !iFieldsKey || !cardReady || !cvvReady) return;
-    if (initializedRef.current) return;
-    if (!window.ifields) return;
-    initializedRef.current = true;
-    try {
-      window.ifields.setAccount(iFieldsKey, "APlus Center", "1.0");
-      window.ifields.setStyle(IFIELD_STYLE);
-      window.ifields.addIfieldCallback("token", (data) => {
-        if (tokenResolveRef.current) {
-          tokenResolveRef.current(data);
-          tokenResolveRef.current = null;
-        }
-      });
-    } catch (e) {
-      console.error("[ifields] init error", e);
-    }
-  }, [scriptReady, iFieldsKey, cardReady, cvvReady]);
 
   function getToken() {
     return new Promise((resolve, reject) => {
-      if (!window.ifields) { reject(new Error("Card form not ready")); return; }
+      if (!window.ifields) { reject(new Error("Card form not ready — please wait a moment")); return; }
       tokenResolveRef.current = (data) => {
         if (data?.xToken) resolve(data.xToken);
-        else reject(new Error(data?.errorMessage || "Could not read card — please re-enter"));
+        else reject(new Error(data?.errorMessage || "Could not read card — please re-enter details"));
       };
       window.ifields.getTokens(
         () => {},
         (err) => reject(new Error(err?.message || "Card tokenization failed")),
-        5000
+        6000
       );
     });
   }
@@ -162,13 +158,9 @@ function CardNotPresentForm({ invoice, clientId, onSuccess, onError, disabled })
     }
   }
 
-  const formReady = scriptReady && cardReady && cvvReady;
-
   if (keyError) {
     return (
-      <div className="rounded-lg bg-red-50 border border-red-200 p-4 text-sm text-red-700">
-        {keyError}
-      </div>
+      <div className="rounded-lg bg-red-50 border border-red-200 p-4 text-sm text-red-700">{keyError}</div>
     );
   }
 
@@ -184,61 +176,41 @@ function CardNotPresentForm({ invoice, clientId, onSuccess, onError, disabled })
     );
   }
 
+  /* iframes are always visible — no overlay ever covers them */
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       {/* Card Number */}
       <div>
         <label className="block text-xs font-semibold text-slate-600 mb-1.5">Card Number</label>
-        <div className={`relative border rounded-lg bg-white overflow-hidden transition-colors ${formReady ? "border-slate-300 hover:border-blue-400" : "border-slate-200"}`}
-          style={{ height: "44px" }}>
+        <div className="border border-slate-300 rounded-lg bg-white overflow-hidden" style={{ height: "44px" }}>
           <iframe
             data-ifields-id="card-number"
             data-ifields-placeholder="•••• •••• •••• ••••"
             src={IFIELD_URL}
             title="Card number"
-            onLoad={() => setCardReady(true)}
             style={{ width: "100%", height: "44px", border: "none", display: "block", padding: "0 12px" }}
           />
-          {!formReady && (
-            <div className="absolute inset-0 flex items-center px-3 bg-white pointer-events-none">
-              <span className="text-sm text-slate-300 animate-pulse">Loading…</span>
-            </div>
-          )}
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        {/* CVV */}
         <div>
           <label className="block text-xs font-semibold text-slate-600 mb-1.5">CVV</label>
-          <div className={`relative border rounded-lg bg-white overflow-hidden transition-colors ${formReady ? "border-slate-300 hover:border-blue-400" : "border-slate-200"}`}
-            style={{ height: "44px" }}>
+          <div className="border border-slate-300 rounded-lg bg-white overflow-hidden" style={{ height: "44px" }}>
             <iframe
               data-ifields-id="cvv"
               data-ifields-placeholder="•••"
               src={IFIELD_URL}
               title="CVV"
-              onLoad={() => setCvvReady(true)}
               style={{ width: "100%", height: "44px", border: "none", display: "block", padding: "0 12px" }}
             />
-            {!formReady && (
-              <div className="absolute inset-0 flex items-center px-3 bg-white pointer-events-none">
-                <span className="text-sm text-slate-300 animate-pulse">…</span>
-              </div>
-            )}
           </div>
         </div>
-
-        {/* Expiry — regular input, not tokenized */}
         <div>
           <label className="block text-xs font-semibold text-slate-600 mb-1.5">Expiry (MM/YY)</label>
-          <input
-            type="text"
-            placeholder="MM/YY"
-            maxLength={5}
-            className="w-full border border-slate-300 rounded-lg px-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            style={{ height: "44px" }}
-          />
+          <input type="text" placeholder="MM/YY" maxLength={5}
+            className="w-full border border-slate-300 rounded-lg px-3 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+            style={{ height: "44px" }} />
         </div>
       </div>
 
@@ -261,10 +233,10 @@ function CardNotPresentForm({ invoice, clientId, onSuccess, onError, disabled })
 
       <button
         type="submit"
-        disabled={loading || disabled || !formReady}
+        disabled={loading || disabled || !ready}
         className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-semibold rounded-lg text-sm transition-colors"
       >
-        {loading ? "Processing…" : !formReady ? "Loading card form…" : `Charge ${fmtMoney(invoice.balanceDue)}`}
+        {loading ? "Processing…" : !ready ? "Initializing…" : `Charge ${fmtMoney(invoice.balanceDue)}`}
       </button>
     </form>
   );
