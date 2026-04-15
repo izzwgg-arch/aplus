@@ -60,41 +60,59 @@ function loadIFieldsScript(callback) {
   document.head.appendChild(script);
 }
 
+/* ─── IFields card iframe URL ───────────────────────────────────────────────── */
+const IFIELD_URL = "https://cdn.cardknox.com/ifields/2.15.2302.0801/ifield.htm";
+const IFIELD_STYLE = [
+  "font-family:Arial,sans-serif",
+  "font-size:14px",
+  "color:#1e293b",
+  "background:#ffffff",
+  "width:100%",
+  "border:none",
+  "outline:none",
+  "padding:0",
+].join(";");
+
 /* ─── CardNotPresentForm ────────────────────────────────────────────────────── */
 
 function CardNotPresentForm({ invoice, clientId, onSuccess, onError, disabled }) {
-  const [iFieldsKey, setIFieldsKey]     = useState(null);
-  const [loading, setLoading]           = useState(false);
-  const [scriptReady, setScriptReady]   = useState(false);
-  const [billingName, setBillingName]   = useState("");
-  const [billingZip, setBillingZip]     = useState("");
-  const tokenResolveRef                 = useRef(null);
+  const [iFieldsKey, setIFieldsKey]   = useState(null);
+  const [keyError,   setKeyError]     = useState(null);
+  const [loading,    setLoading]      = useState(false);
+  const [scriptReady,   setScriptReady]  = useState(false);
+  const [cardReady,     setCardReady]    = useState(false);
+  const [cvvReady,      setCvvReady]     = useState(false);
+  const [billingName, setBillingName] = useState("");
+  const [billingZip,  setBillingZip]  = useState("");
+  const tokenResolveRef = useRef(null);
+  const initializedRef  = useRef(false);
 
-  // Fetch the iFields key from our backend (never hardcode in frontend)
+  // 1. Fetch iFields key from backend
   useEffect(() => {
     api.get("/payments/sola-ifields-key")
       .then((res) => setIFieldsKey(res.data.iFieldsKey))
-      .catch((err) => onError(err?.response?.data?.error || "Could not load payment form"));
+      .catch((err) => {
+        const msg = err?.response?.data?.error || "Could not load payment form. Check Sola credentials in Settings.";
+        setKeyError(msg);
+        onError(msg);
+      });
   }, []);
 
-  // Load iFields script once we have the key
+  // 2. Load iFields script once we have the key
   useEffect(() => {
     if (!iFieldsKey) return;
-    loadIFieldsScript(() => {
-      setScriptReady(true);
-    });
+    loadIFieldsScript(() => setScriptReady(true));
   }, [iFieldsKey]);
 
-  // Initialise iFields after script loads
+  // 3. Initialise iFields ONLY after script + BOTH iframes are loaded
   useEffect(() => {
-    if (!scriptReady || !iFieldsKey || !window.ifields) return;
+    if (!scriptReady || !iFieldsKey || !cardReady || !cvvReady) return;
+    if (initializedRef.current) return;
+    if (!window.ifields) return;
+    initializedRef.current = true;
     try {
-      window.ifields.setAccount(iFieldsKey);
-      window.ifields.setStyle("font-family:inherit;font-size:14px;padding:4px 0;width:100%;border:none;outline:none;background:transparent;");
-      window.ifields.setIfieldStyle("card-number", "");
-      window.ifields.setIfieldStyle("cvv", "");
-
-      // Listen for the token callback
+      window.ifields.setAccount(iFieldsKey, "APlus Center", "1.0");
+      window.ifields.setStyle(IFIELD_STYLE);
       window.ifields.addIfieldCallback("token", (data) => {
         if (tokenResolveRef.current) {
           tokenResolveRef.current(data);
@@ -104,22 +122,19 @@ function CardNotPresentForm({ invoice, clientId, onSuccess, onError, disabled })
     } catch (e) {
       console.error("[ifields] init error", e);
     }
-  }, [scriptReady, iFieldsKey]);
+  }, [scriptReady, iFieldsKey, cardReady, cvvReady]);
 
   function getToken() {
     return new Promise((resolve, reject) => {
-      if (!window.ifields) {
-        reject(new Error("iFields not loaded"));
-        return;
-      }
+      if (!window.ifields) { reject(new Error("Card form not ready")); return; }
       tokenResolveRef.current = (data) => {
         if (data?.xToken) resolve(data.xToken);
-        else reject(new Error(data?.errorMessage || "Could not tokenize card"));
+        else reject(new Error(data?.errorMessage || "Could not read card — please re-enter"));
       };
       window.ifields.getTokens(
         () => {},
-        (err) => reject(new Error(err?.message || "Tokenization failed")),
-        3000
+        (err) => reject(new Error(err?.message || "Card tokenization failed")),
+        5000
       );
     });
   }
@@ -141,16 +156,29 @@ function CardNotPresentForm({ invoice, clientId, onSuccess, onError, disabled })
       });
       onSuccess(res.data);
     } catch (err) {
-      const msg = err?.response?.data?.error || err?.message || "Payment failed";
-      onError(msg);
+      onError(err?.response?.data?.error || err?.message || "Payment failed");
     } finally {
       setLoading(false);
     }
   }
 
+  const formReady = scriptReady && cardReady && cvvReady;
+
+  if (keyError) {
+    return (
+      <div className="rounded-lg bg-red-50 border border-red-200 p-4 text-sm text-red-700">
+        {keyError}
+      </div>
+    );
+  }
+
   if (!iFieldsKey) {
     return (
-      <div className="flex items-center justify-center py-8 text-slate-500 text-sm">
+      <div className="flex items-center justify-center gap-2 py-8 text-slate-500 text-sm">
+        <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+        </svg>
         Loading payment form…
       </div>
     );
@@ -158,76 +186,85 @@ function CardNotPresentForm({ invoice, clientId, onSuccess, onError, disabled })
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      {/* iFields card number iframe */}
+      {/* Card Number */}
       <div>
-        <label className="block text-xs font-medium text-slate-600 mb-1">Card Number</label>
-        <div className="border border-slate-300 rounded-md px-3 py-2.5 bg-white focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500">
+        <label className="block text-xs font-semibold text-slate-600 mb-1.5">Card Number</label>
+        <div className={`relative border rounded-lg bg-white overflow-hidden transition-colors ${formReady ? "border-slate-300 hover:border-blue-400" : "border-slate-200"}`}
+          style={{ height: "44px" }}>
           <iframe
             data-ifields-id="card-number"
             data-ifields-placeholder="•••• •••• •••• ••••"
-            src={`https://cdn.cardknox.com/ifields/2.15.2302.0801/ifield.htm`}
-            className="w-full h-6 border-none"
+            src={IFIELD_URL}
             title="Card number"
+            onLoad={() => setCardReady(true)}
+            style={{ width: "100%", height: "44px", border: "none", display: "block", padding: "0 12px" }}
           />
+          {!formReady && (
+            <div className="absolute inset-0 flex items-center px-3 bg-white pointer-events-none">
+              <span className="text-sm text-slate-300 animate-pulse">Loading…</span>
+            </div>
+          )}
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
         {/* CVV */}
         <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">CVV</label>
-          <div className="border border-slate-300 rounded-md px-3 py-2.5 bg-white focus-within:ring-2 focus-within:ring-blue-500">
+          <label className="block text-xs font-semibold text-slate-600 mb-1.5">CVV</label>
+          <div className={`relative border rounded-lg bg-white overflow-hidden transition-colors ${formReady ? "border-slate-300 hover:border-blue-400" : "border-slate-200"}`}
+            style={{ height: "44px" }}>
             <iframe
               data-ifields-id="cvv"
               data-ifields-placeholder="•••"
-              src={`https://cdn.cardknox.com/ifields/2.15.2302.0801/ifield.htm`}
-              className="w-full h-6 border-none"
+              src={IFIELD_URL}
               title="CVV"
+              onLoad={() => setCvvReady(true)}
+              style={{ width: "100%", height: "44px", border: "none", display: "block", padding: "0 12px" }}
             />
+            {!formReady && (
+              <div className="absolute inset-0 flex items-center px-3 bg-white pointer-events-none">
+                <span className="text-sm text-slate-300 animate-pulse">…</span>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Expiry — plain input (Sola sends expiry to gateway, not iFields-tokenized) */}
+        {/* Expiry — regular input, not tokenized */}
         <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">Expiry (MM/YY)</label>
+          <label className="block text-xs font-semibold text-slate-600 mb-1.5">Expiry (MM/YY)</label>
           <input
             type="text"
             placeholder="MM/YY"
             maxLength={5}
-            className="w-full border border-slate-300 rounded-md px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+            className="w-full border border-slate-300 rounded-lg px-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            style={{ height: "44px" }}
           />
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">Name on Card</label>
-          <input
-            type="text"
-            placeholder="Full name"
-            value={billingName}
+          <label className="block text-xs font-semibold text-slate-600 mb-1.5">Name on Card</label>
+          <input type="text" placeholder="Full name" value={billingName}
             onChange={(e) => setBillingName(e.target.value)}
-            className="w-full border border-slate-300 rounded-md px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-          />
+            className="w-full border border-slate-300 rounded-lg px-3 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+            style={{ height: "44px" }} />
         </div>
         <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">Billing ZIP</label>
-          <input
-            type="text"
-            placeholder="ZIP code"
-            value={billingZip}
+          <label className="block text-xs font-semibold text-slate-600 mb-1.5">Billing ZIP</label>
+          <input type="text" placeholder="ZIP code" value={billingZip}
             onChange={(e) => setBillingZip(e.target.value)}
-            className="w-full border border-slate-300 rounded-md px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-          />
+            className="w-full border border-slate-300 rounded-lg px-3 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+            style={{ height: "44px" }} />
         </div>
       </div>
 
       <button
         type="submit"
-        disabled={loading || disabled}
+        disabled={loading || disabled || !formReady}
         className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-semibold rounded-lg text-sm transition-colors"
       >
-        {loading ? "Processing…" : `Charge ${fmtMoney(invoice.balanceDue)}`}
+        {loading ? "Processing…" : !formReady ? "Loading card form…" : `Charge ${fmtMoney(invoice.balanceDue)}`}
       </button>
     </form>
   );

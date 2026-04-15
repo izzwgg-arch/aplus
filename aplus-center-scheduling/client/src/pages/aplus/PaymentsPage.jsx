@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import api from "../../lib/api";
 import { useToast } from "../../context/ToastContext";
@@ -85,6 +85,23 @@ function money(value, currency = "USD") {
   return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(Number(value || 0));
 }
 
+const IFIELD_URL   = "https://cdn.cardknox.com/ifields/2.15.2302.0801/ifield.htm";
+const IFIELD_STYLE = "font-family:Arial,sans-serif;font-size:14px;color:#1e293b;background:#ffffff;width:100%;border:none;outline:none;padding:0;";
+
+function loadIFieldsScript(cb) {
+  if (window.ifields) { cb(); return; }
+  if (document.getElementById("sola-ifields-script")) {
+    document.getElementById("sola-ifields-script").addEventListener("load", cb);
+    return;
+  }
+  const s = document.createElement("script");
+  s.id = "sola-ifields-script";
+  s.src = "https://cdn.cardknox.com/ifields/2.15.2302.0801/ifields.min.js";
+  s.async = true;
+  s.onload = cb;
+  document.head.appendChild(s);
+}
+
 const initialChargeForm = {
   clientId: "",
   invoiceId: "",
@@ -94,7 +111,6 @@ const initialChargeForm = {
   billingName: "",
   billingEmail: "",
   billingZip: "",
-  paymentMethodToken: "",
   savePaymentMethod: false
 };
 
@@ -129,6 +145,16 @@ export default function PaymentsPage() {
   const [showRefund, setShowRefund] = useState(false);
   const [chargeForm, setChargeForm] = useState(initialChargeForm);
   const [refundForm, setRefundForm] = useState({ amount: "", reason: "", notes: "" });
+
+  // iFields state for the Charge Card modal
+  const [iFieldsKey,   setIFieldsKey]   = useState(null);
+  const [iFieldsError, setIFieldsError] = useState(null);
+  const [iScriptReady, setIScriptReady] = useState(false);
+  const [iCardReady,   setICardReady]   = useState(false);
+  const [iCvvReady,    setICvvReady]    = useState(false);
+  const iInitializedRef = useRef(false);
+  const iTokenResolveRef = useRef(null);
+  const iFormReady = iScriptReady && iCardReady && iCvvReady;
 
   const selectedInvoice = useMemo(() => invoices.find((invoice) => invoice.id === chargeForm.invoiceId) || null, [invoices, chargeForm.invoiceId]);
   const selectedClientInvoices = useMemo(() => invoices.filter((invoice) => !chargeForm.clientId || invoice.clientId === chargeForm.clientId), [invoices, chargeForm.clientId]);
@@ -180,22 +206,78 @@ export default function PaymentsPage() {
     }
   };
 
+  // Fetch iFields key when charge modal opens
+  useEffect(() => {
+    if (!showCharge) return;
+    if (iFieldsKey) return;
+    api.get("/payments/sola-ifields-key")
+      .then((res) => setIFieldsKey(res.data.iFieldsKey))
+      .catch((err) => setIFieldsError(err?.response?.data?.error || "Could not load card form. Check Sola credentials in Settings."));
+  }, [showCharge]);
+
+  useEffect(() => {
+    if (!iFieldsKey || !showCharge) return;
+    loadIFieldsScript(() => setIScriptReady(true));
+  }, [iFieldsKey, showCharge]);
+
+  useEffect(() => {
+    if (!iScriptReady || !iFieldsKey || !iCardReady || !iCvvReady) return;
+    if (iInitializedRef.current) return;
+    if (!window.ifields) return;
+    iInitializedRef.current = true;
+    window.ifields.setAccount(iFieldsKey, "APlus Center", "1.0");
+    window.ifields.setStyle(IFIELD_STYLE);
+    window.ifields.addIfieldCallback("token", (data) => {
+      if (iTokenResolveRef.current) {
+        iTokenResolveRef.current(data);
+        iTokenResolveRef.current = null;
+      }
+    });
+  }, [iScriptReady, iFieldsKey, iCardReady, iCvvReady]);
+
+  function getChargeToken() {
+    return new Promise((resolve, reject) => {
+      if (!window.ifields) { reject(new Error("Card form not ready")); return; }
+      iTokenResolveRef.current = (data) => {
+        if (data?.xToken) resolve(data.xToken);
+        else reject(new Error(data?.errorMessage || "Could not read card — please re-enter"));
+      };
+      window.ifields.getTokens(() => {}, (err) => reject(new Error(err?.message || "Tokenization failed")), 5000);
+    });
+  }
+
+  function resetChargeModal() {
+    setShowCharge(false);
+    setChargeForm(initialChargeForm);
+    iInitializedRef.current = false;
+    setICardReady(false);
+    setICvvReady(false);
+    setIScriptReady(false);
+  }
+
   const submitCharge = async (event) => {
     event.preventDefault();
     setProcessing(true);
     try {
+      const xToken = await getChargeToken();
       const payload = {
-        ...chargeForm,
-        amount: Number(chargeForm.amount)
+        xToken,
+        clientId:    chargeForm.clientId   || undefined,
+        invoiceId:   chargeForm.invoiceId  || undefined,
+        amount:      Number(chargeForm.amount),
+        currency:    chargeForm.currency,
+        description: chargeForm.description || undefined,
+        billingName: chargeForm.billingName || undefined,
+        billingEmail: chargeForm.billingEmail || undefined,
+        billingZip:  chargeForm.billingZip  || undefined,
       };
       const { data } = await api.post("/payments/charge", payload);
       toast?.success(`Charge created: ${money(data.amount, data.currency)}`);
-      setShowCharge(false);
-      setChargeForm(initialChargeForm);
+      resetChargeModal();
       await load(1);
       await openDetails(data.id);
     } catch (error) {
-      toast?.error(error?.response?.data?.error || "Charge failed.");
+      toast?.error(error?.response?.data?.error || error?.message || "Charge failed.");
     } finally {
       setProcessing(false);
     }
@@ -457,34 +539,154 @@ export default function PaymentsPage() {
 
       {showCharge && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-2xl rounded-xl bg-white p-4 shadow-xl">
-            <div className="mb-3 flex items-center justify-between">
+          <div className="w-full max-w-2xl rounded-xl bg-white p-5 shadow-xl">
+            <div className="mb-4 flex items-center justify-between">
               <h3 className="text-lg font-semibold text-slate-900">Charge Card</h3>
-              <button className="btn-secondary" onClick={() => setShowCharge(false)}>Close</button>
+              <button className="btn-secondary" onClick={resetChargeModal}>Close</button>
             </div>
-            <form onSubmit={submitCharge} className="grid gap-3 md:grid-cols-2">
-              <ClientPicker
-                clients={clients}
-                value={chargeForm.clientId}
-                onChange={(id) => setChargeForm((prev) => ({ ...prev, clientId: id, invoiceId: "" }))}
-              />
-              <select className="saas-input" value={chargeForm.invoiceId} onChange={(e) => setChargeForm((prev) => ({ ...prev, invoiceId: e.target.value }))}>
-                <option value="">Optional invoice</option>
-                {selectedClientInvoices.map((invoice) => <option key={invoice.id} value={invoice.id}>{invoice.invoiceNumber || invoice.id}</option>)}
-              </select>
-              <input className="saas-input" type="number" min="0.01" step="0.01" placeholder="Amount" value={chargeForm.amount} onChange={(e) => setChargeForm((prev) => ({ ...prev, amount: e.target.value }))} />
-              <input className="saas-input" placeholder="Description" value={chargeForm.description} onChange={(e) => setChargeForm((prev) => ({ ...prev, description: e.target.value }))} />
-              <input className="saas-input" placeholder="Billing name" value={chargeForm.billingName} onChange={(e) => setChargeForm((prev) => ({ ...prev, billingName: e.target.value }))} />
-              <input className="saas-input" type="email" placeholder="Billing email" value={chargeForm.billingEmail} onChange={(e) => setChargeForm((prev) => ({ ...prev, billingEmail: e.target.value }))} />
-              <input className="saas-input" placeholder="Billing ZIP" value={chargeForm.billingZip} onChange={(e) => setChargeForm((prev) => ({ ...prev, billingZip: e.target.value }))} />
-              <input className="saas-input md:col-span-2" placeholder="Payment method token (from secure hosted fields)" value={chargeForm.paymentMethodToken} onChange={(e) => setChargeForm((prev) => ({ ...prev, paymentMethodToken: e.target.value }))} />
-              {selectedInvoice && <p className="text-xs text-slate-500 md:col-span-2">Invoice balance due: {money(selectedInvoice.balanceDue, "USD")}</p>}
-              <label className="flex items-center gap-2 text-sm text-slate-700 md:col-span-2">
-                <input type="checkbox" checked={chargeForm.savePaymentMethod} onChange={(e) => setChargeForm((prev) => ({ ...prev, savePaymentMethod: e.target.checked }))} />
-                Save payment method snapshot
-              </label>
-              <div className="md:col-span-2 flex justify-end">
-                <button className="btn-primary" disabled={processing}>{processing ? "Processing..." : "Submit Charge"}</button>
+
+            {iFieldsError && (
+              <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+                {iFieldsError}
+              </div>
+            )}
+
+            <form onSubmit={submitCharge} className="space-y-4">
+              {/* Client + Invoice row */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Client</label>
+                  <ClientPicker
+                    clients={clients}
+                    value={chargeForm.clientId}
+                    onChange={(id) => setChargeForm((prev) => ({ ...prev, clientId: id, invoiceId: "" }))}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Invoice (optional)</label>
+                  <select className="saas-input h-[42px]" value={chargeForm.invoiceId}
+                    onChange={(e) => setChargeForm((prev) => ({ ...prev, invoiceId: e.target.value }))}>
+                    <option value="">None</option>
+                    {selectedClientInvoices.map((inv) => (
+                      <option key={inv.id} value={inv.id}>
+                        {inv.invoiceNumber || inv.id}{inv.balanceDue ? ` — $${Number(inv.balanceDue).toFixed(2)} due` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Amount + Description */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Amount <span className="text-red-500">*</span></label>
+                  <input className="saas-input" type="number" min="0.01" step="0.01" placeholder="0.00" required
+                    value={chargeForm.amount}
+                    onChange={(e) => setChargeForm((prev) => ({ ...prev, amount: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Description</label>
+                  <input className="saas-input" placeholder="Reason for charge"
+                    value={chargeForm.description}
+                    onChange={(e) => setChargeForm((prev) => ({ ...prev, description: e.target.value }))} />
+                </div>
+              </div>
+
+              {selectedInvoice && (
+                <p className="text-xs text-slate-500">
+                  Invoice balance due: <strong>{money(selectedInvoice.balanceDue, "USD")}</strong>
+                </p>
+              )}
+
+              {/* ── iFields card entry ─────────────────────────────────── */}
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-3">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Card Details</p>
+
+                {/* Card Number */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Card Number <span className="text-red-500">*</span></label>
+                  <div className={`relative border rounded-lg bg-white overflow-hidden ${iFormReady ? "border-slate-300" : "border-slate-200"}`} style={{ height: "44px" }}>
+                    <iframe
+                      data-ifields-id="card-number"
+                      data-ifields-placeholder="•••• •••• •••• ••••"
+                      src={IFIELD_URL}
+                      title="Card number"
+                      onLoad={() => setICardReady(true)}
+                      style={{ width: "100%", height: "44px", border: "none", display: "block", padding: "0 12px" }}
+                    />
+                    {!iFormReady && (
+                      <div className="absolute inset-0 flex items-center px-3 bg-white pointer-events-none">
+                        <span className="text-sm text-slate-300 animate-pulse">Loading…</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-3">
+                  {/* CVV */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">CVV <span className="text-red-500">*</span></label>
+                    <div className={`relative border rounded-lg bg-white overflow-hidden ${iFormReady ? "border-slate-300" : "border-slate-200"}`} style={{ height: "44px" }}>
+                      <iframe
+                        data-ifields-id="cvv"
+                        data-ifields-placeholder="•••"
+                        src={IFIELD_URL}
+                        title="CVV"
+                        onLoad={() => setICvvReady(true)}
+                        style={{ width: "100%", height: "44px", border: "none", display: "block", padding: "0 12px" }}
+                      />
+                      {!iFormReady && (
+                        <div className="absolute inset-0 flex items-center px-3 bg-white pointer-events-none">
+                          <span className="text-sm text-slate-300 animate-pulse">…</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {/* Expiry */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">Expiry</label>
+                    <input type="text" placeholder="MM/YY" maxLength={5}
+                      className="w-full border border-slate-300 rounded-lg px-3 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                      style={{ height: "44px" }} />
+                  </div>
+                  {/* Billing ZIP */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">ZIP</label>
+                    <input type="text" placeholder="ZIP" value={chargeForm.billingZip}
+                      onChange={(e) => setChargeForm((prev) => ({ ...prev, billingZip: e.target.value }))}
+                      className="w-full border border-slate-300 rounded-lg px-3 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                      style={{ height: "44px" }} />
+                  </div>
+                </div>
+
+                {/* Billing Name / Email */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">Name on Card</label>
+                    <input type="text" placeholder="Full name" value={chargeForm.billingName}
+                      onChange={(e) => setChargeForm((prev) => ({ ...prev, billingName: e.target.value }))}
+                      className="w-full border border-slate-300 rounded-lg px-3 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                      style={{ height: "44px" }} />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">Billing Email</label>
+                    <input type="email" placeholder="email@example.com" value={chargeForm.billingEmail}
+                      onChange={(e) => setChargeForm((prev) => ({ ...prev, billingEmail: e.target.value }))}
+                      className="w-full border border-slate-300 rounded-lg px-3 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                      style={{ height: "44px" }} />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-1">
+                <p className="text-xs text-slate-400">Secured by Sola Payments · PCI Compliant</p>
+                <button
+                  type="submit"
+                  className="btn-primary px-6 py-2.5 text-sm"
+                  disabled={processing || !iFormReady || !chargeForm.amount}
+                >
+                  {processing ? "Processing…" : !iFormReady ? "Loading…" : `Charge ${chargeForm.amount ? money(chargeForm.amount) : ""}`}
+                </button>
               </div>
             </form>
           </div>
