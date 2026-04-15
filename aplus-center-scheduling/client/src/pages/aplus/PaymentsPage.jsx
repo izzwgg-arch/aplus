@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import api from "../../lib/api";
+import { CARDKNOX_IFIELD_FRAME_URL, loadCardknoxIFieldsScript } from "../../lib/cardknoxIfields.js";
 import { useToast } from "../../context/ToastContext";
 
 /* ── Searchable client picker ───────────────────────────────────────────────── */
@@ -85,26 +86,14 @@ function money(value, currency = "USD") {
   return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(Number(value || 0));
 }
 
-const IFIELD_URL   = "https://cdn.cardknox.com/ifields/2.15.2302.0801/ifield.htm";
-const IFIELD_STYLE = "font-family:Arial,sans-serif;font-size:14px;color:#1e293b;background:#ffffff;width:100%;border:none;outline:none;padding:0;";
-
-function loadIFieldsScript(cb) {
-  if (window.ifields) { cb(); return; }
-  function waitForIfields() {
-    if (window.ifields) { cb(); return; }
-    setTimeout(waitForIfields, 50);
-  }
-  if (document.getElementById("sola-ifields-script")) {
-    waitForIfields();
-    return;
-  }
-  const s = document.createElement("script");
-  s.id = "sola-ifields-script";
-  s.src = "https://cdn.cardknox.com/ifields/2.15.2302.0801/ifields.min.js";
-  s.async = true;
-  s.onload = waitForIfields;
-  document.head.appendChild(s);
-}
+const IFIELD_STYLE = {
+  border: "none",
+  "font-size": "14px",
+  width: "100%",
+  padding: "10px 12px",
+  "box-sizing": "border-box",
+  color: "#1e293b",
+};
 
 const initialChargeForm = {
   clientId: "",
@@ -112,6 +101,7 @@ const initialChargeForm = {
   amount: "",
   currency: "USD",
   description: "",
+  expiry: "",
   billingName: "",
   billingEmail: "",
   billingZip: "",
@@ -156,6 +146,8 @@ export default function PaymentsPage() {
   const [iReady,       setIReady]       = useState(false);  // true after setAccount called
   const iInitializedRef  = useRef(false);
   const iTokenResolveRef = useRef(null);
+  const cardTokenRef     = useRef(null);
+  const cvvTokenRef      = useRef(null);
 
   const selectedInvoice = useMemo(() => invoices.find((invoice) => invoice.id === chargeForm.invoiceId) || null, [invoices, chargeForm.invoiceId]);
   const selectedClientInvoices = useMemo(() => invoices.filter((invoice) => !chargeForm.clientId || invoice.clientId === chargeForm.clientId), [invoices, chargeForm.clientId]);
@@ -218,33 +210,70 @@ export default function PaymentsPage() {
 
   useEffect(() => {
     if (!iFieldsKey || iInitializedRef.current) return;
-    iInitializedRef.current = true;
-    loadIFieldsScript(() => {
-      try {
-        window.ifields.setAccount(iFieldsKey, "APlus Center", "1.0");
-        window.ifields.setStyle(IFIELD_STYLE);
-        window.ifields.addIfieldCallback("token", (data) => {
-          if (iTokenResolveRef.current) {
-            iTokenResolveRef.current(data);
-            iTokenResolveRef.current = null;
-          }
+    let cancelled = false;
+    let completed = false;
+
+    loadCardknoxIFieldsScript({ timeoutMs: 25000 })
+      .then(() => {
+        if (cancelled) return;
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            if (cancelled) return;
+            try {
+              window.setAccount(iFieldsKey, "APlus Center", "1.0");
+              if (window.setIfieldStyle) {
+                window.setIfieldStyle("card-number", IFIELD_STYLE);
+                window.setIfieldStyle("cvv", IFIELD_STYLE);
+              }
+              if (window.enableAutoFormatting) {
+                window.enableAutoFormatting(" ");
+              }
+              iInitializedRef.current = true;
+              completed = true;
+              setIReady(true);
+              setTimeout(() => window.focusIfield?.("card-number"), 150);
+            } catch (e) {
+              console.error("[ifields-payments] init error", e);
+              setIFieldsError("Card form failed to initialize — please refresh.");
+            }
+          });
         });
-        setIReady(true);
-      } catch (e) {
-        console.error("[ifields-payments] init error", e);
-        setIFieldsError("Card form failed to initialize — please refresh.");
-      }
-    });
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          console.error("[ifields-payments] load error", e);
+          setIFieldsError(e?.message || "Could not load secure card entry.");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      if (!completed) iInitializedRef.current = false;
+    };
   }, [iFieldsKey]);
 
   function getChargeToken() {
     return new Promise((resolve, reject) => {
-      if (!window.ifields) { reject(new Error("Card form not ready")); return; }
-      iTokenResolveRef.current = (data) => {
-        if (data?.xToken) resolve(data.xToken);
-        else reject(new Error(data?.errorMessage || "Could not read card — please re-enter"));
-      };
-      window.ifields.getTokens(() => {}, (err) => reject(new Error(err?.message || "Tokenization failed")), 5000);
+      if (!window.getTokens) { reject(new Error("Card form not ready")); return; }
+      if (!cardTokenRef.current || !cvvTokenRef.current) {
+        reject(new Error("Card form is missing token fields"));
+        return;
+      }
+      cardTokenRef.current.value = "";
+      cvvTokenRef.current.value = "";
+      window.getTokens(
+        () => {
+          const xCardNum = cardTokenRef.current.value;
+          const xCVV = cvvTokenRef.current.value;
+          if (!xCardNum || !xCVV) {
+            reject(new Error("Could not read card details — please re-enter"));
+            return;
+          }
+          resolve({ xCardNum, xCVV });
+        },
+        (err) => reject(new Error(err?.message || "Tokenization failed")),
+        5000
+      );
     });
   }
 
@@ -253,15 +282,22 @@ export default function PaymentsPage() {
     setChargeForm(initialChargeForm);
     iInitializedRef.current = false;
     setIReady(false);
+    setIFieldsError(null);
   }
 
   const submitCharge = async (event) => {
     event.preventDefault();
     setProcessing(true);
     try {
-      const xToken = await getChargeToken();
+      const exp = String(chargeForm.expiry || "").replace(/\D/g, "");
+      if (exp.length !== 4) {
+        throw new Error("Expiry must be entered as MM/YY");
+      }
+      const { xCardNum, xCVV } = await getChargeToken();
       const payload = {
-        xToken,
+        xCardNum,
+        xCVV,
+        xExp:        exp,
         clientId:    chargeForm.clientId   || undefined,
         invoiceId:   chargeForm.invoiceId  || undefined,
         amount:      Number(chargeForm.amount),
@@ -609,11 +645,12 @@ export default function PaymentsPage() {
                     <iframe
                       data-ifields-id="card-number"
                       data-ifields-placeholder="•••• •••• •••• ••••"
-                      src={IFIELD_URL}
+                      src={CARDKNOX_IFIELD_FRAME_URL}
                       title="Card number"
                       style={{ width: "100%", height: "44px", border: "none", display: "block", padding: "0 12px" }}
                     />
                   </div>
+                  <input ref={cardTokenRef} name="xCardNum" data-ifields-id="card-number-token" type="hidden" />
                 </div>
 
                 <div className="grid grid-cols-3 gap-3">
@@ -624,16 +661,18 @@ export default function PaymentsPage() {
                       <iframe
                         data-ifields-id="cvv"
                         data-ifields-placeholder="•••"
-                        src={IFIELD_URL}
+                        src={CARDKNOX_IFIELD_FRAME_URL}
                         title="CVV"
                         style={{ width: "100%", height: "44px", border: "none", display: "block", padding: "0 12px" }}
                       />
                     </div>
+                    <input ref={cvvTokenRef} name="xCVV" data-ifields-id="cvv-token" type="hidden" />
                   </div>
                   {/* Expiry */}
                   <div>
                     <label className="block text-xs font-semibold text-slate-600 mb-1.5">Expiry</label>
-                    <input type="text" placeholder="MM/YY" maxLength={5}
+                    <input type="text" placeholder="MM/YY" maxLength={5} value={chargeForm.expiry}
+                      onChange={(e) => setChargeForm((prev) => ({ ...prev, expiry: e.target.value }))}
                       className="w-full border border-slate-300 rounded-lg px-3 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                       style={{ height: "44px" }} />
                   </div>
@@ -664,6 +703,7 @@ export default function PaymentsPage() {
                       style={{ height: "44px" }} />
                   </div>
                 </div>
+                <label data-ifields-id="card-data-error" className="block min-h-5 text-xs text-red-600" />
               </div>
 
               <div className="flex items-center justify-between pt-1">

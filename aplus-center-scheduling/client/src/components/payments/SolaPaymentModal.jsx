@@ -20,8 +20,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import api from "../../lib/api.js";
-
-const IFIELDS_SCRIPT_URL = "https://cdn.cardknox.com/ifields/2.15.2302.0801/ifields.min.js";
+import { CARDKNOX_IFIELD_FRAME_URL, loadCardknoxIFieldsScript } from "../../lib/cardknoxIfields.js";
 
 /* ─── tiny helpers ─────────────────────────────────────────────────────────── */
 
@@ -45,34 +44,15 @@ function TabBtn({ active, onClick, children }) {
   );
 }
 
-/* ─── iFields loader — waits for window.ifields to actually be available ──── */
-
-function loadIFieldsScript(callback) {
-  // Already loaded
-  if (window.ifields) { callback(); return; }
-
-  function waitForIfields() {
-    if (window.ifields) { callback(); return; }
-    setTimeout(waitForIfields, 50);
-  }
-
-  // Script tag already injected — just wait for window.ifields
-  if (document.getElementById("sola-ifields-script")) {
-    waitForIfields();
-    return;
-  }
-
-  const script  = document.createElement("script");
-  script.id     = "sola-ifields-script";
-  script.src    = IFIELDS_SCRIPT_URL;
-  script.async  = true;
-  script.onload = waitForIfields;
-  document.head.appendChild(script);
-}
-
 /* ─── iFields constants ─────────────────────────────────────────────────────── */
-const IFIELD_URL   = "https://cdn.cardknox.com/ifields/2.15.2302.0801/ifield.htm";
-const IFIELD_STYLE = "font-family:Arial,sans-serif;font-size:14px;color:#1e293b;background:#ffffff;width:100%;border:none;outline:none;padding:2px 0;";
+const IFIELD_STYLE = {
+  border: "none",
+  "font-size": "14px",
+  width: "100%",
+  padding: "10px 12px",
+  "box-sizing": "border-box",
+  color: "#1e293b",
+};
 
 /* ─── CardNotPresentForm ────────────────────────────────────────────────────── */
 
@@ -81,10 +61,11 @@ function CardNotPresentForm({ invoice, clientId, onSuccess, onError, disabled })
   const [keyError,   setKeyError]   = useState(null);
   const [ready,      setReady]      = useState(false);   // true once setAccount called
   const [loading,    setLoading]    = useState(false);
+  const [expiry,     setExpiry]     = useState("");
   const [billingName, setBillingName] = useState("");
   const [billingZip,  setBillingZip]  = useState("");
-  const tokenResolveRef = useRef(null);
-  const initRef         = useRef(false);
+  const cardTokenRef    = useRef(null);
+  const cvvTokenRef     = useRef(null);
 
   // 1. Fetch iFields public key from backend
   useEffect(() => {
@@ -97,38 +78,68 @@ function CardNotPresentForm({ invoice, clientId, onSuccess, onError, disabled })
       });
   }, []);
 
-  // 2. Once key arrives, load script then call setAccount
-  //    ifields.js handles iframe communication internally — no need to wait for iframe onLoad
+  // 2. Once key arrives, load Cardknox iFields then setAccount after iframes are in the DOM.
   useEffect(() => {
-    if (!iFieldsKey || initRef.current) return;
-    initRef.current = true;
-    loadIFieldsScript(() => {
-      try {
-        window.ifields.setAccount(iFieldsKey, "APlus Center", "1.0");
-        window.ifields.setStyle(IFIELD_STYLE);
-        window.ifields.addIfieldCallback("token", (data) => {
-          if (tokenResolveRef.current) {
-            tokenResolveRef.current(data);
-            tokenResolveRef.current = null;
-          }
+    if (!iFieldsKey) return;
+    let cancelled = false;
+
+    loadCardknoxIFieldsScript({ timeoutMs: 25000 })
+      .then(() => {
+        if (cancelled) return;
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            if (cancelled) return;
+            try {
+              window.setAccount(iFieldsKey, "APlus Center", "1.0");
+              if (window.setIfieldStyle) {
+                window.setIfieldStyle("card-number", IFIELD_STYLE);
+                window.setIfieldStyle("cvv", IFIELD_STYLE);
+              }
+              if (window.enableAutoFormatting) {
+                window.enableAutoFormatting(" ");
+              }
+              setReady(true);
+              setTimeout(() => window.focusIfield?.("card-number"), 150);
+            } catch (e) {
+              console.error("[ifields] init error", e);
+              onError("Card form failed to initialize — please refresh and try again.");
+            }
+          });
         });
-        setReady(true);
-      } catch (e) {
-        console.error("[ifields] init error", e);
-        onError("Card form failed to initialize — please refresh and try again.");
-      }
-    });
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          console.error("[ifields] load error", e);
+          const msg = e?.message || "Could not load secure card entry.";
+          setKeyError(msg);
+          onError(msg);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [iFieldsKey]);
 
   function getToken() {
     return new Promise((resolve, reject) => {
-      if (!window.ifields) { reject(new Error("Card form not ready — please wait a moment")); return; }
-      tokenResolveRef.current = (data) => {
-        if (data?.xToken) resolve(data.xToken);
-        else reject(new Error(data?.errorMessage || "Could not read card — please re-enter details"));
-      };
-      window.ifields.getTokens(
-        () => {},
+      if (!window.getTokens) { reject(new Error("Card form not ready — please wait a moment")); return; }
+      if (!cardTokenRef.current || !cvvTokenRef.current) {
+        reject(new Error("Card form is missing token fields"));
+        return;
+      }
+      cardTokenRef.current.value = "";
+      cvvTokenRef.current.value = "";
+      window.getTokens(
+        () => {
+          const xCardNum = cardTokenRef.current.value;
+          const xCVV = cvvTokenRef.current.value;
+          if (!xCardNum || !xCVV) {
+            reject(new Error("Could not read card details — please re-enter"));
+            return;
+          }
+          resolve({ xCardNum, xCVV });
+        },
         (err) => reject(new Error(err?.message || "Card tokenization failed")),
         6000
       );
@@ -139,9 +150,15 @@ function CardNotPresentForm({ invoice, clientId, onSuccess, onError, disabled })
     e.preventDefault();
     setLoading(true);
     try {
-      const xToken = await getToken();
+      const exp = expiry.replace(/\D/g, "");
+      if (exp.length !== 4) {
+        throw new Error("Expiry must be in MMYY format");
+      }
+      const { xCardNum, xCVV } = await getToken();
       const res = await api.post("/payments/charge", {
-        xToken,
+        xCardNum,
+        xCVV,
+        xExp:          exp,
         amount:        invoice.balanceDue,
         invoiceId:     invoice.id,
         invoiceNumber: invoice.invoiceNumber,
@@ -186,11 +203,12 @@ function CardNotPresentForm({ invoice, clientId, onSuccess, onError, disabled })
           <iframe
             data-ifields-id="card-number"
             data-ifields-placeholder="•••• •••• •••• ••••"
-            src={IFIELD_URL}
+            src={CARDKNOX_IFIELD_FRAME_URL}
             title="Card number"
             style={{ width: "100%", height: "44px", border: "none", display: "block", padding: "0 12px" }}
           />
         </div>
+        <input ref={cardTokenRef} name="xCardNum" data-ifields-id="card-number-token" type="hidden" />
       </div>
 
       <div className="grid grid-cols-2 gap-3">
@@ -200,19 +218,23 @@ function CardNotPresentForm({ invoice, clientId, onSuccess, onError, disabled })
             <iframe
               data-ifields-id="cvv"
               data-ifields-placeholder="•••"
-              src={IFIELD_URL}
+              src={CARDKNOX_IFIELD_FRAME_URL}
               title="CVV"
               style={{ width: "100%", height: "44px", border: "none", display: "block", padding: "0 12px" }}
             />
           </div>
+          <input ref={cvvTokenRef} name="xCVV" data-ifields-id="cvv-token" type="hidden" />
         </div>
         <div>
           <label className="block text-xs font-semibold text-slate-600 mb-1.5">Expiry (MM/YY)</label>
-          <input type="text" placeholder="MM/YY" maxLength={5}
+          <input type="text" placeholder="MM/YY" maxLength={5} value={expiry}
+            onChange={(e) => setExpiry(e.target.value)}
             className="w-full border border-slate-300 rounded-lg px-3 text-sm outline-none focus:ring-2 focus:ring-blue-500"
             style={{ height: "44px" }} />
         </div>
       </div>
+
+      <label data-ifields-id="card-data-error" className="block min-h-5 text-xs text-red-600" />
 
       <div className="grid grid-cols-2 gap-3">
         <div>
