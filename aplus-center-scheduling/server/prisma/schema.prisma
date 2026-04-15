@@ -1,0 +1,726 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  BCBA
+  STAFF
+}
+
+enum UserStatus {
+  INVITED
+  ACTIVE
+  DISABLED
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  PENDING
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+  RESCHEDULED
+  NO_SHOW
+  PAID
+  RUNNING_LATE
+  CUSTOM
+}
+
+enum RecurrenceType {
+  NONE
+  WEEKLY
+  MONTHLY
+}
+
+enum InvoiceStatus {
+  DRAFT
+  OPEN
+  SENT
+  PAID
+  PARTIAL
+  OVERDUE
+  VOID
+}
+
+enum ClientStatus {
+  ACTIVE
+  INACTIVE
+  WAITLIST
+}
+
+enum PaymentStatus {
+  PENDING
+  AUTHORIZED
+  SUCCEEDED
+  FAILED
+  PARTIALLY_REFUNDED
+  REFUNDED
+  CANCELED
+}
+
+enum RefundStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  CANCELED
+}
+
+enum PaymentProcessor {
+  PAYMENT_HUB
+  SOLA_PAYMENTS
+}
+
+enum IntegrationProvider {
+  QUICKBOOKS
+  PAYMENT_HUB
+  GOOGLE_WORKSPACE
+  VOIPMS
+}
+
+enum IntegrationEnvironment {
+  SANDBOX
+  PRODUCTION
+}
+
+enum SyncDirection {
+  PUSH
+  PULL
+}
+
+enum SyncStatus {
+  SUCCESS
+  FAILED
+  PENDING
+}
+
+enum PricingSource {
+  SERVICE_STANDARD
+  SERVICE_OVERTIME
+  SERVICE_OVERTIME_REMOVED
+  SERVICE_PROVIDER_CUSTOM_STANDARD
+  SERVICE_PROVIDER_CUSTOM_OVERTIME
+}
+
+model User {
+  id             String               @id @default(cuid())
+  email          String               @unique
+  passwordHash   String
+  fullName       String
+  role           UserRole             @default(STAFF)
+  status         UserStatus           @default(ACTIVE)
+  invitedAt      DateTime?
+  activatedAt    DateTime?
+  invitedById    String?
+  lastLoginAt    DateTime?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  resetTokens    PasswordResetToken[]
+  appointments   Appointment[]
+  auditLogs      AuditLog[]
+}
+
+model Service {
+  id                   String            @id @default(cuid())
+  name                 String
+  code                 String?
+  description          String?
+  colorTag             String
+  isActive             Boolean           @default(true)
+  standardRate         Float
+  overtimeRate         Float?
+  durationMinutes      Int?
+  category             String?
+  notes                String?
+  calendarBgColor      String?
+  calendarNameColor    String?
+  calendarServiceColor String?
+  calendarTimeColor    String?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  appointments         Appointment[]
+  providerLinks        ServiceProvider[]
+  waitlistEntries      WaitlistEntry[]
+}
+
+model Provider {
+  id                 String            @id @default(cuid())
+  firstName          String
+  lastName           String
+  fullName           String
+  email              String?
+  phone              String?
+  title              String?
+  credential         String?
+  licenseNumber      String?
+  npi                String?
+  colorTag           String?
+  isActive           Boolean           @default(true)
+  defaultHourlyRate  Float?
+  overtimeHourlyRate Float?
+  address            String?
+  notes              String?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  appointments       Appointment[]
+  serviceLinks       ServiceProvider[]
+  waitlistEntries    WaitlistEntry[]
+  communicationPreference ProviderCommunicationPreference?
+  globalReminderDefaultFor ReminderGlobalSettings? @relation("GlobalReminderDefaultProvider")
+}
+
+model ServiceProvider {
+  id                 String   @id @default(cuid())
+  serviceId          String
+  providerId         String
+  isEnabled          Boolean  @default(true)
+  customRate         Float?
+  customOvertimeRate Float?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  service            Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  provider           Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([serviceId, providerId])
+}
+
+model PasswordResetToken {
+  id         String    @id @default(cuid())
+  tokenHash  String    @unique
+  userId     String
+  purpose    String    @default("PASSWORD_RESET")
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime  @default(now())
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Client {
+  id                          String          @id @default(cuid())
+  firstName                   String?
+  lastName                    String?
+  fullName                    String
+  dob                         DateTime?
+  phone                       String
+  phoneCell                   String?
+  phoneSecondary              String?
+  email                       String
+  zip                         String
+  insurance                   String?
+  addressEncrypted            String
+  notesEncrypted              String?
+  hourlyRate                  Float?
+  cancellationFeeEnabled      Boolean         @default(false)
+  profileImageUrl             String?
+  status                      ClientStatus    @default(ACTIVE)
+  createdAt                   DateTime        @default(now())
+  updatedAt                   DateTime        @updatedAt
+  appointments                Appointment[]
+  documents                   Document[]
+  clientFiles                 ClientFile[]
+  clientDocumentRoots         ClientDocumentRoot[]
+  invoices                    Invoice[]
+  waitlistEntries             WaitlistEntry[]
+  solaXToken                  String?
+  quickbooksCustomerId        String?
+  payments                    Payment[]
+  paymentMethodSnapshots      PaymentMethodSnapshot[]
+  assessments                 Assessment[]
+  dataTrackingEntries         DataTrackingEntry[]
+  communicationPreference   ClientCommunicationPreference?
+
+  @@index([fullName])
+  @@index([lastName, firstName])
+}
+
+enum ReminderTargetType {
+  CLIENT
+  PROVIDER
+}
+
+enum ReminderChannel {
+  EMAIL
+  SMS
+}
+
+enum ReminderJobStatus {
+  QUEUED
+  SENDING
+  SENT
+  FAILED
+  CANCELLED
+  SKIPPED
+}
+
+enum ReminderTemplateKey {
+  CLIENT_EMAIL
+  CLIENT_SMS
+  PROVIDER_EMAIL
+  PROVIDER_SMS
+}
+
+model Appointment {
+  id                    String            @id @default(cuid())
+  clientId              String
+  bcbaId                String?
+  serviceId             String?
+  providerId            String?
+  title                 String
+  startAt               DateTime?
+  endAt                 DateTime?
+  startsAt              DateTime
+  endsAt                DateTime
+  location              String?
+  colorId               String?
+  notes                 String?
+  durationMinutes       Int               @default(60)
+  reminderEnabled       Boolean           @default(true)
+  reminder24SentAt      DateTime?
+  reminder1SentAt       DateTime?
+  remindersUseDefaults           Boolean  @default(true)
+  reminderEmailEnabledOverride     Boolean?
+  reminderSmsEnabledOverride       Boolean?
+  remindClientOverride             Boolean?
+  remindProviderOverride           Boolean?
+  reminderOffsetsOverrideJson      String?
+  recurrenceType        RecurrenceType    @default(NONE)
+  recurrenceGroupId     String?
+  status                AppointmentStatus @default(SCHEDULED)
+  postReportRequestedAt DateTime?
+  isOvertime            Boolean           @default(false)
+  removeOvertimeCharge  Boolean           @default(false)
+  standardRateSnapshot  Float?
+  overtimeRateSnapshot  Float?
+  effectiveRate         Float?
+  pricingSource         PricingSource?
+  overtimeReason        String?
+  billingNotes          String?
+  serviceNameSnapshot   String?
+  providerNameSnapshot  String?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+  client                Client            @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  bcba                  User?             @relation(fields: [bcbaId], references: [id], onDelete: SetNull)
+  service               Service?          @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  provider              Provider?         @relation(fields: [providerId], references: [id], onDelete: SetNull)
+  report                Report?
+  invoice               Invoice?
+  reminderJobs          ReminderJob[]
+
+  @@index([serviceId])
+  @@index([providerId])
+  @@index([startsAt])
+}
+
+model Document {
+  id           String   @id @default(cuid())
+  clientId     String
+  fileName     String
+  filePath     String
+  mimeType     String
+  uploadedAt   DateTime @default(now())
+  client       Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+}
+
+model Report {
+  id             String      @id @default(cuid())
+  appointmentId  String      @unique
+  uploadedById   String?
+  fileName       String
+  filePath       String
+  mimeType       String
+  uploadedAt     DateTime    @default(now())
+  appointment    Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+}
+
+model Invoice {
+  id                  String         @id @default(cuid())
+  appointmentId       String?        @unique
+  clientId            String
+  invoiceNumber       String?        @unique
+  issueDate           DateTime       @default(now())
+  dueDate             DateTime       @default(now())
+  subtotal            Float          @default(0)
+  tax                 Float          @default(0)
+  discount            Float          @default(0)
+  total               Float          @default(0)
+  balanceDue          Float          @default(0)
+  notes               String?
+  quickbooksInvoiceId String?
+  paymentHubInvoiceId String?
+  paymentLinkUrl      String?
+  hostedCheckoutRef   String?
+  qbSyncStatus        String         @default("NOT_SYNCED")
+  qbSyncError         String?
+  qbPaymentId         String?
+  status              InvoiceStatus  @default(DRAFT)
+  pdfPath             String?
+  sentAt              DateTime?
+  paidAt              DateTime?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  appointment         Appointment?   @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  client              Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  lineItems           InvoiceLineItem[]
+  payments            Payment[]
+  activities          InvoiceActivity[]
+}
+
+model InvoiceLineItem {
+  id          String   @id @default(cuid())
+  invoiceId   String
+  description String
+  quantity    Float
+  unitPrice   Float
+  amount      Float
+  serviceDate DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+}
+
+model Payment {
+  id                      String          @id @default(cuid())
+  clientId                String?
+  invoiceId          String?
+  processor               PaymentProcessor @default(PAYMENT_HUB)
+  externalPaymentId       String          @unique
+  externalCustomerId      String?
+  externalPaymentMethodId String?
+  amount                  Float
+  currency                String          @default("USD")
+  status                  PaymentStatus   @default(PENDING)
+  capturedAt              DateTime?
+  createdAt               DateTime        @default(now())
+  updatedAt               DateTime        @updatedAt
+  paymentDate             DateTime
+  description             String?
+  receiptUrl              String?
+  receiptSentAt           DateTime?
+  processorResponseJson   Json?
+  failureCode             String?
+  failureMessage          String?
+  cardBrand               String?
+  cardLast4               String?
+  cardExpMonth            Int?
+  cardExpYear             Int?
+  billingName             String?
+  billingEmail            String?
+  billingZip              String?
+  paymentMethod           String?
+  paymentSourceType       String?
+  refundedAmount          Float           @default(0)
+  netAmount               Float?
+  feeAmount               Float?
+  solaXRefNum             String?
+  solaXToken              String?
+  client                  Client?         @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  invoice                 Invoice?        @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  refunds                 Refund[]
+}
+
+model Refund {
+  id                    String       @id @default(cuid())
+  paymentId              String
+  externalRefundId       String       @unique
+  amount                 Float
+  currency               String       @default("USD")
+  status                 RefundStatus @default(PENDING)
+  reason                 String?
+  notes                  String?
+  processorResponseJson  Json?
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
+  payment                Payment      @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+}
+
+model PaymentMethodSnapshot {
+  id                      String           @id @default(cuid())
+  clientId                String?
+  externalCustomerId      String?
+  externalPaymentMethodId String
+  processor               PaymentProcessor @default(PAYMENT_HUB)
+  brand                   String
+  last4                   String
+  expMonth                Int?
+  expYear                 Int?
+  billingName             String?
+  billingEmail            String?
+  isDefault               Boolean          @default(false)
+  createdAt               DateTime         @default(now())
+  updatedAt               DateTime         @updatedAt
+  client                  Client?          @relation(fields: [clientId], references: [id], onDelete: SetNull)
+}
+
+model PaymentWebhookEvent {
+  id            String   @id @default(cuid())
+  provider      String
+  externalEventId String @unique
+  eventType     String
+  payloadJson   Json?
+  processedAt   DateTime?
+  createdAt     DateTime @default(now())
+}
+
+model InvoiceActivity {
+  id         String   @id @default(cuid())
+  invoiceId  String
+  type       String   // CREATED | SENT | PAYMENT_LINK_GENERATED | PAYMENT_RECEIVED | MANUAL_PAYMENT | CARD_PAYMENT | QB_SYNCED | QB_FAILED | RECEIPT_SENT | VOIDED | DUPLICATED | NOTE
+  actorType  String   @default("SYSTEM") // SYSTEM | USER
+  actorId    String?
+  message    String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  invoice    Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+}
+
+model IntegrationAccount {
+  id             String                 @id @default(cuid())
+  provider       IntegrationProvider    @unique
+  isEnabled      Boolean                @default(false)
+  environment    IntegrationEnvironment @default(SANDBOX)
+  realmId        String?
+  accessTokenEnc String?
+  refreshTokenEnc String?
+  tokenExpiresAt DateTime?
+  companyName    String?
+  metadataJson   Json?
+  lastSyncAt     DateTime?
+  syncStatus     SyncStatus?
+  syncError      String?
+  webhookSecretEnc String?
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+}
+
+model IntegrationSyncLog {
+  id         String              @id @default(cuid())
+  provider   IntegrationProvider
+  direction  SyncDirection
+  entityType String
+  entityId   String?
+  status     SyncStatus
+  message    String
+  payloadJson Json?
+  createdAt  DateTime            @default(now())
+}
+
+model WaitlistEntry {
+  id              String    @id @default(cuid())
+  clientId        String
+  serviceId       String?
+  providerId      String?
+  priority        String    @default("NORMAL")   // LOW | NORMAL | HIGH | URGENT
+  status          String    @default("WAITING")  // WAITING | CONTACTED | SCHEDULED | DECLINED | NO_RESPONSE | REMOVED
+  queuePosition   Int       @default(0)
+  notes           String?
+  scheduledApptId String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  client   Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  service  Service?  @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  provider Provider? @relation(fields: [providerId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([queuePosition])
+}
+
+model DataTrackingEntry {
+  id         String   @id @default(cuid())
+  clientId   String
+  title      String
+  value      String
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  client     Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+}
+
+model Assessment {
+  id          String   @id @default(cuid())
+  clientId    String
+  title       String
+  status      String   @default("DRAFT")
+  contentJson Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+}
+
+model ClinicSetting {
+  id                            Int      @id @default(1)
+  defaultHourlyRate             Float    @default(130)
+  defaultCancellationFeeEnabled Boolean  @default(false)
+  companyName                   String?
+  companyAddress                String?
+  companyEmail                  String?
+  companyPhone                  String?
+  invoiceLogoUrl                String?
+  invoiceFooterText             String?
+  invoiceAccentColor            String?  @default("#2563EB")
+  createdAt                     DateTime @default(now())
+  updatedAt                     DateTime @updatedAt
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String
+  entityType String?
+  entityId   String?
+  detailsJson Json?
+  targetType String?
+  targetId   String?
+  actorId    String?
+  actorEmail String?
+  ipAddress  String?
+  userAgent  String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+}
+
+enum FileNodeType {
+  FILE
+  FOLDER
+}
+
+model ClientFile {
+  id            String       @id @default(cuid())
+  clientId      String
+  parentId      String?
+  type          FileNodeType @default(FILE)
+  section       String       @default("files")
+  name          String
+  originalName  String?
+  mimeType      String?
+  extension     String?
+  sizeBytes     BigInt?
+  storagePath   String?
+  uploadedById  String?
+  notes         String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  deletedAt     DateTime?
+
+  client   Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  parent   ClientFile? @relation("FileTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children ClientFile[] @relation("FileTree")
+
+  @@index([clientId, section])
+}
+
+// Maps each shortcut section key (bba, bbr, ctr…) to the actual ClientFile folder
+// that lives inside the client's "files" root.  One record per (clientId, section).
+model ClientDocumentRoot {
+  id         String   @id @default(cuid())
+  clientId   String
+  section    String   // "bba" | "bbr" | "ctr" | "supplements" | "registration_form" | "assessments"
+  folderName String   // Human name of the real folder, e.g. "Brain Balance Assessment"
+  folderId   String?  // ClientFile.id of the actual FOLDER record (no FK — flexible)
+  createdAt  DateTime @default(now())
+
+  client     Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, section])
+  @@index([clientId])
+}
+
+model ReminderGlobalSettings {
+  id                       Int      @id @default(1)
+  remindersEnabledGlobal   Boolean  @default(true)
+  emailEnabledByDefault    Boolean  @default(true)
+  smsEnabledByDefault      Boolean  @default(false)
+  smsProviderEnabled       Boolean  @default(false)
+  voipmsDid                String?
+  defaultReminderProviderId String? @unique
+  remindClientByDefault    Boolean  @default(true)
+  remindProviderByDefault  Boolean  @default(false)
+  timezone                 String   @default("America/New_York")
+  sendWindowStartMinutes   Int      @default(480)
+  sendWindowEndMinutes     Int      @default(1200)
+  defaultOffsetsJson       String   @default("[{\"value\":24,\"unit\":\"HOURS\"},{\"value\":2,\"unit\":\"HOURS\"},{\"value\":30,\"unit\":\"MINUTES\"}]")
+  retryEnabled             Boolean  @default(true)
+  maxRetries               Int      @default(3)
+  retryDelayMinutes        Int      @default(15)
+  lastSmsTestAt            DateTime?
+  lastSmsTestResult        String?
+  lastSmsTestOk            Boolean?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+  defaultReminderProvider  Provider? @relation("GlobalReminderDefaultProvider", fields: [defaultReminderProviderId], references: [id], onDelete: SetNull)
+}
+
+model ReminderTemplate {
+  id           String              @id @default(cuid())
+  templateKey  ReminderTemplateKey @unique
+  subject      String?
+  bodyTemplate String
+  updatedAt    DateTime            @updatedAt
+}
+
+model ClientCommunicationPreference {
+  clientId              String    @id
+  emailRemindersEnabled Boolean   @default(true)
+  smsRemindersEnabled   Boolean   @default(true)
+  preferredChannel      String    @default("BOTH")
+  smsOptOut             Boolean   @default(false)
+  smsOptOutAt           DateTime?
+  reminderNotes         String?
+  client                Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+}
+
+model ProviderCommunicationPreference {
+  providerId            String   @id
+  emailRemindersEnabled Boolean  @default(true)
+  smsRemindersEnabled   Boolean  @default(false)
+  preferredChannel      String   @default("EMAIL")
+  provider              Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+}
+
+model ReminderJob {
+  id                String            @id @default(cuid())
+  appointmentId     String
+  targetType        ReminderTargetType
+  targetId          String
+  channel           ReminderChannel
+  offsetMinutes     Int
+  scheduledFor      DateTime
+  status            ReminderJobStatus @default(QUEUED)
+  attemptCount      Int               @default(0)
+  lastAttemptAt     DateTime?
+  nextRetryAt       DateTime?
+  errorMessage      String?
+  sentAt            DateTime?
+  providerMessageId String?
+  dedupeKey         String            @unique
+  templateKey       ReminderTemplateKey?
+  destinationMasked String?
+  skipReason        String?
+  appointment       Appointment       @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@index([status, scheduledFor])
+  @@index([appointmentId])
+}
+
+model InboundSmsEvent {
+  id          String   @id @default(cuid())
+  fromNumber  String
+  toNumber    String?
+  body        String
+  rawPayload  Json?
+  action      String
+  clientId    String?
+  createdAt   DateTime @default(now())
+
+  @@index([fromNumber])
+  @@index([createdAt])
+}
