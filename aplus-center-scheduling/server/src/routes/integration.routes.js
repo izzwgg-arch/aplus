@@ -9,6 +9,11 @@ import {
   exchangeCodeForTokens
 } from "../services/integrations/quickbooks/quickbooksService.js";
 import {
+  connectSolaPayments,
+  disconnectSolaPayments,
+  testSolaConnection
+} from "../services/integrations/sola/solaIntegrationService.js";
+import {
   connectPaymentHub,
   disconnectPaymentHub,
   testPaymentHubConnection
@@ -53,6 +58,45 @@ router.get("/quickbooks/callback", async (req, res) => {
 });
 
 router.use(requireAuth);
+
+// ── Sola Payments ─────────────────────────────────────────────────────────────
+router.post("/sola/connect", requireRole("ADMIN"), async (req, res) => {
+  try {
+    const account = await connectSolaPayments(req.body || {});
+    await writeAuditLog(req, {
+      action:     "INTEGRATION_CONNECTED",
+      entityType: "IntegrationAccount",
+      entityId:   account.id,
+      detailsJson: { provider: "SOLA_PAYMENTS" }
+    });
+    return res.json(account);
+  } catch (error) {
+    return res.status(error.status || 500).json({ error: error.message || "Failed to save Sola credentials" });
+  }
+});
+
+router.post("/sola/disconnect", requireRole("ADMIN"), async (req, res) => {
+  try {
+    const account = await disconnectSolaPayments();
+    await writeAuditLog(req, {
+      action:     "INTEGRATION_DISCONNECTED",
+      entityType: "IntegrationAccount",
+      entityId:   account.id,
+      detailsJson: { provider: "SOLA_PAYMENTS" }
+    });
+    return res.json(account);
+  } catch (error) {
+    return res.status(error.status || 500).json({ error: error.message || "Failed to disconnect Sola" });
+  }
+});
+
+router.post("/sola/test", requireRole("ADMIN"), async (_req, res) => {
+  try {
+    return res.json(await testSolaConnection());
+  } catch (error) {
+    return res.status(error.status || 500).json({ error: error.message || "Sola test failed" });
+  }
+});
 
 // Returns the Intuit OAuth authorization URL — frontend opens it to start QB connect
 router.get("/quickbooks/auth-url", requireRole("ADMIN"), (_req, res) => {

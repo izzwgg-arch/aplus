@@ -29,6 +29,7 @@
  */
 
 import { env } from "../../../config/env.js";
+import { getSolaCredentials } from "../../integrations/sola/solaIntegrationService.js";
 
 const SOLA_GATEWAY_URL = "https://x1.cardknox.com/gatewayjson";
 const SOLA_CLOUDIM_URL = "https://api.cloudim.cardknox.com";
@@ -36,30 +37,37 @@ const SOFTWARE_NAME    = "APlus Center";
 const SOFTWARE_VERSION = "1.0";
 
 /* ─────────────────────────────────────────────────────────────────────────── */
-/* Helpers                                                                      */
+/* Helpers — credentials come from DB (IntegrationAccount) first, env fallback */
 /* ─────────────────────────────────────────────────────────────────────────── */
 
-function getXKey() {
-  const key = env.solaXKey;
+async function getXKey() {
+  const creds = await getSolaCredentials();
+  const key   = creds.xKey;
   if (!key) {
-    const err = new Error("SOLA_XKEY is not configured");
+    const err = new Error("Sola transaction key (XKEY) is not configured — enter it in Settings → Integrations → Sola Payments");
     err.status = 500;
     throw err;
   }
   return key;
 }
 
-function getCloudIMKey() {
-  return env.solaCloudIMKey || getXKey();
+async function getCloudIMKey() {
+  const creds = await getSolaCredentials();
+  return creds.cloudIMKey || await getXKey();
+}
+
+async function getCloudIMDeviceId(override) {
+  if (override) return override;
+  const creds = await getSolaCredentials();
+  return creds.cloudIMDeviceId || env.solaCloudIMDeviceId || "";
 }
 
 /**
  * POST to the Sola gateway and return the parsed response.
- * Throws if xResult is not "A" (Approved).
  */
 async function callGateway(params) {
   const body = {
-    xKey:             getXKey(),
+    xKey:             await getXKey(),
     xVersion:         "4.5.9",
     xSoftwareName:    SOFTWARE_NAME,
     xSoftwareVersion: SOFTWARE_VERSION,
@@ -81,11 +89,9 @@ async function callGateway(params) {
 /* ─────────────────────────────────────────────────────────────────────────── */
 
 export async function testConnection() {
-  // Sola has no dedicated health endpoint; we verify the key is present and
-  // the gateway is reachable by attempting a $0.00 auth-only that will reject
-  // cleanly even in sandbox. Any network error surfaces immediately.
-  if (!env.solaXKey) {
-    const err = new Error("SOLA_XKEY is not configured");
+  const creds = await getSolaCredentials();
+  if (!creds.xKey) {
+    const err = new Error("Sola transaction key (XKEY) is not configured — enter it in Settings → Integrations → Sola Payments");
     err.status = 400;
     throw err;
   }
@@ -96,10 +102,11 @@ export async function testConnection() {
 /* 2. iFields key — returned to the frontend so it can load the iFields widget */
 /* ─────────────────────────────────────────────────────────────────────────── */
 
-export function getIFieldsKey() {
-  const key = env.solaIFieldsKey;
+export async function getIFieldsKey() {
+  const creds = await getSolaCredentials();
+  const key   = creds.iFieldsKey;
   if (!key) {
-    const err = new Error("SOLA_IFIELDS_KEY is not configured");
+    const err = new Error("Sola iFields key is not configured — enter it in Settings → Integrations → Sola Payments");
     err.status = 400;
     throw err;
   }
@@ -176,9 +183,9 @@ export async function chargeWithToken({
  * @param {string} [opts.description]
  */
 export async function chargeCloudIM({ deviceId, amount, invoiceNumber, description }) {
-  const device = deviceId || env.solaCloudIMDeviceId;
+  const device = await getCloudIMDeviceId(deviceId);
   if (!device) {
-    const err = new Error("CloudIM device ID is not configured (SOLA_CLOUDIM_DEVICE_ID)");
+    const err = new Error("CloudIM device ID is not configured — enter it in Settings → Integrations → Sola Payments");
     err.status = 400;
     throw err;
   }
@@ -188,8 +195,10 @@ export async function chargeCloudIM({ deviceId, amount, invoiceNumber, descripti
     throw err;
   }
 
+  const cloudIMKey = await getCloudIMKey();
+
   const payload = {
-    xKey:             getCloudIMKey(),
+    xKey:             cloudIMKey,
     xVersion:         "4.5.9",
     xSoftwareName:    SOFTWARE_NAME,
     xSoftwareVersion: SOFTWARE_VERSION,
@@ -204,7 +213,7 @@ export async function chargeCloudIM({ deviceId, amount, invoiceNumber, descripti
     method:  "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization:  `Bearer ${getCloudIMKey()}`
+      Authorization:  `Bearer ${cloudIMKey}`
     },
     body: JSON.stringify(payload)
   });

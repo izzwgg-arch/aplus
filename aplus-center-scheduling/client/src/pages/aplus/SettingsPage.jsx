@@ -198,6 +198,7 @@ export default function SettingsPage() {
   const [integrations, setIntegrations] = useState([]);
   const [qbForm, setQbForm] = useState({ environment: "SANDBOX", realmId: "", companyName: "", accessToken: "", refreshToken: "", syncMode: "FULL" });
   const [phForm, setPhForm] = useState({ environment: "SANDBOX", apiKey: "", webhookSecret: "", paymentCollectionEnabled: true });
+  const [solaForm, setSolaForm] = useState({ xKey: "", iFieldsKey: "", cloudIMKey: "", cloudIMDeviceId: "", webhookSecret: "" });
   const [voipmsForm, setVoipmsForm] = useState({ apiUser: "", apiPassword: "", webhookSecret: "" });
   const [voipmsWebhookTouched, setVoipmsWebhookTouched] = useState(false);
   const [voipmsWebhookHints, setVoipmsWebhookHints] = useState(null);
@@ -219,8 +220,9 @@ export default function SettingsPage() {
   const [loadingAction, setLoadingAction] = useState("");
   const isAdmin = user?.role === "ADMIN";
 
-  const quickbooks = useMemo(() => integrations.find((item) => item.provider === "QUICKBOOKS"), [integrations]);
-  const paymentHub = useMemo(() => integrations.find((item) => item.provider === "PAYMENT_HUB"), [integrations]);
+  const quickbooks   = useMemo(() => integrations.find((item) => item.provider === "QUICKBOOKS"),   [integrations]);
+  const paymentHub   = useMemo(() => integrations.find((item) => item.provider === "PAYMENT_HUB"),   [integrations]);
+  const solaPayments = useMemo(() => integrations.find((item) => item.provider === "SOLA_PAYMENTS"), [integrations]);
   const googleWorkspace = useMemo(() => integrations.find((item) => item.provider === "GOOGLE_WORKSPACE"), [integrations]);
   const voipms = useMemo(() => integrations.find((item) => item.provider === "VOIPMS"), [integrations]);
 
@@ -374,33 +376,109 @@ export default function SettingsPage() {
         <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
           {/* ── Sola Payments ─────────────────────────────────────────────── */}
           <section className="rounded-xl border border-slate-200 p-4">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between mb-3">
               <h3 className="text-lg font-semibold text-slate-900">Sola Payments</h3>
               <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                loadingAction === "sola-test" ? "bg-slate-100 text-slate-500" : "bg-emerald-100 text-emerald-700"
+                solaPayments?.isEnabled ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
               }`}>
-                {loadingAction === "sola-test" ? "Checking…" : "Active processor"}
+                {solaPayments?.isEnabled ? "Connected" : "Not configured"}
               </span>
             </div>
-            <p className="mt-1 text-sm text-slate-500">
-              Sola Payments is configured via server environment variables
-              (<code className="text-xs bg-slate-100 px-1 rounded">SOLA_XKEY</code>,{" "}
-              <code className="text-xs bg-slate-100 px-1 rounded">SOLA_IFIELDS_KEY</code>).
-              Use the button below to verify connectivity.
-            </p>
+
+            <div className="grid gap-2">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">
+                  Transaction Key (XKEY) <span className="text-red-500">*</span>
+                </label>
+                <input
+                  className="saas-input"
+                  type="password"
+                  placeholder={solaPayments?.metadataJson?.keysMasked?.xKey || "Enter your Sola transaction key"}
+                  value={solaForm.xKey}
+                  onChange={(e) => setSolaForm((p) => ({ ...p, xKey: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">
+                  iFields Key <span className="text-red-500">*</span>
+                </label>
+                <input
+                  className="saas-input"
+                  type="password"
+                  placeholder={solaPayments?.metadataJson?.keysMasked?.iFieldsKey || "Enter your Sola iFields public key"}
+                  value={solaForm.iFieldsKey}
+                  onChange={(e) => setSolaForm((p) => ({ ...p, iFieldsKey: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Webhook Secret</label>
+                <input
+                  className="saas-input"
+                  type="password"
+                  placeholder={solaPayments?.metadataJson?.keysMasked?.webhookSecret || "Webhook HMAC secret (optional)"}
+                  value={solaForm.webhookSecret}
+                  onChange={(e) => setSolaForm((p) => ({ ...p, webhookSecret: e.target.value }))}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">CloudIM Key</label>
+                  <input
+                    className="saas-input"
+                    type="password"
+                    placeholder={solaPayments?.metadataJson?.keysMasked?.cloudIMKey || "Optional, defaults to XKEY"}
+                    value={solaForm.cloudIMKey}
+                    onChange={(e) => setSolaForm((p) => ({ ...p, cloudIMKey: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Terminal Device ID</label>
+                  <input
+                    className="saas-input"
+                    placeholder={solaPayments?.metadataJson?.cloudIMDeviceId || "CloudIM device ID"}
+                    value={solaForm.cloudIMDeviceId}
+                    onChange={(e) => setSolaForm((p) => ({ ...p, cloudIMDeviceId: e.target.value }))}
+                  />
+                </div>
+              </div>
+            </div>
+
             <div className="mt-3 flex flex-wrap gap-2">
               <button
                 type="button"
+                className="btn-primary"
+                disabled={!isAdmin || loadingAction === "sola-connect" || (!solaForm.xKey && !solaForm.iFieldsKey)}
+                onClick={() => runIntegrationAction(
+                  "sola-connect",
+                  () => api.post("/integrations/sola/connect", solaForm),
+                  "Sola Payments credentials saved."
+                )}
+              >
+                {loadingAction === "sola-connect" ? "Saving…" : solaPayments?.isEnabled ? "Update Credentials" : "Save Credentials"}
+              </button>
+              <button
+                type="button"
                 className="btn-secondary"
-                disabled={!isAdmin || loadingAction === "sola-test"}
-                onClick={() => runIntegrationAction("sola-test", () => api.post("/payments/test-connection"), "Sola Payments key is configured.")}
+                disabled={!isAdmin || !solaPayments?.isEnabled || loadingAction === "sola-test"}
+                onClick={() => runIntegrationAction("sola-test", () => api.post("/integrations/sola/test"), "Sola Payments connection verified.")}
               >
                 {loadingAction === "sola-test" ? "Testing…" : "Test Connection"}
               </button>
+              {solaPayments?.isEnabled && (
+                <button
+                  type="button"
+                  className="btn-secondary text-rose-600 hover:bg-rose-50"
+                  disabled={!isAdmin || loadingAction === "sola-disconnect"}
+                  onClick={() => runIntegrationAction("sola-disconnect", () => api.post("/integrations/sola/disconnect"), "Sola Payments disconnected.")}
+                >
+                  Disconnect
+                </button>
+              )}
             </div>
+
             <p className="mt-3 text-xs text-slate-500">
               Webhook URL to register in Sola portal:{" "}
-              <code className="bg-slate-100 px-1 rounded break-all">
+              <code className="bg-slate-100 px-1 rounded break-all text-[10px]">
                 {window.location.origin.replace(/:\d+$/, "")}/api/payments/webhook/sola
               </code>
             </p>

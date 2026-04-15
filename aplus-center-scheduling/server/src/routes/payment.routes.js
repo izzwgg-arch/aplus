@@ -14,7 +14,8 @@ import { logActivity } from "../services/invoices/invoiceActivityService.js";
 import { sendReceiptEmail, sendInvoiceEmail } from "../utils/mailer.js";
 import { getOrCreateClinicSettings } from "../services/settingsService.js";
 import { syncPaymentToQuickbooks } from "../services/integrations/quickbooks/quickbooksService.js";
-import { testConnection as testSolaConnection, getIFieldsKey } from "../services/payments/provider/solaPaymentsProviderService.js";
+import { getIFieldsKey } from "../services/payments/provider/solaPaymentsProviderService.js";
+import { testSolaConnection } from "../services/integrations/sola/solaIntegrationService.js";
 import { env } from "../config/env.js";
 
 const router = express.Router();
@@ -201,9 +202,9 @@ router.post("/webhook/payment-hub", async (req, res) => {
 router.use(requireAuth);
 
 // ── Sola iFields key — returned to frontend for card tokenization ─────────────
-router.get("/sola-ifields-key", (_req, res) => {
+router.get("/sola-ifields-key", async (_req, res) => {
   try {
-    const key = getIFieldsKey();
+    const key = await getIFieldsKey();
     return res.json({ iFieldsKey: key });
   } catch (error) {
     return res.status(error.status || 500).json({ error: error.message || "iFields key not configured" });

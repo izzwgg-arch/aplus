@@ -79,6 +79,7 @@ enum PaymentProcessor {
 enum IntegrationProvider {
   QUICKBOOKS
   PAYMENT_HUB
+  SOLA_PAYMENTS
   GOOGLE_WORKSPACE
   VOIPMS
 }
