@@ -420,6 +420,7 @@ export default function AppointmentDetailsModal({
   const [error,        setError]       = useState(null);
   const [showPayModal,       setShowPayModal]       = useState(false);
   const [creatingInvoice,    setCreatingInvoice]    = useState(false);
+  const [completing,         setCompleting]         = useState(false);
 
   const load = useCallback(async () => {
     if (!appointmentId) return;
@@ -618,46 +619,77 @@ export default function AppointmentDetailsModal({
 
         {/* Footer */}
         {!loading && !error && appt && (
-          <div className="flex items-center justify-between border-t border-slate-100 px-6 py-4">
+          <div className="flex items-center justify-between border-t border-slate-100 px-6 py-4 gap-2">
             <button
               type="button"
               onClick={() => navigate(`/aplus/clients/${appt.clientId}`)}
-              className="btn-secondary px-4 py-2 text-sm"
+              className="btn-secondary px-4 py-2 text-sm shrink-0"
             >
               View Client
             </button>
-            {appt?.status === "COMPLETED" && (!appt?.invoice || Number(appt.invoice.balanceDue || 0) > 0) ? (
-              <button
-                type="button"
-                disabled={creatingInvoice}
-                onClick={async () => {
-                  setTab("payments");
-                  if (!appt.invoice) {
-                    setCreatingInvoice(true);
+
+            <div className="flex items-center gap-2">
+              {/* Mark Complete — shown for any non-terminal status */}
+              {!["COMPLETED","CANCELLED","NO_SHOW","PAID"].includes(appt.status) && (
+                <button
+                  type="button"
+                  disabled={completing}
+                  onClick={async () => {
+                    setCompleting(true);
                     try {
-                      const res = await api.post(`/appointments/${appointmentId}/create-invoice`);
-                      setAppt((prev) => ({ ...prev, invoice: res.data }));
+                      const res = await api.post(`/appointments/${appointmentId}/complete`);
+                      setAppt((prev) => ({ ...prev, ...res.data }));
+                      toast?.success("Appointment marked complete.");
+                      setTab("payments");
                     } catch (e) {
-                      console.error("[create-invoice]", e);
+                      toast?.error("Could not mark appointment complete.");
                     } finally {
-                      setCreatingInvoice(false);
+                      setCompleting(false);
                     }
-                  }
-                  setShowPayModal(true);
-                }}
-                className="btn-primary px-5 py-2 text-sm"
-              >
-                {creatingInvoice ? "Creating…" : appt?.invoice ? `Collect Payment · ${fmtMoney(appt.invoice.balanceDue)}` : "Collect Payment"}
-              </button>
-            ) : appt?.invoice ? (
-              <button
-                type="button"
-                onClick={() => navigate(`/aplus/invoices?id=${appt.invoice.id}`)}
-                className="btn-secondary px-5 py-2 text-sm"
-              >
-                View Invoice
-              </button>
-            ) : null}
+                  }}
+                  className="rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 shadow-sm transition-colors hover:bg-emerald-100 disabled:opacity-50"
+                >
+                  {completing ? "Completing…" : "✓ Mark Complete"}
+                </button>
+              )}
+
+              {/* Collect Payment — shown when COMPLETED and balance > 0 */}
+              {appt.status === "COMPLETED" && (!appt.invoice || Number(appt.invoice.balanceDue || 0) > 0) && (
+                <button
+                  type="button"
+                  disabled={creatingInvoice}
+                  onClick={async () => {
+                    setTab("payments");
+                    if (!appt.invoice) {
+                      setCreatingInvoice(true);
+                      try {
+                        const res = await api.post(`/appointments/${appointmentId}/create-invoice`);
+                        setAppt((prev) => ({ ...prev, invoice: res.data }));
+                      } catch (e) {
+                        console.error("[create-invoice]", e);
+                      } finally {
+                        setCreatingInvoice(false);
+                      }
+                    }
+                    setShowPayModal(true);
+                  }}
+                  className="btn-primary px-5 py-2 text-sm"
+                >
+                  {creatingInvoice ? "Creating…" : appt.invoice ? `Collect Payment · ${fmtMoney(appt.invoice.balanceDue)}` : "Collect Payment"}
+                </button>
+              )}
+
+              {/* View Invoice — shown when completed and fully paid */}
+              {appt.status === "COMPLETED" && appt.invoice && Number(appt.invoice.balanceDue || 0) <= 0 && (
+                <button
+                  type="button"
+                  onClick={() => navigate(`/aplus/invoices?id=${appt.invoice.id}`)}
+                  className="btn-secondary px-5 py-2 text-sm"
+                >
+                  View Invoice
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>
