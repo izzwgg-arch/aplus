@@ -266,12 +266,26 @@ function HistoryTab({ history }) {
 }
 
 /* ─── Payments Tab ──────────────────────────────────────────────────────────── */
-function PaymentsTab({ invoice, appointmentId, clientId, navigate, onShowPayModal, onRefresh }) {
+function PaymentsTab({ invoice, appointmentId, appointmentStatus, clientId, navigate, onShowPayModal, onInvoiceCreated, onRefresh }) {
+  const [creatingInvoice, setCreatingInvoice] = useState(false);
   const payments   = invoice?.payments ?? [];
   const hasPaid    = payments.length > 0;
   const totalPaid  = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
   const balanceDue = invoice?.balanceDue !== undefined ? Number(invoice.balanceDue) : null;
   const canPay     = balanceDue !== null && balanceDue > 0;
+  const isCompleted = appointmentStatus === "COMPLETED";
+
+  async function handleCreateAndPay() {
+    setCreatingInvoice(true);
+    try {
+      const res = await api.post(`/appointments/${appointmentId}/create-invoice`);
+      onInvoiceCreated(res.data);
+    } catch (err) {
+      console.error("[create-invoice]", err);
+    } finally {
+      setCreatingInvoice(false);
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -340,6 +354,19 @@ function PaymentsTab({ invoice, appointmentId, clientId, navigate, onShowPayModa
         </div>
       )}
 
+      {/* Completed + no invoice → create invoice first, then pay */}
+      {isCompleted && !invoice && (
+        <button
+          type="button"
+          onClick={handleCreateAndPay}
+          disabled={creatingInvoice}
+          className="btn-primary w-full py-2.5 text-sm"
+        >
+          {creatingInvoice ? "Creating invoice…" : "Create Invoice & Collect Payment"}
+        </button>
+      )}
+
+      {/* Invoice exists + balance > 0 → show payment button */}
       {canPay && (
         <button
           type="button"
@@ -391,7 +418,8 @@ export default function AppointmentDetailsModal({
   const [loading,      setLoading]     = useState(true);
   const [deleting,     setDeleting]    = useState(false);
   const [error,        setError]       = useState(null);
-  const [showPayModal, setShowPayModal] = useState(false);
+  const [showPayModal,       setShowPayModal]       = useState(false);
+  const [creatingInvoice,    setCreatingInvoice]    = useState(false);
 
   const load = useCallback(async () => {
     if (!appointmentId) return;
@@ -575,9 +603,14 @@ export default function AppointmentDetailsModal({
             <PaymentsTab
               invoice={appt?.invoice}
               appointmentId={appointmentId}
+              appointmentStatus={appt?.status}
               clientId={appt?.clientId}
               navigate={navigate}
               onShowPayModal={() => setShowPayModal(true)}
+              onInvoiceCreated={(newInvoice) => {
+                setAppt((prev) => ({ ...prev, invoice: newInvoice }));
+                setShowPayModal(true);
+              }}
               onRefresh={load}
             />
           )}
@@ -593,23 +626,38 @@ export default function AppointmentDetailsModal({
             >
               View Client
             </button>
-            {appt?.invoice && Number(appt.invoice.balanceDue || 0) > 0 ? (
+            {appt?.status === "COMPLETED" && (!appt?.invoice || Number(appt.invoice.balanceDue || 0) > 0) ? (
               <button
                 type="button"
-                onClick={() => { setTab("payments"); setShowPayModal(true); }}
+                disabled={creatingInvoice}
+                onClick={async () => {
+                  setTab("payments");
+                  if (!appt.invoice) {
+                    setCreatingInvoice(true);
+                    try {
+                      const res = await api.post(`/appointments/${appointmentId}/create-invoice`);
+                      setAppt((prev) => ({ ...prev, invoice: res.data }));
+                    } catch (e) {
+                      console.error("[create-invoice]", e);
+                    } finally {
+                      setCreatingInvoice(false);
+                    }
+                  }
+                  setShowPayModal(true);
+                }}
                 className="btn-primary px-5 py-2 text-sm"
               >
-                Collect Payment
+                {creatingInvoice ? "Creating…" : appt?.invoice ? `Collect Payment · ${fmtMoney(appt.invoice.balanceDue)}` : "Collect Payment"}
               </button>
-            ) : (
+            ) : appt?.invoice ? (
               <button
                 type="button"
-                onClick={() => navigate(`/aplus/invoices${appt?.invoice ? `?id=${appt.invoice.id}` : ""}`)}
+                onClick={() => navigate(`/aplus/invoices?id=${appt.invoice.id}`)}
                 className="btn-secondary px-5 py-2 text-sm"
               >
                 View Invoice
               </button>
-            )}
+            ) : null}
           </div>
         )}
       </div>
