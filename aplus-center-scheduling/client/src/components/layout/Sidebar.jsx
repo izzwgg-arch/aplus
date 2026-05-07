@@ -54,7 +54,6 @@ const links = [
   { to: "/aplus/providers", label: "Providers", icon: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11A4 4 0 1 0 9 3a4 4 0 0 0 0 8m12 10v-2a4 4 0 0 0-3-3.87m-2-8.13a4 4 0 1 1 0-8" },
   { to: "/aplus/appointments", label: "Appointments", icon: "M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2" },
   { to: "/aplus/reminders", label: "Reminders", icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
-  { to: "/aplus/assessments", label: "Assessments", icon: "M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 0 2-2h2a2 2 0 0 0 2 2M12 12h4M12 16h4M8 12h.01M8 16h.01" },
   { to: "/aplus/waitlist", label: "Waitlist", icon: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" },
   { to: "/aplus/invoices", label: "Invoicing", icon: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h8M8 9h2" },
   { to: "/aplus/payments", label: "Payments", icon: "M2 7h20M2 12h20M2 17h20M6 4v16M18 4v16" },
