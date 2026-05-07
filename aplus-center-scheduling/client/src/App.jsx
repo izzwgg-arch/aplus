@@ -1,12 +1,14 @@
 import { Suspense, lazy } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import ProtectedRoute from "./components/common/ProtectedRoute";
+import { ClientsListProvider } from "./context/ClientsListContext";
 
 const AppLayout = lazy(() => import("./components/layout/AppLayout"));
 const LoginPage = lazy(() => import("./pages/LoginPage"));
 const ForgotPasswordPage = lazy(() => import("./pages/ForgotPasswordPage"));
 const ResetPasswordPage = lazy(() => import("./pages/ResetPasswordPage"));
 const ChangePasswordPage = lazy(() => import("./pages/ChangePasswordPage"));
+const AcceptInvitePage = lazy(() => import("./pages/AcceptInvitePage"));
 const DashboardSelectPage = lazy(() => import("./pages/DashboardSelectPage"));
 const ComingSoonPage = lazy(() => import("./pages/ComingSoonPage"));
 const RedirectToSmartSteps = lazy(() => import("./pages/RedirectToSmartSteps"));
@@ -23,8 +25,11 @@ const InvoicesPage = lazy(() => import("./pages/aplus/InvoicesPage"));
 const PaymentsPage = lazy(() => import("./pages/aplus/PaymentsPage"));
 const IntakeFormPage = lazy(() => import("./pages/aplus/IntakeFormPage"));
 const SettingsPage = lazy(() => import("./pages/aplus/SettingsPage"));
+const RemindersPage = lazy(() => import("./pages/aplus/RemindersPage"));
 const UsersPage = lazy(() => import("./pages/aplus/UsersPage"));
 const AuditLogsPage = lazy(() => import("./pages/aplus/AuditLogsPage"));
+const LegalEulaPage     = lazy(() => import("./pages/legal/LegalEulaPage"));
+const LegalPrivacyPage  = lazy(() => import("./pages/legal/LegalPrivacyPage"));
 
 function PageLoader() {
   return (
@@ -38,22 +43,29 @@ export default function App() {
   return (
     <Suspense fallback={<PageLoader />}>
       <Routes>
+        {/* Public legal pages — no authentication required */}
+        <Route path="/legal/eula"    element={<LegalEulaPage />} />
+        <Route path="/legal/privacy" element={<LegalPrivacyPage />} />
+
         <Route path="/login" element={<LoginPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="/accept-invite" element={<AcceptInvitePage />} />
         <Route path="/change-password" element={<ProtectedRoute><ChangePasswordPage /></ProtectedRoute>} />
 
         <Route path="/dashboard" element={<ProtectedRoute><DashboardSelectPage /></ProtectedRoute>} />
         <Route path="/smart-steps" element={<ProtectedRoute><RedirectToSmartSteps /></ProtectedRoute>} />
-        <Route path="/aba-coming-soon" element={<ProtectedRoute><Navigate to="/smart-steps" replace />} />
+        <Route path="/aba-coming-soon" element={<ProtectedRoute><Navigate to="/smart-steps" replace /></ProtectedRoute>} />
 
-        <Route path="/aplus" element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
+        <Route path="/aplus" element={<ProtectedRoute><ClientsListProvider><AppLayout /></ClientsListProvider></ProtectedRoute>}>
           <Route index element={<OverviewPage />} />
           <Route path="clients" element={<ClientsPage />} />
           <Route path="clients/:id" element={<ClientDetailPage />} />
+          <Route path="clients/:id/:tab" element={<ClientDetailPage />} />
           <Route path="services" element={<ServicesPage />} />
           <Route path="providers" element={<ProvidersPage />} />
           <Route path="appointments" element={<AppointmentsPage />} />
+          <Route path="reminders" element={<RemindersPage />} />
           <Route path="data-tracking" element={<DataTrackingPage />} />
           <Route path="assessments" element={<AssessmentsPage />} />
           <Route path="waitlist" element={<WaitlistPage />} />

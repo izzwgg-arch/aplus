@@ -1,0 +1,187 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    @apply font-sans text-slate-800;
+    background-color: #F7F9FC;
+  }
+}
+
+@layer components {
+  /* ── Card ──────────────────────────────────────────────────────────────── */
+  .card {
+    @apply bg-white transition-all duration-200;
+    border-radius: 16px;
+    padding: 24px;
+    border: 1px solid rgba(0, 0, 0, 0.05);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 8px 24px rgba(0,0,0,0.05);
+  }
+
+  .card-hover:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 16px 40px rgba(0,0,0,0.08);
+    transform: translateY(-2px);
+  }
+
+  /* ── Inputs ────────────────────────────────────────────────────────────── */
+  .saas-input {
+    @apply w-full rounded-xl border bg-white px-3 text-sm text-slate-800 transition-all outline-none;
+    height: 40px;
+    border-color: #E2E8F0;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+
+  .saas-input:focus {
+    border-color: #2563EB;
+    box-shadow: 0 0 0 3px rgba(37,99,235,0.12);
+  }
+
+  .saas-textarea {
+    @apply w-full rounded-xl border bg-white px-3 py-2 text-sm text-slate-800 transition-all outline-none;
+    border-color: #E2E8F0;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+
+  .saas-textarea:focus {
+    border-color: #2563EB;
+    box-shadow: 0 0 0 3px rgba(37,99,235,0.12);
+  }
+
+  /* ── Buttons ───────────────────────────────────────────────────────────── */
+  .btn-primary {
+    @apply inline-flex items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold text-white transition-all duration-150;
+    background-color: #2563EB;
+    box-shadow: 0 1px 3px rgba(37,99,235,0.3), 0 4px 12px rgba(37,99,235,0.15);
+  }
+
+  .btn-primary:hover {
+    background-color: #1D4ED8;
+    box-shadow: 0 2px 6px rgba(37,99,235,0.35), 0 6px 18px rgba(37,99,235,0.2);
+    transform: translateY(-1px);
+  }
+
+  .btn-primary:active {
+    transform: translateY(0);
+    box-shadow: 0 1px 2px rgba(37,99,235,0.2);
+  }
+
+  .btn-primary:disabled {
+    opacity: 0.6;
+    transform: none;
+    box-shadow: none;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center rounded-xl border bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition-all duration-150;
+    border-color: #E2E8F0;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  }
+
+  .btn-secondary:hover {
+    background-color: #F8FAFC;
+    border-color: #CBD5E1;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.07);
+  }
+
+  .btn-secondary:disabled {
+    opacity: 0.55;
+  }
+
+  /* ── Empty state ───────────────────────────────────────────────────────── */
+  .empty-state {
+    @apply rounded-2xl border border-dashed border-slate-200 bg-slate-50/60 p-8 text-center text-sm text-slate-400;
+  }
+
+  /* ── Skeleton ──────────────────────────────────────────────────────────── */
+  .skeleton {
+    @apply animate-pulse rounded-xl bg-slate-100;
+  }
+
+  .skeleton-line {
+    @apply skeleton h-4;
+  }
+
+  .rich-text-editor:empty::before {
+    content: attr(data-placeholder);
+    pointer-events: none;
+  }
+
+  .rich-text-editor {
+    overflow-x: auto;
+  }
+
+  .rich-text-editor h2,
+  .rich-text-editor h3,
+  .rich-text-editor h4 {
+    @apply mb-2 mt-3 font-semibold text-slate-950;
+  }
+
+  .rich-text-editor p {
+    @apply mb-2;
+  }
+
+  .rich-text-editor ul,
+  .rich-text-editor ol {
+    @apply mb-3 ml-5;
+  }
+
+  .rich-text-editor ul {
+    @apply list-disc;
+  }
+
+  .rich-text-editor ol {
+    @apply list-decimal;
+  }
+
+  .rich-text-editor table {
+    @apply my-3 w-full border-collapse text-sm;
+    min-width: 640px;
+  }
+
+  .rich-text-editor th,
+  .rich-text-editor td {
+    @apply border border-slate-200 px-3 py-2 align-top;
+    min-width: 120px;
+    word-break: break-word;
+  }
+
+  .rich-text-editor th {
+    @apply bg-slate-50 font-semibold text-slate-700;
+  }
+
+  .rich-text-editor td:hover,
+  .rich-text-editor th:hover {
+    @apply bg-blue-50/50;
+  }
+}
+
+@media print {
+  .rich-text-editor {
+    overflow: visible;
+  }
+
+  .rich-text-editor table {
+    min-width: 0;
+    page-break-inside: avoid;
+  }
+
+  /* Hide app chrome if the user prints the main page directly */
+  aside,
+  nav,
+  header,
+  .btn-primary,
+  .btn-secondary,
+  [role="navigation"] {
+    display: none !important;
+  }
+}
