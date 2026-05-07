@@ -147,7 +147,6 @@ export default function RichTextEditor({ value, onChange, disabled = false, plac
   function cmd(command: string, arg: string | null = null) {
     if (disabled) return;
     editorRef.current?.focus();
-    // eslint-disable-next-line @typescript-eslint/no-deprecated
     document.execCommand(command, false, arg ?? undefined);
     emit();
   }
@@ -264,7 +263,6 @@ export default function RichTextEditor({ value, onChange, disabled = false, plac
     const html = e.clipboardData.getData("text/html");
     const text = e.clipboardData.getData("text/plain");
     const clean = html ? sanitizeHtml(html) : plainTextToHtml(text);
-    // eslint-disable-next-line @typescript-eslint/no-deprecated
     document.execCommand("insertHTML", false, clean);
     emit();
   }
