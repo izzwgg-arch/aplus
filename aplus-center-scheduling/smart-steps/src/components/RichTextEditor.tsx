@@ -219,11 +219,12 @@ export default function RichTextEditor({ value, onChange, disabled = false, plac
     if (!cell || !table) return;
     const insertIdx = cell.cellIndex + 1;
     Array.from(table.rows).forEach((row) => {
-      const ref  = row.cells[Math.min(insertIdx, row.cells.length - 1)];
+      // Insert before the cell currently at insertIdx (or append if at end)
+      const ref  = insertIdx < row.cells.length ? row.cells[insertIdx] : null;
       const tag  = row.parentElement?.tagName === "THEAD" ? "th" : "td";
       const next = document.createElement(tag) as HTMLTableCellElement;
       next.innerHTML = "<br>";
-      row.insertBefore(next, ref?.nextSibling ?? null);
+      row.insertBefore(next, ref);
     });
     emit();
     focusCell((cell.parentElement as HTMLTableRowElement | null)?.cells[insertIdx] as HTMLTableCellElement | undefined);

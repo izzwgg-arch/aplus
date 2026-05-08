@@ -54,6 +54,8 @@ export default function ReportTemplateBuilderPage() {
   async function save() {
     if (saving || !template) return;
     setSaving(true);
+    // Capture position before save — PUT route deletes+recreates sections (new IDs)
+    const activeSectionIndex = sections.findIndex((s) => s.id === activeId);
     try {
       const res = await fetch(`/smart-steps/api/report-templates/${id}/sections`, {
         method: "PUT", headers: { "Content-Type": "application/json" },
@@ -69,6 +71,12 @@ export default function ReportTemplateBuilderPage() {
         setTemplate((p) => p ? { ...p, name: nameVal } : p);
       }
       setSections(updated.sections);
+      // Restore active section by position — IDs changed, positions didn't
+      if (activeSectionIndex >= 0 && updated.sections[activeSectionIndex]) {
+        setActiveId(updated.sections[activeSectionIndex].id);
+      } else if (updated.sections.length > 0) {
+        setActiveId(updated.sections[0].id);
+      }
       setDirty(false);
       toast.success("Saved");
     } catch {

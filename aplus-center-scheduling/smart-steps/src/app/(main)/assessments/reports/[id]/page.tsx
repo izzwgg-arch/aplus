@@ -352,7 +352,7 @@ export default function ClientReportEditorPage() {
           <div className="space-y-4">
             {sections.map((sec, idx) => (
               <div
-                key={sec.id}
+                key={idx}
                 draggable
                 onDragStart={(e) => onDragStart(e, idx)}
                 onDragOver={(e) => onDragOver(e, idx)}
@@ -378,10 +378,11 @@ export default function ClientReportEditorPage() {
                   </div>
                 </div>
 
-                {/* Rich text content */}
+                {/* Rich text content — key uses idx (not sec.id) so editors don't remount
+                    when the PUT route rebuilds sections with new IDs on each save */}
                 <div className="px-4 pb-4 pt-3">
                   <RichTextEditor
-                    key={sec.id}
+                    key={idx}
                     value={sec.content || ""}
                     onChange={(v) => updateSection(sec.id, "content", v)}
                     placeholder={`Write clinical notes for "${sec.title}"…`}
