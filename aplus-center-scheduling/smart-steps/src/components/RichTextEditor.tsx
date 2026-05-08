@@ -87,6 +87,7 @@ export default function RichTextEditor({ value, onChange, disabled = false, plac
   const editorRef       = useRef<HTMLDivElement>(null);
   const lastHtmlRef     = useRef("");
   const activeCellRef   = useRef<HTMLTableCellElement | null>(null);
+  const prevCellRef     = useRef<HTMLTableCellElement | null>(null);
   const [hasCell, setHasCell] = useState(false);
 
   // Sync incoming value → DOM (only when changed externally)
@@ -128,6 +129,12 @@ export default function RichTextEditor({ value, onChange, disabled = false, plac
     const el   = editorRef.current;
     const cell = getSelectionCell();
     const next = cell && el?.contains(cell) ? cell : null;
+    // Update DOM class for active-cell highlight (class is stripped by sanitizer on save)
+    if (prevCellRef.current !== next) {
+      prevCellRef.current?.classList.remove("rte-active-cell");
+      next?.classList.add("rte-active-cell");
+      prevCellRef.current = next;
+    }
     activeCellRef.current = next;
     setHasCell(Boolean(next));
   }
@@ -165,6 +172,10 @@ export default function RichTextEditor({ value, onChange, disabled = false, plac
     const sel = window.getSelection();
     sel?.removeAllRanges();
     sel?.addRange(range);
+    // Update active-cell highlight
+    prevCellRef.current?.classList.remove("rte-active-cell");
+    cell.classList.add("rte-active-cell");
+    prevCellRef.current = cell;
     activeCellRef.current = cell;
     setHasCell(true);
     editorRef.current?.focus();
@@ -185,6 +196,25 @@ export default function RichTextEditor({ value, onChange, disabled = false, plac
       newRow.appendChild(next);
     });
     row.parentNode!.insertBefore(newRow, row.nextSibling);
+    emit();
+    focusCell(newRow.cells[Math.min(cell.cellIndex, newRow.cells.length - 1)] as HTMLTableCellElement);
+  }
+
+  function addRowAbove() {
+    if (disabled) return;
+    const cell = getActiveCell();
+    const row  = cell?.parentElement as HTMLTableRowElement | null;
+    if (!cell || !row) return;
+    const newRow = row.cloneNode(false) as HTMLTableRowElement;
+    Array.from(row.cells).forEach((src) => {
+      const tag  = src.tagName.toLowerCase();
+      const next = document.createElement(tag) as HTMLTableCellElement;
+      if (src.colSpan > 1) next.setAttribute("colspan", String(src.colSpan));
+      if (src.rowSpan > 1) next.setAttribute("rowspan", String(src.rowSpan));
+      next.innerHTML = "<br>";
+      newRow.appendChild(next);
+    });
+    row.parentNode!.insertBefore(newRow, row); // before current row, not after
     emit();
     focusCell(newRow.cells[Math.min(cell.cellIndex, newRow.cells.length - 1)] as HTMLTableCellElement);
   }
@@ -230,6 +260,24 @@ export default function RichTextEditor({ value, onChange, disabled = false, plac
     focusCell((cell.parentElement as HTMLTableRowElement | null)?.cells[insertIdx] as HTMLTableCellElement | undefined);
   }
 
+  function addColumnLeft() {
+    if (disabled) return;
+    const cell  = getActiveCell();
+    const table = cell?.closest("table") as HTMLTableElement | null;
+    if (!cell || !table) return;
+    const insertIdx = cell.cellIndex; // insert AT current index — pushes current cell right
+    Array.from(table.rows).forEach((row) => {
+      const ref  = insertIdx < row.cells.length ? row.cells[insertIdx] : null;
+      const tag  = row.parentElement?.tagName === "THEAD" ? "th" : "td";
+      const next = document.createElement(tag) as HTMLTableCellElement;
+      next.innerHTML = "<br>";
+      row.insertBefore(next, ref);
+    });
+    emit();
+    // New cell lands at insertIdx; current cell shifted to insertIdx+1
+    focusCell((cell.parentElement as HTMLTableRowElement | null)?.cells[insertIdx] as HTMLTableCellElement | undefined);
+  }
+
   function deleteCurrentColumn() {
     if (disabled) return;
     const cell  = getActiveCell();
@@ -263,7 +311,17 @@ export default function RichTextEditor({ value, onChange, disabled = false, plac
     e.preventDefault();
     const html = e.clipboardData.getData("text/html");
     const text = e.clipboardData.getData("text/plain");
-    const clean = html ? sanitizeHtml(html) : plainTextToHtml(text);
+    let clean: string;
+    if (html) {
+      clean = sanitizeHtml(html);
+    } else if (getSelectionCell()) {
+      // Inside a table cell: use <br> for line breaks instead of wrapping in <p> blocks
+      clean = text
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        .replace(/\n/g, "<br>");
+    } else {
+      clean = plainTextToHtml(text);
+    }
     document.execCommand("insertHTML", false, clean);
     emit();
   }
@@ -292,24 +350,32 @@ export default function RichTextEditor({ value, onChange, disabled = false, plac
         <Btn title="Paragraph"      onClick={() => cmd("formatBlock", "p")}>Paragraph</Btn>
         <Btn title="Bulleted list"  onClick={() => cmd("insertUnorderedList")}>• List</Btn>
         <Btn title="Numbered list"  onClick={() => cmd("insertOrderedList")}>1. List</Btn>
+
+        {/* Text alignment — persists via sanitizer text-align allowance */}
+        <span className="mx-0.5 h-4 w-px shrink-0 bg-[var(--glass-border)]" />
+        <Btn title="Align left"   onClick={() => cmd("justifyLeft")}>L</Btn>
+        <Btn title="Align center" onClick={() => cmd("justifyCenter")}>C</Btn>
+        <Btn title="Align right"  onClick={() => cmd("justifyRight")}>R</Btn>
+
+        {/* Table inserts */}
+        <span className="mx-0.5 h-4 w-px shrink-0 bg-[var(--glass-border)]" />
         <Btn title="Insert blank table" onClick={() => cmd("insertHTML", buildTable(["Label", "Details"]))}>
           Table
         </Btn>
-
-        {/* Default table blocks */}
         {TABLE_BLOCKS.map((block) => (
           <Btn key={block.id} title={`Insert ${block.label} table`} onClick={() => insertTable(block.cols)}>
             {block.label}
           </Btn>
         ))}
 
-        <span className="mx-0.5 h-4 w-px shrink-0 bg-[var(--glass-border)]" />
-
         {/* Table row/col controls — only active when cursor is inside a cell */}
-        <TableBtn title="Add row below current row" disabled={disabled || !hasCell} onClick={addRowBelow}>+Row</TableBtn>
-        <TableBtn title="Delete current row"        disabled={disabled || !hasCell} onClick={deleteCurrentRow}>−Row</TableBtn>
-        <TableBtn title="Add column right"          disabled={disabled || !hasCell} onClick={addColumnRight}>+Col</TableBtn>
-        <TableBtn title="Delete current column"     disabled={disabled || !hasCell} onClick={deleteCurrentColumn}>−Col</TableBtn>
+        <span className="mx-0.5 h-4 w-px shrink-0 bg-[var(--glass-border)]" />
+        <TableBtn title="Add row below" disabled={disabled || !hasCell} onClick={addRowBelow}>+Row↓</TableBtn>
+        <TableBtn title="Add row above" disabled={disabled || !hasCell} onClick={addRowAbove}>+Row↑</TableBtn>
+        <TableBtn title="Delete row"    disabled={disabled || !hasCell} onClick={deleteCurrentRow}>−Row</TableBtn>
+        <TableBtn title="Add column right" disabled={disabled || !hasCell} onClick={addColumnRight}>+Col→</TableBtn>
+        <TableBtn title="Add column left"  disabled={disabled || !hasCell} onClick={addColumnLeft}>+Col←</TableBtn>
+        <TableBtn title="Delete column"    disabled={disabled || !hasCell} onClick={deleteCurrentColumn}>−Col</TableBtn>
       </div>
 
       {/* Editable area */}

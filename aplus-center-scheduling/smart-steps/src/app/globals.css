@@ -202,6 +202,7 @@ select.field-input {
   text-align: left;
   vertical-align: top;
   min-width: 80px;
+  min-height: 2em; /* keeps empty cells clickable */
 }
 .rich-text-editor th {
   background: rgba(255, 255, 255, 0.07);
@@ -220,6 +221,13 @@ select.field-input {
   outline: 1px solid rgba(34, 211, 238, 0.35);
   background: rgba(34, 211, 238, 0.04);
 }
+/* Active cell — set via JS (class stripped by sanitizer on save, DOM-only) */
+.rich-text-editor td.rte-active-cell,
+.rich-text-editor th.rte-active-cell {
+  outline: 2px solid rgba(34, 211, 238, 0.55);
+  outline-offset: -1px;
+  background: rgba(34, 211, 238, 0.09);
+}
 
 /* ─── Print styles ───────────────────────────────────────────────────────────── */
 @media print {
@@ -233,16 +241,23 @@ select.field-input {
   .rich-text-editor table {
     border-collapse: collapse;
     width: 100%;
+    margin: 0.5em 0;
+    page-break-inside: avoid;
   }
   .rich-text-editor th,
   .rich-text-editor td {
-    border: 1px solid #aaa;
-    padding: 4px 8px;
+    border: 1px solid #999;
+    padding: 6px 10px;
     color: #000;
-    background: transparent;
+    background: transparent !important;
+    outline: none !important;
+    min-height: unset;
   }
   .rich-text-editor th {
-    background: #f0f0f0 !important;
+    background: #efefef !important;
     font-weight: bold;
+  }
+  .rich-text-editor tr {
+    page-break-inside: avoid;
   }
 }

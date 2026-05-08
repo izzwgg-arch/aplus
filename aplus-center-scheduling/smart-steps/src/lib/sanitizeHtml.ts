@@ -34,7 +34,14 @@ function sanitizeAttrs(tagName: string, rawAttrs: string): string {
   while ((m = pat.exec(rawAttrs)) !== null) {
     const name = m[1].toLowerCase();
     const val  = m[2] ?? m[3] ?? m[4] ?? "";
-    if (name.startsWith("on") || name === "style" || !allowed.has(name)) continue;
+    if (name.startsWith("on")) continue;
+    // Allow only text-align from style attributes — everything else in style is stripped
+    if (name === "style") {
+      const align = val.match(/\btext-align\s*:\s*(left|center|right|justify)\b/i)?.[1];
+      if (align) attrs.set("style", `text-align:${align.toLowerCase()}`);
+      continue;
+    }
+    if (!allowed.has(name)) continue;
     if ((name === "href" || name === "src") && /^\s*javascript:/i.test(val)) continue;
     if ((name === "colspan" || name === "rowspan") && !/^\d{1,2}$/.test(val)) continue;
     attrs.set(name, val);
