@@ -26,26 +26,13 @@ const STATUS_STYLES: Record<string, string> = {
 
 // ── Print / Save as PDF ───────────────────────────────────────────────────────
 
-type OrgSettings = {
-  orgName?: string | null;
-  orgAddress?: string | null;
-  orgPhone?: string | null;
-  orgEmail?: string | null;
-  logoUrl?: string | null;
-  letterheadHtml?: string | null;
-  footerHtml?: string | null;
-};
+const LETTERHEAD_TOP_SRC = "/smart-steps/letterhead/smart-steps-top.png?v=pdf-sharp-20260630";
+const LETTERHEAD_WATERMARK_SRC = "/smart-steps/letterhead/smart-steps-watermark.png?v=transparent-soft-20260630";
+const LETTERHEAD_BOTTOM_SRC = "/smart-steps/letterhead/smart-steps-bottom.png?v=pdf-sharp-20260630";
 
 async function printReport(report: Report, sections: Section[]) {
   const win = window.open("", "_blank");
   if (!win) { toast.error("Pop-up blocked — allow pop-ups and try again."); return; }
-
-  // Fetch org settings for letterhead/footer (non-blocking; fall back gracefully)
-  let org: OrgSettings = {};
-  try {
-    const r = await fetch("/smart-steps/api/organization/settings");
-    if (r.ok) org = await r.json();
-  } catch { /* ignore */ }
 
   const clientName = escapeHtml(report.client?.name ?? "");
   const title      = escapeHtml(report.title);
@@ -53,28 +40,14 @@ async function printReport(report: Report, sections: Section[]) {
     month: "long", day: "numeric", year: "numeric",
   });
 
-  // Build letterhead block
-  const letterheadBlock = org.letterheadHtml
-    ? `<div class="org-letterhead">${org.letterheadHtml}</div>`
-    : org.orgName
-    ? `<div class="org-letterhead">
-        ${org.logoUrl ? `<img src="${escapeHtml(org.logoUrl)}" alt="${escapeHtml(org.orgName ?? "")}" class="org-logo">` : ""}
-        <div class="org-info">
-          <strong>${escapeHtml(org.orgName ?? "")}</strong>
-          ${org.orgAddress ? `<span>${escapeHtml(org.orgAddress)}</span>` : ""}
-          ${org.orgPhone   ? `<span>${escapeHtml(org.orgPhone)}</span>`   : ""}
-          ${org.orgEmail   ? `<span>${escapeHtml(org.orgEmail)}</span>`   : ""}
-        </div>
-      </div>`
+  const [firstSection, ...remainingSections] = sections;
+  const firstSectionHtml = firstSection
+    ? `<section class="report-section first-report-section">
+        <h2>${escapeHtml(firstSection.title)}</h2>
+        <div class="section-content">${firstSection.content || "<p><em>(empty)</em></p>"}</div>
+      </section>`
     : "";
-
-  const footerBlock = org.footerHtml
-    ? `<div class="org-footer">${org.footerHtml}</div>`
-    : org.orgName
-    ? `<div class="org-footer"><p>${escapeHtml(org.orgName ?? "")}${org.orgAddress ? ` · ${escapeHtml(org.orgAddress)}` : ""}</p></div>`
-    : "";
-
-  const sectionsHtml = sections
+  const remainingSectionsHtml = remainingSections
     .map((s) => `
       <section class="report-section">
         <h2>${escapeHtml(s.title)}</h2>
@@ -88,40 +61,115 @@ async function printReport(report: Report, sections: Section[]) {
   <meta charset="utf-8">
   <title>${title}</title>
   <style>
+    @page { size: letter; margin: 0; }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html {
+      background: #fff;
+    }
     body {
       font-family: Georgia, "Times New Roman", serif;
       font-size: 11pt;
       line-height: 1.6;
       color: #111;
       background: #fff;
-      padding: 1in;
       max-width: 8.5in;
       margin: 0 auto;
+      padding: 0;
+      position: relative;
+      overflow-x: hidden;
     }
-    .org-letterhead {
-      display: flex;
-      align-items: center;
-      gap: 16pt;
-      padding-bottom: 10pt;
-      margin-bottom: 12pt;
-      border-bottom: 2px solid #333;
+    .print-watermark {
+      pointer-events: none;
+      user-select: none;
     }
-    .org-logo { max-height: 60pt; max-width: 120pt; object-fit: contain; }
-    .org-info { display: flex; flex-direction: column; gap: 2pt; font-size: 10pt; color: #333; }
-    .org-info strong { font-size: 13pt; color: #111; }
+    .print-watermark {
+      position: fixed;
+      top: 3.15in;
+      left: 50%;
+      width: 6.15in;
+      max-width: 72%;
+      height: auto;
+      transform: translateX(-50%);
+      opacity: 0.24;
+      z-index: 0;
+    }
+    .front-page {
+      position: relative;
+      min-height: 11in;
+      padding: 2.32in 0.65in 1.45in;
+      page-break-after: always;
+      break-after: page;
+    }
+    .front-page-letterhead,
+    .front-page-bottom {
+      position: absolute;
+      left: 0;
+      width: 8.5in;
+      height: auto;
+      z-index: 0;
+      pointer-events: none;
+      user-select: none;
+    }
+    .front-page-letterhead {
+      top: 0;
+    }
+    .front-page-bottom {
+      bottom: 0;
+    }
+    .following-pages {
+      position: relative;
+      z-index: 1;
+      padding: 0;
+    }
+    .pagination-source {
+      display: none;
+    }
+    .content-page {
+      position: relative;
+      z-index: 1;
+      width: 8.5in;
+      min-height: 11in;
+      height: 11in;
+      padding: 0.72in 0.65in 0.85in;
+      page-break-after: always;
+      break-after: page;
+      overflow: hidden;
+    }
+    .content-page:last-child {
+      page-break-after: auto;
+      break-after: auto;
+    }
+    .content-page-inner {
+      height: 9.43in;
+      overflow: visible;
+    }
+    .print-content {
+      position: relative;
+      z-index: 1;
+    }
     .report-header {
       border-bottom: 1px solid #555;
       padding-bottom: 10pt;
       margin-bottom: 20pt;
+      background: transparent;
     }
-    .report-header h1 { font-size: 16pt; font-weight: bold; margin-bottom: 5pt; }
-    .report-meta { font-size: 10pt; color: #444; display: flex; gap: 24pt; flex-wrap: wrap; }
+    .report-header h1 {
+      font-size: 16pt;
+      font-weight: bold;
+      line-height: 1.2;
+      margin-bottom: 5pt;
+      visibility: hidden;
+    }
+    .report-meta { font-size: 10pt; color: #111; display: flex; gap: 24pt; flex-wrap: wrap; }
     .report-section {
-      margin-bottom: 24pt;
-      page-break-inside: avoid;
+      margin-bottom: 22pt;
+      page-break-inside: auto;
+      break-inside: auto;
       orphans: 4;
       widows: 4;
+    }
+    .first-report-section {
+      margin-bottom: 0;
     }
     .report-section h2 {
       font-size: 13pt;
@@ -131,8 +179,19 @@ async function printReport(report: Report, sections: Section[]) {
       padding-bottom: 4pt;
       margin-bottom: 10pt;
       page-break-after: avoid;
+      break-after: avoid;
+    }
+    .continued-label {
+      color: #555;
+      font-size: 10pt;
+      font-style: italic;
+      font-weight: normal;
     }
     .section-content { font-size: 11pt; font-family: inherit; }
+    .section-content,
+    .report-section h2 {
+      background: transparent;
+    }
     p  { margin-bottom: 8pt; orphans: 3; widows: 3; }
     ul, ol { margin: 8pt 0 8pt 20pt; }
     li { margin-bottom: 4pt; }
@@ -163,42 +222,147 @@ async function printReport(report: Report, sections: Section[]) {
     th { background: #f0f0f0; font-weight: bold; }
     span { /* Inline font-size, font-family, color, background-color from editor preserved as-is */ }
     hr { border: none; border-top: 1px solid #ccc; margin: 14pt 0; }
-    .org-footer {
-      margin-top: 32pt;
-      padding-top: 8pt;
-      border-top: 1px solid #aaa;
-      font-size: 9pt;
-      color: #666;
-      text-align: center;
-    }
     @media print {
-      body { padding: 0.5in; }
-      .report-section { page-break-inside: avoid; }
+      html, body {
+        width: 8.5in;
+        min-height: 11in;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      .front-page {
+        height: 11in;
+      }
+      .report-section {
+        page-break-inside: auto;
+        break-inside: auto;
+      }
       thead { display: table-header-group; }
       tr { page-break-inside: avoid; }
       h2, h3 { page-break-after: avoid; }
       a { color: #000; text-decoration: none; }
     }
+    @media screen {
+      .following-pages {
+        padding: 0;
+      }
+    }
   </style>
 </head>
 <body>
-  ${letterheadBlock}
-  <div class="report-header">
-    <h1>${title}</h1>
-    <div class="report-meta">
-      ${clientName ? `<span><strong>Client:</strong> ${clientName}</span>` : ""}
-      <span><strong>Status:</strong> ${escapeHtml(report.status.replace("_", " "))}</span>
-      <span><strong>Updated:</strong> ${escapeHtml(updated)}</span>
+  <img class="print-watermark" src="${LETTERHEAD_WATERMARK_SRC}" alt="">
+  <main class="front-page">
+    <img class="front-page-letterhead" src="${LETTERHEAD_TOP_SRC}" alt="">
+    <img class="front-page-bottom" src="${LETTERHEAD_BOTTOM_SRC}" alt="">
+    <div class="print-content">
+      <div class="report-header">
+        <h1 aria-hidden="true">${title}</h1>
+        <div class="report-meta">
+          ${clientName ? `<span><strong>Client:</strong> ${clientName}</span>` : ""}
+          <span><strong>Status:</strong> ${escapeHtml(report.status.replace("_", " "))}</span>
+          <span><strong>Updated:</strong> ${escapeHtml(updated)}</span>
+        </div>
+      </div>
+      ${firstSectionHtml}
     </div>
+  </main>
+  <main class="following-pages" id="paginated-pages"></main>
+  <div class="pagination-source" id="pagination-source">
+    ${remainingSectionsHtml}
   </div>
-  ${sectionsHtml}
-  ${footerBlock}
 </body>
 </html>`);
 
   win.document.close();
-  win.focus();
-  setTimeout(() => { win.print(); }, 400);
+  function paginatePrintDocument(doc: Document) {
+    const source = doc.getElementById("pagination-source");
+    const target = doc.getElementById("paginated-pages");
+    if (!source || !target) return;
+    const pageTarget = target;
+
+    const pageInnerHeightTolerance = 2;
+    let pageInner: HTMLElement | null = null;
+
+    function createPage() {
+      const page = doc.createElement("section");
+      page.className = "content-page";
+      page.setAttribute("aria-label", "Assessment content page");
+      const inner = doc.createElement("div");
+      inner.className = "content-page-inner";
+      page.appendChild(inner);
+      pageTarget.appendChild(page);
+      pageInner = inner;
+      return inner;
+    }
+
+    function createSectionShell(titleHtml: string, continued: boolean) {
+      const shell = doc.createElement("section");
+      shell.className = "report-section";
+      const titleEl = doc.createElement("h2");
+      titleEl.innerHTML = continued ? `${titleHtml} <span class="continued-label">(continued)</span>` : titleHtml;
+      const contentEl = doc.createElement("div");
+      contentEl.className = "section-content";
+      shell.append(titleEl, contentEl);
+      return { shell, contentEl };
+    }
+
+    function pageOverflows() {
+      return !!pageInner && pageInner.scrollHeight > pageInner.clientHeight + pageInnerHeightTolerance;
+    }
+
+    function appendSectionToPages(section: Element) {
+      const heading = section.querySelector("h2");
+      const content = section.querySelector(".section-content");
+      const titleHtml = heading?.innerHTML || "";
+      const blocks = content ? Array.from(content.childNodes) : [];
+      let continued = false;
+      let current = createSectionShell(titleHtml, continued);
+
+      if (!pageInner) createPage();
+      pageInner?.appendChild(current.shell);
+
+      if (pageOverflows()) {
+        current.shell.remove();
+        createPage();
+        pageInner?.appendChild(current.shell);
+      }
+
+      for (const block of blocks) {
+        current.contentEl.appendChild(block);
+        if (!pageOverflows()) continue;
+
+        current.contentEl.removeChild(block);
+        if (!current.contentEl.childNodes.length) {
+          current.contentEl.appendChild(block);
+          continue;
+        }
+
+        continued = true;
+        createPage();
+        current = createSectionShell(titleHtml, continued);
+        pageInner?.appendChild(current.shell);
+        current.contentEl.appendChild(block);
+      }
+    }
+
+    createPage();
+    Array.from(source.querySelectorAll(".report-section")).forEach(appendSectionToPages);
+    if (pageTarget.lastElementChild?.querySelector(".content-page-inner")?.childNodes.length === 0) {
+      pageTarget.lastElementChild.remove();
+    }
+    source.remove();
+  }
+  const images = Array.from(win.document.images);
+  Promise.all(images.map((img) => {
+    if (img.complete) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      img.onload = () => resolve();
+      img.onerror = () => resolve();
+    });
+  })).then(() => {
+    paginatePrintDocument(win.document);
+    win.focus();
+    setTimeout(() => { win.print(); }, 100);
+  });
 }
 
 // ── Main Page ─────────────────────────────────────────────────────────────────

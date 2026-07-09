@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { requireSession } from "@/lib/session";
+import { requirePermissionResponse } from "@/lib/permissions";
 import { prisma } from "@/lib/db";
 import { sanitizeHtml } from "@/lib/sanitizeHtml";
 
 export async function PUT(req: Request, { params }: { params: Promise<{ templateId: string }> }) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const user = await requireSession();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const denied = await requirePermissionResponse(user.id, "smartsteps.report_templates.manage");
+  if (denied) return denied;
   const { templateId } = await params;
 
   const { sections } = await req.json();
@@ -29,8 +32,10 @@ export async function PUT(req: Request, { params }: { params: Promise<{ template
 }
 
 export async function POST(req: Request, { params }: { params: Promise<{ templateId: string }> }) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const user = await requireSession();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const denied = await requirePermissionResponse(user.id, "smartsteps.report_templates.manage");
+  if (denied) return denied;
   const { templateId } = await params;
 
   const { title, content = "" } = await req.json();

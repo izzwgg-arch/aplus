@@ -1,14 +1,17 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { requireSession } from "@/lib/session";
+import { requireClientAccessResponse, requirePermissionResponse } from "@/lib/permissions";
 import { prisma } from "@/lib/db";
 
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ clientId: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const user = await requireSession();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { clientId } = await params;
+  const denied = await requireClientAccessResponse(user.id, clientId, "smartsteps.goals.view");
+  if (denied) return denied;
 
   try {
     const goals = await prisma.parentGoal.findMany({
@@ -47,8 +50,11 @@ export async function POST(
   req: Request,
   { params }: { params: Promise<{ clientId: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const user = await requireSession();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const denied = await requirePermissionResponse(user.id, "smartsteps.goals.create");
+  if (denied) return denied;
 
   const { clientId } = await params;
 

@@ -7,6 +7,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { Plus, ClipboardList, Edit2, Archive, FileText, X, ChevronRight, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
+import { RequirePermission } from "@/components/common/RequirePermission";
 
 // ── Existing scoring-template types ──────────────────────────────────────────
 type Template = {
@@ -347,6 +348,21 @@ function CreateReportModal({
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function AssessmentTemplatesPage() {
+  return (
+    <RequirePermission
+      anyOf={[
+        "smartsteps.assessment_templates.view",
+        "smartsteps.assessment_templates.manage",
+        "smartsteps.report_templates.view",
+        "smartsteps.report_templates.manage",
+      ]}
+    >
+      <AssessmentTemplatesPageInner />
+    </RequirePermission>
+  );
+}
+
+function AssessmentTemplatesPageInner() {
   const router = useRouter();
   const qc     = useQueryClient();
   const [tab,   setTab]   = useState<"scoring" | "report">("scoring");

@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { FileText, Download, FileSpreadsheet, BarChart2, ClipboardList } from "lucide-react";
 import { toast } from "sonner";
+import { RequirePermission } from "@/components/common/RequirePermission";
 
 type ReportType = "progress" | "session_summary" | "behavior" | "assessment_summary";
 
@@ -273,8 +274,10 @@ function ReportsInner() {
 
 export default function ReportsPage() {
   return (
-    <Suspense fallback={<div className="p-8"><div className="glass-card skeleton h-64 rounded-2xl" /></div>}>
-      <ReportsInner />
-    </Suspense>
+    <RequirePermission anyOf={["smartsteps.reports.view.all", "smartsteps.reports.export"]}>
+      <Suspense fallback={<div className="p-8"><div className="glass-card skeleton h-64 rounded-2xl" /></div>}>
+        <ReportsInner />
+      </Suspense>
+    </RequirePermission>
   );
 }

@@ -74,26 +74,79 @@ enum ResponseType {
 }
 
 model User {
-  id            String    @id @default(cuid())
-  email         String    @unique
-  name          String?
-  role          Role      @default(RBT)
-  image         String?
-  emailVerified DateTime?
-  phone         String?
-  credentials   String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  assignedClients ClientAssignment[]
-  sessions      Session[]
-  notes         Note[]
-  auditEntries  AuditEntry[]
+  id                   String             @id @default(cuid())
+  email                String             @unique
+  name                 String?
+  role                 Role               @default(RBT)
+  displayRole          String? // human-readable title (Supervisor, Clinical Director, etc.)
+  // Legacy `role` enum kept for backward compatibility / display fallback.
+  // `appRoleId` is the new granular-permission role, nullable until the
+  // backfill script runs.
+  appRoleId            String?
+  passwordHash         String? // set when the account has a standalone SmartSteps login (not SSO-only)
+  isActive             Boolean            @default(true) // false = inactive; preserved on SSO sync
+  image                String?
+  emailVerified        DateTime?
+  phone                String?
+  credentials          String?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  assignedClients      ClientAssignment[]
+  sessions             Session[]
+  notes                Note[]
+  auditEntries         AuditEntry[]
   completedAssessments ClientAssessment[]
-  targetAnnotations TargetAnnotation[]
+  targetAnnotations    TargetAnnotation[]
+  appRole              AppRole?           @relation(fields: [appRoleId], references: [id], onDelete: SetNull)
+}
+
+// ─── Permission System (Phase 1) ─────────────────────────────────────────────
+// Additive-only tables. Named `AppRole` (not `Role`) to avoid colliding with
+// the existing `Role` enum (RBT/BCBA/ADMIN), which is untouched.
+
+model AppRole {
+  id          String   @id @default(cuid())
+  key         String   @unique // stable machine key, e.g. "ADMIN", "RBT", "PARENT_VIEWER"
+  name        String
+  description String?
+  isSystem    Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  permissions AppRolePermission[]
+  users       User[]
+
+  @@index([isActive])
+}
+
+model AppPermission {
+  id          String @id @default(cuid())
+  key         String @unique // e.g. "smartsteps.clients.view.assigned"
+  category    String
+  label       String
+  description String?
+
+  roles AppRolePermission[]
+
+  @@index([category])
+}
+
+model AppRolePermission {
+  id           String @id @default(cuid())
+  roleId       String
+  permissionId String
+
+  role       AppRole       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission AppPermission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@index([roleId])
 }
 
 model Client {
-  id                String   @id @default(cuid())
+  id                String             @id @default(cuid())
   name              String
   photoUrl          String?
   dob               DateTime
@@ -105,9 +158,9 @@ model Client {
   school            String?
   insuranceId       String?
   intakeNotes       String?
-  isArchived        Boolean  @default(false)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  isArchived        Boolean            @default(false)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
   assignments       ClientAssignment[]
   programs          Program[]
   parentGoals       ParentGoal[]
@@ -127,21 +180,22 @@ model ClientAssignment {
   createdAt DateTime @default(now())
   client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@unique([clientId, userId])
   @@index([clientId])
   @@index([userId])
 }
 
 model Program {
-  id          String      @id @default(cuid())
+  id          String       @id @default(cuid())
   clientId    String
   name        String
   domain      String
   description String?
-  isActive    Boolean     @default(true)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
-  client      Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  isActive    Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  client      Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
   targets     Target[]
   parentGoals ParentGoal[]
 }
@@ -153,7 +207,7 @@ model ParentGoal {
   programId   String?
   title       String
   description String?
-  domain      String?    // Communication, Self-Care, Social, Academic, etc.
+  domain      String? // Communication, Self-Care, Social, Academic, etc.
   status      GoalStatus @default(ACTIVE)
   priority    Int        @default(0)
   targetDate  DateTime?
@@ -163,7 +217,8 @@ model ParentGoal {
   client      Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
   program     Program?   @relation(fields: [programId], references: [id], onDelete: SetNull)
   subGoals    SubGoal[]
-  targets     Target[]   // targets can live directly under parent goal too
+  targets     Target[] // targets can live directly under parent goal too
+
   @@index([clientId])
 }
 
@@ -180,33 +235,35 @@ model SubGoal {
   updatedAt    DateTime   @updatedAt
   parentGoal   ParentGoal @relation(fields: [parentGoalId], references: [id], onDelete: Cascade)
   targets      Target[]
+
   @@index([parentGoalId])
 }
 
 // Measurable ABA target
 model Target {
-  id                    String      @id @default(cuid())
-  programId             String?     // Legacy link to Program
-  parentGoalId          String?     // Direct link to ParentGoal (if no subGoal)
-  subGoalId             String?     // Preferred: link via SubGoal
-  definition            String
-  targetType            String      @default("DISCRETE_TRIAL")
-  phase                 String      @default("BASELINE")
-  masteryRule           Json?       // { thresholdPct, consecutiveDays, promptFade }
-  promptHierarchy       String[]    @default([])
-  baseline              String?
-  dateMastered          DateTime?
-  isActive              Boolean     @default(true)
-  inMaintenance         Boolean     @default(false)
-  inGeneralization      Boolean     @default(false)
-  notes                 String?
-  createdAt             DateTime    @default(now())
-  updatedAt             DateTime    @updatedAt
-  program               Program?    @relation(fields: [programId], references: [id], onDelete: SetNull)
-  parentGoal            ParentGoal? @relation(fields: [parentGoalId], references: [id], onDelete: Cascade)
-  subGoal               SubGoal?    @relation(fields: [subGoalId], references: [id], onDelete: Cascade)
-  trials                Trial[]
-  annotations           TargetAnnotation[]
+  id               String             @id @default(cuid())
+  programId        String? // Legacy link to Program
+  parentGoalId     String? // Direct link to ParentGoal (if no subGoal)
+  subGoalId        String? // Preferred: link via SubGoal
+  definition       String
+  targetType       String             @default("DISCRETE_TRIAL")
+  phase            String             @default("BASELINE")
+  masteryRule      Json? // { thresholdPct, consecutiveDays, promptFade }
+  promptHierarchy  String[]           @default([])
+  baseline         String?
+  dateMastered     DateTime?
+  isActive         Boolean            @default(true)
+  inMaintenance    Boolean            @default(false)
+  inGeneralization Boolean            @default(false)
+  notes            String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  program          Program?           @relation(fields: [programId], references: [id], onDelete: SetNull)
+  parentGoal       ParentGoal?        @relation(fields: [parentGoalId], references: [id], onDelete: Cascade)
+  subGoal          SubGoal?           @relation(fields: [subGoalId], references: [id], onDelete: Cascade)
+  trials           Trial[]
+  annotations      TargetAnnotation[]
+
   @@index([programId])
   @@index([subGoalId])
   @@index([parentGoalId])
@@ -228,21 +285,23 @@ model Session {
   trials             Trial[]
   behaviors          BehaviorEvent[]
   intervalRecordings IntervalRecording[]
+  sessionNotes       Note[]
 }
 
 model Trial {
-  id          String      @id @default(cuid())
+  id          String    @id @default(cuid())
   sessionId   String
   targetId    String
-  result      String      // CORRECT | INCORRECT | PROMPTED | NR | SKIP
+  result      String // CORRECT | INCORRECT | PROMPTED | NR | SKIP
   promptLevel String?
   latencyMs   Int?
   notes       String?
   deletedAt   DateTime?
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
-  session     Session     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  target      Target      @relation(fields: [targetId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  session     Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  target      Target    @relation(fields: [targetId], references: [id], onDelete: Cascade)
+
   @@index([sessionId])
   @@index([targetId])
   @@index([deletedAt])
@@ -251,7 +310,7 @@ model Trial {
 model BehaviorEvent {
   id          String   @id @default(cuid())
   sessionId   String
-  type        String   // frequency, duration, latency, ABC
+  type        String // frequency, duration, latency, ABC
   value       Float?
   antecedent  String?
   behavior    String?
@@ -260,24 +319,40 @@ model BehaviorEvent {
   notes       String?
   createdAt   DateTime @default(now())
   session     Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
   @@index([sessionId])
 }
 
 model Note {
-  id        String   @id @default(cuid())
-  clientId  String
-  userId    String
-  content   String
-  type      String   // SOAP, progress, general
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id              String    @id @default(cuid())
+  clientId        String
+  userId          String
+  sessionId       String?
+  title           String?
+  type            String // BT_SESSION | BCBA | GENERAL
+  bcbaServiceType String? // DSU | TM | TP | PRT | ASSES
+  serviceDate     DateTime?
+  timeIn          String?
+  timeOut         String?
+  attendance      String?
+  content         String
+  recommendations String?
+  nextSteps       String?
+  providerName    String?
+  isGenerated     Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  client          Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session         Session?  @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
   @@index([clientId])
+  @@index([serviceDate])
+  @@index([sessionId])
 }
 
 model TargetAnnotation {
-  id         String   @id @default(cuid())
+  id          String   @id @default(cuid())
   targetId    String
   userId      String?
   note        String
@@ -287,34 +362,103 @@ model TargetAnnotation {
   updatedAt   DateTime @updatedAt
   target      Target   @relation(fields: [targetId], references: [id], onDelete: Cascade)
   user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
   @@index([targetId, annotatedAt])
 }
 
 model TargetLibraryItem {
-  id                    String   @id @default(cuid())
+  id                    String             @id @default(cuid())
   title                 String
   operationalDefinition String?
-  targetType            String   @default("DISCRETE_TRIAL")
+  targetType            String             @default("DISCRETE_TRIAL")
   masteryRule           Json?
-  promptHierarchy       String[] @default([])
+  promptHierarchy       String[]           @default([])
   baseline              String?
   notes                 String?
+  category              String?
+  skillArea             String?
+  domain                String?
+  isActive              Boolean            @default(true)
+  usageCount            Int                @default(0)
   createdById           String?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+  favorites             UserGoalFavorite[] @relation("GoalFavorites")
+  usageLogs             GoalLibraryUsage[] @relation("GoalUsage")
+
+  @@index([isActive])
+  @@index([category])
+  @@index([skillArea])
+  @@index([usageCount])
+}
+
+// Global reusable parent goal templates — no clientId
+model ParentGoalLibraryItem {
+  id          String             @id @default(cuid())
+  title       String
+  description String?
+  domain      String?
+  category    String?
+  skillArea   String?
+  notes       String?
+  isActive    Boolean            @default(true)
+  usageCount  Int                @default(0)
+  createdById String?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  favorites   UserGoalFavorite[] @relation("ParentGoalFavorites")
+  usageLogs   GoalLibraryUsage[] @relation("ParentGoalUsage")
+
+  @@index([isActive])
+  @@index([domain])
+  @@index([category])
+  @@index([usageCount])
+}
+
+// Per-user recently-used tracking — row inserted only after confirmed client-goal save
+model GoalLibraryUsage {
+  id           String                 @id @default(cuid())
+  userId       String
+  itemType     String // 'GOAL' | 'PARENT_GOAL'
+  goalItem     TargetLibraryItem?     @relation("GoalUsage", fields: [goalItemId], references: [id], onDelete: Cascade)
+  goalItemId   String?
+  parentItem   ParentGoalLibraryItem? @relation("ParentGoalUsage", fields: [parentItemId], references: [id], onDelete: Cascade)
+  parentItemId String?
+  usedAt       DateTime               @default(now())
+
+  @@index([userId, itemType, usedAt(sort: Desc)])
+  @@index([goalItemId])
+  @@index([parentItemId])
+}
+
+// Per-user favorites — each clinician has their own set, never shared
+model UserGoalFavorite {
+  id           String                 @id @default(cuid())
+  userId       String
+  itemType     String // 'GOAL' | 'PARENT_GOAL'
+  goalItem     TargetLibraryItem?     @relation("GoalFavorites", fields: [goalItemId], references: [id], onDelete: Cascade)
+  goalItemId   String?
+  parentItem   ParentGoalLibraryItem? @relation("ParentGoalFavorites", fields: [parentItemId], references: [id], onDelete: Cascade)
+  parentItemId String?
+  createdAt    DateTime               @default(now())
+
+  @@unique([userId, goalItemId])
+  @@unique([userId, parentItemId])
+  @@index([userId, itemType])
 }
 
 model Attachment {
-  id          String    @id @default(cuid())
-  clientId    String?
-  targetId    String?
-  sessionId   String?
-  behaviorId  String?
-  type        String
-  url         String
-  consent     Boolean   @default(false)
-  createdAt   DateTime  @default(now())
-  client      Client?   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  id         String   @id @default(cuid())
+  clientId   String?
+  targetId   String?
+  sessionId  String?
+  behaviorId String?
+  type       String
+  url        String
+  consent    Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  client     Client?  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
   @@index([clientId])
   @@index([sessionId])
 }
@@ -337,17 +481,18 @@ model BehaviorPlan {
 }
 
 model IntervalRecording {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   sessionId   String
   targetId    String?
   type        String
-  intervalSec Int      @default(10)
+  intervalSec Int       @default(10)
   value       Float?
   startedAt   DateTime
   endedAt     DateTime?
   notes       String?
-  createdAt   DateTime @default(now())
-  session     Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  session     Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
   @@index([sessionId])
 }
 
@@ -355,83 +500,87 @@ model IntervalRecording {
 
 // A reusable assessment instrument definition (e.g. VB-MAPP, ABLLS, custom)
 model AssessmentTemplate {
-  id            String              @id @default(cuid())
-  name          String
-  description   String?
-  category      String?             // Adaptive, Behavioral, Language, Academic, Custom
-  version       String              @default("1.0")
-  scoringMethod String?             // total_score, section_score, pass_fail, narrative
-  isActive      Boolean             @default(true)
-  createdBy     String?
-  createdAt     DateTime            @default(now())
-  updatedAt     DateTime            @updatedAt
-  sections      AssessmentSection[]
+  id                String              @id @default(cuid())
+  name              String
+  description       String?
+  category          String? // Adaptive, Behavioral, Language, Academic, Custom
+  version           String              @default("1.0")
+  scoringMethod     String? // total_score, section_score, pass_fail, narrative
+  isActive          Boolean             @default(true)
+  createdBy         String?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  sections          AssessmentSection[]
   clientAssessments ClientAssessment[]
 }
 
 // A section within a template (e.g. "Mand", "Tact", "Listener Responding")
 model AssessmentSection {
-  id           String             @id @default(cuid())
-  templateId   String
-  title        String
-  description  String?
-  sortOrder    Int                @default(0)
-  createdAt    DateTime           @default(now())
-  template     AssessmentTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
-  items        AssessmentItem[]
+  id          String             @id @default(cuid())
+  templateId  String
+  title       String
+  description String?
+  sortOrder   Int                @default(0)
+  createdAt   DateTime           @default(now())
+  template    AssessmentTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  items       AssessmentItem[]
+
   @@index([templateId])
 }
 
 // A single item/question within a section
 model AssessmentItem {
-  id            String                   @id @default(cuid())
-  sectionId     String
-  text          String                   // The question or skill description
-  description   String?                  // Operational definition / instructions
-  responseType  String                   // YES_NO | SCALE | NUMERIC | TEXT | SINGLE_SELECT | MULTI_SELECT | PERCENTAGE | PROMPT_LEVEL
-  options       Json?                    // For SINGLE_SELECT, MULTI_SELECT: ["Option A", "Option B", ...]
-  scoreValue    Float?                   // Max points for this item
-  sortOrder     Int                      @default(0)
-  isRequired    Boolean                  @default(false)
-  createdAt     DateTime                 @default(now())
-  section       AssessmentSection        @relation(fields: [sectionId], references: [id], onDelete: Cascade)
-  responses     ClientAssessmentResponse[]
+  id           String                     @id @default(cuid())
+  sectionId    String
+  text         String // The question or skill description
+  description  String? // Operational definition / instructions
+  responseType String // YES_NO | SCALE | NUMERIC | TEXT | SINGLE_SELECT | MULTI_SELECT | PERCENTAGE | PROMPT_LEVEL
+  options      Json? // For SINGLE_SELECT, MULTI_SELECT: ["Option A", "Option B", ...]
+  scoreValue   Float? // Max points for this item
+  sortOrder    Int                        @default(0)
+  isRequired   Boolean                    @default(false)
+  createdAt    DateTime                   @default(now())
+  section      AssessmentSection          @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  responses    ClientAssessmentResponse[]
+
   @@index([sectionId])
 }
 
 // An instance of an assessment assigned to a client
 model ClientAssessment {
-  id            String                   @id @default(cuid())
+  id            String                     @id @default(cuid())
   clientId      String
   templateId    String
-  completedById String?                  // User who filled it out
-  status        String                   @default("IN_PROGRESS") // IN_PROGRESS | COMPLETED | ARCHIVED
-  startedAt     DateTime                 @default(now())
+  completedById String? // User who filled it out
+  status        String                     @default("IN_PROGRESS") // IN_PROGRESS | COMPLETED | ARCHIVED
+  startedAt     DateTime                   @default(now())
   completedAt   DateTime?
   totalScore    Float?
   notes         String?
-  createdAt     DateTime                 @default(now())
-  updatedAt     DateTime                 @updatedAt
-  client        Client                   @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  template      AssessmentTemplate       @relation(fields: [templateId], references: [id])
-  completedBy   User?                    @relation(fields: [completedById], references: [id], onDelete: SetNull)
+  createdAt     DateTime                   @default(now())
+  updatedAt     DateTime                   @updatedAt
+  client        Client                     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  template      AssessmentTemplate         @relation(fields: [templateId], references: [id])
+  completedBy   User?                      @relation(fields: [completedById], references: [id], onDelete: SetNull)
   responses     ClientAssessmentResponse[]
+
   @@index([clientId])
   @@index([templateId])
 }
 
 // Individual item responses within a client assessment
 model ClientAssessmentResponse {
-  id                 String          @id @default(cuid())
+  id                 String           @id @default(cuid())
   clientAssessmentId String
   itemId             String
-  responseValue      String?         // Stored as string; parsed based on responseType
-  responseScore      Float?          // Calculated score for this item
+  responseValue      String? // Stored as string; parsed based on responseType
+  responseScore      Float? // Calculated score for this item
   notes              String?
-  createdAt          DateTime        @default(now())
-  updatedAt          DateTime        @updatedAt
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
   clientAssessment   ClientAssessment @relation(fields: [clientAssessmentId], references: [id], onDelete: Cascade)
-  item               AssessmentItem  @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  item               AssessmentItem   @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
   @@unique([clientAssessmentId, itemId])
   @@index([clientAssessmentId])
 }
@@ -461,20 +610,22 @@ model ReportTemplateSection {
   createdAt  DateTime       @default(now())
   updatedAt  DateTime       @updatedAt
   template   ReportTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
   @@index([templateId])
 }
 
 model ClientReport {
-  id         String              @id @default(cuid())
+  id         String                @id @default(cuid())
   clientId   String
   templateId String?
   title      String
-  status     String              @default("DRAFT")
-  createdAt  DateTime            @default(now())
-  updatedAt  DateTime            @updatedAt
-  client     Client              @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  template   ReportTemplate?     @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  status     String                @default("DRAFT")
+  createdAt  DateTime              @default(now())
+  updatedAt  DateTime              @updatedAt
+  client     Client                @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  template   ReportTemplate?       @relation(fields: [templateId], references: [id], onDelete: SetNull)
   sections   ClientReportSection[]
+
   @@index([clientId])
 }
 
@@ -487,6 +638,7 @@ model ClientReportSection {
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
   report    ClientReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
   @@index([reportId])
 }
 
@@ -499,6 +651,7 @@ model AuditEntry {
   details    Json?
   createdAt  DateTime @default(now())
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@index([userId])
   @@index([entityType, entityId])
 }

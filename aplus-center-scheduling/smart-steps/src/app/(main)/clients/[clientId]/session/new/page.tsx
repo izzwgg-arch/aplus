@@ -5,10 +5,11 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
-import { db, queueTrial, queueBehavior } from "@/lib/dexie";
+import { db, queueTrial, queueBehavior, queueSession } from "@/lib/dexie";
 import { toast } from "sonner";
-import { ArrowLeft, Pause, Play, Timer, Plus, Minus, RefreshCcw, Save, CloudOff } from "lucide-react";
-import { useABAStore } from "@/store/abaStore";
+import { ArrowLeft, Pause, Play, Timer, Plus, Minus, RefreshCcw, Save, CloudOff, ChevronDown, AlertTriangle } from "lucide-react";
+import { useABAStore, resolveSessionStart, type ActiveSession } from "@/store/abaStore";
+import { useSession as useAuthSession } from "next-auth/react";
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 
@@ -91,7 +92,6 @@ export default function SessionNewPage() {
   const queryClient = useQueryClient();
 
   /* ABA store for offline-first persistence */
-  const storeStartSession = useABAStore((s) => s.startSession);
   const storeSetServerId = useABAStore((s) => s.setSessionServerId);
   const storeAddTrial = useABAStore((s) => s.addTrial);
   const storeAddABC = useABAStore((s) => s.addABCEvent);
@@ -100,6 +100,46 @@ export default function SessionNewPage() {
   const storeActiveSession = useABAStore((s) => s.activeSession);
   const storeTargets = useABAStore((s) => s.targets.filter((t) => t.clientId === clientId && t.isActive));
   const [storeLocalSessionId, setStoreLocalSessionId] = useState<string | null>(null);
+  /* Unsaved-session conflict guard — set when starting this session would
+   * silently discard a DIFFERENT client's still-unsaved session data. */
+  const [conflictingSession, setConflictingSession] = useState<{
+    existing: ActiveSession;
+    pendingSetup?: { startedAt?: string; endedAt?: string; providerId?: string };
+  } | null>(null);
+
+  /* Auth */
+  const { data: authSession } = useAuthSession();
+  const loggedInUserId   = (authSession?.user as { id?: string })?.id ?? "";
+  const loggedInUserName = authSession?.user?.name ?? "";
+
+  /* Pre-session setup form */
+  const todayStr   = new Date().toISOString().slice(0, 10);
+  const nowTimeStr = new Date().toTimeString().slice(0, 5);
+  const [hasStarted, setHasStarted] = useState(false);
+  const [setupForm, setSetupForm] = useState({
+    sessionDate: todayStr,
+    timeIn: nowTimeStr,
+    timeOut: "",
+    providerId: "",
+    providerName: "",
+  });
+
+  useEffect(() => {
+    if (loggedInUserId && !setupForm.providerId) {
+      setSetupForm((f) => ({ ...f, providerId: loggedInUserId, providerName: loggedInUserName }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loggedInUserId]);
+
+  const { data: providerList = [] } = useQuery<{id: string; name: string | null; role: string; displayRole: string | null}[]>({
+    queryKey: ["providers-dropdown"],
+    queryFn: async () => {
+      const res = await fetch("/smart-steps/api/users?forDropdown=1");
+      if (!res.ok) return [];
+      return res.json();
+    },
+    staleTime: 10 * 60 * 1000,
+  });
 
   /* session state */
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -187,18 +227,33 @@ export default function SessionNewPage() {
 
   /* ─── Session init ─────────────────────────────────────────────────────── */
 
-  const createSession = useCallback(async () => {
-    // Check if there's an unfinished active session in the store for this client
-    const stored = useABAStore.getState().activeSession;
-    if (stored && stored.clientId === clientId && !stored.saved) {
-      // Restore existing in-progress session
-      const localId = storeStartSession(clientId, stored.serverId);
-      setStoreLocalSessionId(localId);
-      setSessionId(stored.serverId ?? localId);
-      setStartedAt(stored.startedAt);
-      // Restore trials — map store shape → page TrialEntry shape
-      // Store uses numeric promptLevel; page uses string union — drop promptLevel on restore
-      const restoredTrials: TrialEntry[] = stored.trials.map((t) => ({
+  /* Always routes through resolveSessionStart() so an unsaved session (this
+   * client OR any other client) is NEVER silently discarded. This used to
+   * call the store's startSession action directly with its own bespoke
+   * "already in progress?" check that only ever matched when `setup` was
+   * omitted — but every real caller here always passes a (possibly
+   * all-undefined-fields) setup object, so that check could never actually
+   * fire and any existing unsaved session was unconditionally overwritten.
+   * See resolveSessionStart in abaStore.ts for the shared, centralized fix. */
+  const createSession = useCallback(async (
+    setup?: { startedAt?: string; endedAt?: string; providerId?: string },
+    opts?: { force?: boolean },
+  ) => {
+    const result = resolveSessionStart(clientId, opts);
+
+    if (result.kind === "conflict") {
+      setConflictingSession({ existing: result.existing, pendingSetup: setup });
+      return;
+    }
+
+    setHasStarted(true);
+
+    if (result.kind === "resumed") {
+      const existing = result.existing;
+      setStoreLocalSessionId(existing.localId);
+      setSessionId(existing.serverId ?? existing.localId);
+      setStartedAt(existing.startedAt);
+      const restoredTrials: TrialEntry[] = existing.trials.map((t) => ({
         targetId: t.targetId,
         targetLabel: t.targetTitle,
         result: t.result as TrialEntry["result"],
@@ -213,15 +268,20 @@ export default function SessionNewPage() {
       return;
     }
 
-    // Start fresh session in store first (offline-first)
-    const localSessionId = storeStartSession(clientId, null);
+    // result.kind === "started" — brand new local session
+    const localSessionId = result.localId;
     setStoreLocalSessionId(localSessionId);
 
     try {
       const res = await fetch("/smart-steps/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId }),
+        body: JSON.stringify({
+          clientId,
+          ...(setup?.startedAt  ? { startedAt:  setup.startedAt  } : {}),
+          ...(setup?.endedAt    ? { endedAt:    setup.endedAt    } : {}),
+          ...(setup?.providerId ? { providerId: setup.providerId } : {}),
+        }),
       });
       const data = await res.json().catch(() => ({}));
       const realId = data?.id;
@@ -230,18 +290,42 @@ export default function SessionNewPage() {
         storeSetServerId(localSessionId, realId);
       } else {
         setSessionId(localSessionId);
+        // Queue the session itself for creation — otherwise trials recorded
+        // against `localSessionId` below would reference a session that
+        // never exists server-side and could never sync (see queueSession).
+        queueSession({
+          localId: localSessionId,
+          clientId,
+          startedAt: setup?.startedAt ?? new Date().toISOString(),
+        }).catch(() => {});
         toast.info("Working offline — session saved locally", { duration: 3000 });
       }
     } catch {
       setSessionId(localSessionId);
+      queueSession({
+        localId: localSessionId,
+        clientId,
+        startedAt: setup?.startedAt ?? new Date().toISOString(),
+      }).catch(() => {});
       toast.info("Offline mode — trials saved locally", { duration: 3000 });
     }
-    setStartedAt(Date.now());
-  }, [clientId, storeStartSession, storeSetServerId]);
+    setStartedAt(setup?.startedAt ? new Date(setup.startedAt).getTime() : Date.now());
+  }, [clientId, storeSetServerId]);
 
-  useEffect(() => {
-    if (!sessionId) createSession();
-  }, [sessionId, createSession]);
+  const startSetupSession = useCallback(() => {
+    void createSession({
+      startedAt: setupForm.timeIn ? new Date(`${setupForm.sessionDate}T${setupForm.timeIn}:00`).toISOString() : undefined,
+      endedAt: setupForm.timeOut ? new Date(`${setupForm.sessionDate}T${setupForm.timeOut}:00`).toISOString() : undefined,
+      providerId: setupForm.providerId || undefined,
+    });
+  }, [createSession, setupForm]);
+
+  const confirmDiscardAndStart = useCallback(() => {
+    if (!conflictingSession) return;
+    const pendingSetup = conflictingSession.pendingSetup;
+    setConflictingSession(null);
+    void createSession(pendingSetup, { force: true });
+  }, [conflictingSession, createSession]);
 
   /* ─── Session timer (no reset on pause) ────────────────────────────────── */
 
@@ -484,6 +568,147 @@ export default function SessionNewPage() {
   const pct = totalCount > 0 ? Math.round((correctCount / totalCount) * 100) : null;
 
   /* ─── Render ────────────────────────────────────────────────────────────── */
+
+  /* ── Setup form shown before session starts ── */
+  if (!hasStarted) {
+    const isBackdated = setupForm.sessionDate !== new Date().toISOString().slice(0, 10);
+    return (
+      <div className="min-h-dvh bg-[var(--background)] pb-safe">
+        <header className="sticky top-0 z-20 border-b border-[var(--glass-border)] bg-[var(--background)]/90 backdrop-blur-xl">
+          <div className="flex items-center gap-3 px-4 py-3">
+            <Link href={`/clients/${clientId}`} className="tap-target rounded-xl p-2 text-zinc-400 hover:text-[var(--foreground)]">
+              <ArrowLeft className="h-5 w-5" />
+            </Link>
+            <div>
+              <h1 className="text-base font-bold text-[var(--foreground)]">New Session</h1>
+              <p className="text-xs text-zinc-500">Session date controls reports, notes, and assessments.</p>
+            </div>
+          </div>
+        </header>
+        <main className="mx-auto max-w-lg px-4 py-6 space-y-5">
+          <div className="glass-card rounded-2xl p-5 space-y-4">
+            {/* Provider */}
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 mb-1.5">Provider</label>
+              <div className="relative">
+                <select
+                  value={setupForm.providerId}
+                  onChange={(e) => {
+                    const opt = providerList.find((p) => p.id === e.target.value);
+                    setSetupForm((f) => ({ ...f, providerId: e.target.value, providerName: opt?.name ?? e.target.value }));
+                  }}
+                  className="w-full appearance-none rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] px-3 py-2.5 text-sm text-[var(--foreground)] pr-8"
+                >
+                  {providerList.length === 0 && (
+                    <option value={loggedInUserId}>{loggedInUserName || "Me (logged in)"}</option>
+                  )}
+                  {providerList.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name ?? p.id}{p.displayRole ? ` — ${p.displayRole}` : ""}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
+              </div>
+            </div>
+            {/* Session Date */}
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 mb-1.5">Session Date</label>
+              <input
+                type="date"
+                max={new Date().toISOString().slice(0, 10)}
+                value={setupForm.sessionDate}
+                onChange={(e) => setSetupForm((f) => ({ ...f, sessionDate: e.target.value }))}
+                className="w-full rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] px-3 py-2.5 text-sm text-[var(--foreground)]"
+              />
+            </div>
+            {/* Time In / Time Out */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 mb-1.5">Time In</label>
+                <input
+                  type="time"
+                  value={setupForm.timeIn}
+                  onChange={(e) => setSetupForm((f) => ({ ...f, timeIn: e.target.value }))}
+                  className="w-full rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] px-3 py-2.5 text-sm text-[var(--foreground)]"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 mb-1.5">Time Out <span className="font-normal">(optional)</span></label>
+                <input
+                  type="time"
+                  value={setupForm.timeOut}
+                  onChange={(e) => setSetupForm((f) => ({ ...f, timeOut: e.target.value }))}
+                  className="w-full rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] px-3 py-2.5 text-sm text-[var(--foreground)]"
+                />
+              </div>
+            </div>
+          </div>
+
+          {isBackdated && (
+            <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 flex items-start gap-3">
+              <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-semibold text-amber-300">Backdated Session</p>
+                <p className="text-xs text-amber-400/80 mt-0.5">
+                  You are creating a session for{" "}
+                  <span className="font-semibold">
+                    {new Date(setupForm.sessionDate + "T12:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}
+                  </span>
+                  . Reports, graphs, assessments, and session notes will use this service date.
+                </p>
+              </div>
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={startSetupSession}
+            className="btn-primary tap-target w-full flex items-center justify-center gap-2 rounded-2xl py-4 font-bold text-base"
+          >
+            <Play className="h-5 w-5" />
+            {isBackdated ? "Create Backdated Session" : "Start Session"}
+          </button>
+        </main>
+
+        {conflictingSession && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+            <div className="glass-card w-full max-w-md rounded-2xl border border-amber-500/30 p-6 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-amber-500/15">
+                  <AlertTriangle className="h-5 w-5 text-amber-400" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-[var(--foreground)]">Unsaved session in progress</h3>
+                  <p className="text-xs text-zinc-500">for a different client</p>
+                </div>
+              </div>
+              <p className="text-sm text-zinc-400">
+                You have <span className="font-semibold text-amber-300">
+                  {conflictingSession.existing.trials.length} recorded trial{conflictingSession.existing.trials.length !== 1 ? "s" : ""}
+                </span> that have not been saved yet. Starting a new session here will <span className="font-semibold text-[var(--accent-pink)]">permanently discard</span> that data unless you go back and end that session first.
+              </p>
+              <div className="flex gap-3 pt-1">
+                <Link
+                  href={`/clients/${conflictingSession.existing.clientId}/session/new`}
+                  className="flex-1 rounded-xl border border-[var(--glass-border)] py-2.5 text-center text-sm font-medium text-zinc-300 hover:bg-white/5 transition-colors"
+                >
+                  Go resume it
+                </Link>
+                <button
+                  type="button"
+                  onClick={confirmDiscardAndStart}
+                  className="flex-1 rounded-xl bg-[var(--accent-pink)]/20 py-2.5 text-sm font-semibold text-[var(--accent-pink)] hover:bg-[var(--accent-pink)]/30 transition-colors"
+                >
+                  Discard &amp; start new
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-dvh bg-[var(--background)] pb-safe">

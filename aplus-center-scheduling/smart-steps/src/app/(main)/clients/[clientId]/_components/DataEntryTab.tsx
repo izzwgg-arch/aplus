@@ -12,27 +12,49 @@
  * offline-first behaviour and localStorage persistence are inherited for free.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import Link from "next/link";
 import {
   Play, Pause, Timer, Save, CloudOff, Plus, Minus, RefreshCcw,
   Activity, X, CheckCircle2, Zap, Layers, Target as TargetIcon, Clock,
+  RotateCcw, ChevronDown, User,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSession } from "next-auth/react";
 import { toast } from "sonner";
-import { queueTrial, queueBehavior } from "@/lib/dexie";
+import { queueTrial, queueBehavior, queueSession } from "@/lib/dexie";
 import {
   useABAStore,
+  resolveSessionStart,
+  defaultMastery,
+  defaultPromptLevels,
   type TrialResultKey,
   type ActiveABCEntry,
+  type ActiveSession,
   type LocalTarget,
 } from "@/store/abaStore";
+import { SessionSnapshotDrawer } from "./SessionSnapshotDrawer";
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
 
 type RecordingMode = "DTT" | "INTERVAL" | "ABC";
 type IntervalType  = "FREQUENCY" | "DURATION" | "MOMENTARY" | "PARTIAL" | "WHOLE" | "LATENCY";
-type DataView      = "history" | "live" | "summary";
+type DataView      = "history" | "setup" | "live" | "summary";
+
+interface SessionSetup {
+  startedAt?: string;
+  endedAt?: string;
+  providerId?: string;
+  mode?: RecordingMode;
+}
+
+interface ProviderOption {
+  id: string;
+  name: string | null;
+  role: string;
+  displayRole: string | null;
+}
 
 interface TrialEntry {
   id: string;
@@ -71,6 +93,7 @@ interface PastSession {
   id: string;
   startedAt: string;
   endedAt?: string | null;
+  createdAt?: string | null;
   trialCount: number;
   pctCorrect?: number | null;
   therapistName?: string | null;
@@ -313,6 +336,60 @@ function SummaryView({
   );
 }
 
+/* ─── Unsaved-session conflict dialog ─────────────────────────────────────
+ * Shown instead of silently discarding data when the user tries to start a
+ * session while a DIFFERENT client's session is still unsaved. */
+function ConflictDialog({
+  trialCount,
+  onCancel,
+  onDiscard,
+}: {
+  trialCount: number;
+  onCancel: () => void;
+  onDiscard: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <motion.div
+        initial={{ opacity: 0, y: 12, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        className="glass-card w-full max-w-md rounded-2xl border border-amber-500/30 p-6 space-y-4"
+      >
+        <div className="flex items-center gap-3">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-amber-500/15">
+            <CloudOff className="h-5 w-5 text-amber-400" />
+          </div>
+          <div>
+            <h3 className="text-base font-bold text-[var(--foreground)]">Unsaved session in progress</h3>
+            <p className="text-xs text-zinc-500">for a different client</p>
+          </div>
+        </div>
+        <p className="text-sm text-zinc-400">
+          You have <span className="font-semibold text-amber-300">{trialCount} recorded trial{trialCount !== 1 ? "s" : ""}</span> that
+          {" "}have not been saved yet. Starting a new session here will <span className="font-semibold text-[var(--accent-pink)]">permanently discard</span> that
+          data unless you go back and end that session first.
+        </p>
+        <div className="flex gap-3 pt-1">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="flex-1 rounded-xl border border-[var(--glass-border)] py-2.5 text-sm font-medium text-zinc-300 hover:bg-white/5 transition-colors"
+          >
+            Go back &amp; resume it
+          </button>
+          <button
+            type="button"
+            onClick={onDiscard}
+            className="flex-1 rounded-xl bg-[var(--accent-pink)]/20 py-2.5 text-sm font-semibold text-[var(--accent-pink)] hover:bg-[var(--accent-pink)]/30 transition-colors"
+          >
+            Discard &amp; start new
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 /* ─── Main DataEntryTab ──────────────────────────────────────────────────── */
 
 export function DataEntryTab({ clientId }: { clientId: string }) {
@@ -320,8 +397,46 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => setHydrated(true), []);
 
+  /* ── Auth ── */
+  const { data: authSession } = useSession();
+  const loggedInUserId   = (authSession?.user as { id?: string })?.id ?? "";
+  const loggedInUserName = authSession?.user?.name ?? "";
+
   /* ── View state ── */
   const [view, setView] = useState<DataView>("history");
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+
+  /* ── Pre-session setup form ── */
+  const todayStr   = new Date().toISOString().slice(0, 10);
+  const nowTimeStr = new Date().toTimeString().slice(0, 5);
+  const [setupForm, setSetupForm] = useState({
+    sessionDate: todayStr,
+    timeIn: nowTimeStr,
+    timeOut: "",
+    mode: "DTT" as RecordingMode,
+    providerId: "",
+    providerName: "",
+  });
+
+  /* Set default provider once auth loads */
+  useEffect(() => {
+    if (loggedInUserId && !setupForm.providerId) {
+      setSetupForm((f) => ({ ...f, providerId: loggedInUserId, providerName: loggedInUserName }));
+    }
+    // Only run when auth first resolves
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loggedInUserId]);
+
+  /* ── Provider dropdown list ── */
+  const { data: providerList = [] } = useQuery<ProviderOption[]>({
+    queryKey: ["providers-dropdown"],
+    queryFn: async () => {
+      const res = await fetch("/smart-steps/api/users?forDropdown=1");
+      if (!res.ok) return [];
+      return res.json();
+    },
+    staleTime: 10 * 60 * 1000,
+  });
 
   /* ── Session timer ── */
   const [startedAtMs, setStartedAtMs]   = useState<number | null>(null);
@@ -361,19 +476,35 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
   const [summary, setSummary]  = useState<SessionSummaryData | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
+  /* ── Conflicting unsaved session guard ──
+   * Set when the user tries to start a new session while a DIFFERENT
+   * client's session is still unsaved. We never discard that data
+   * automatically — the user must explicitly confirm. */
+  const [conflictingSession, setConflictingSession] = useState<{
+    existing: ActiveSession;
+    pendingSetup?: SessionSetup;
+  } | null>(null);
+
   const qc = useQueryClient();
 
   /* ── Zustand store ── */
-  const storeStartSession  = useABAStore((s) => s.startSession);
   const storeSetServerId   = useABAStore((s) => s.setSessionServerId);
   const storeAddTrial      = useABAStore((s) => s.addTrial);
   const storeAddABC        = useABAStore((s) => s.addABCEvent);
   const storeMarkSaved     = useABAStore((s) => s.markSessionSaved);
   const storeClear         = useABAStore((s) => s.clearActiveSession);
   const storeActiveSession = useABAStore((s) => s.activeSession);
-  const categories         = useABAStore((s) => (s.categories ?? []).filter((c) => c.clientId === clientId));
-  const allSkills          = useABAStore((s) => s.programs ?? []);
-  const allGoals           = useABAStore((s) => (s.targets ?? []).filter((t) => t.clientId === clientId && (t.isActive ?? true)));
+  // Select raw arrays — never filter inside useABAStore selector (filter() returns a new
+  // array reference every call → Zustand sees changed value every render → infinite loop).
+  // Actions (setTargetServerId, addTarget) are accessed via getState() in effects only —
+  // subscribing to them as selectors + including them in effect deps causes React #185
+  // (maximum update depth exceeded) in React 19 because Zustand notifies subscribers
+  // synchronously inside useSyncExternalStore, re-triggering the effect chain.
+  const rawCategories      = useABAStore((s) => s.categories);
+  const allSkills          = useABAStore((s) => s.programs);
+  const rawTargets         = useABAStore((s) => s.targets);
+  const categories         = useMemo(() => (rawCategories ?? []).filter((c) => c.clientId === clientId), [rawCategories, clientId]);
+  const allGoals           = useMemo(() => (rawTargets ?? []).filter((t) => t.clientId === clientId && (t.isActive ?? true)), [rawTargets, clientId]);
 
   /* ── Past sessions ── */
   const { data: pastSessions = [], refetch: refetchSessions } = useQuery<PastSession[]>({
@@ -386,19 +517,101 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
     enabled: !!clientId,
   });
 
-  /* ── Derived goal list ── */
-  const visibleGoals = allGoals.filter((g) => {
-    if (filterSkillId) return g.programId === filterSkillId;
-    if (filterCatId) {
-      const skill = allSkills.find((s) => s.categoryId === filterCatId && s.clientId === clientId && g.programId === s.id);
-      return !!skill || (allSkills.filter((s) => s.categoryId === filterCatId).length === 0 && g.categoryId === filterCatId);
-    }
-    return true;
+  /* ── Server target sync: ensures every goal has a serverId before recording ── */
+  const { data: serverTargetData } = useQuery<{
+    groups: Array<{
+      groupId: string;
+      groupLabel: string;
+      groupType: "goal" | "program";
+      targets: Array<{ id: string; definition: string; targetType: string; phase: string }>;
+    }>;
+  }>({
+    queryKey: ["server-targets-sync", clientId],
+    queryFn: async () => {
+      const res = await fetch(`/smart-steps/api/clients/${clientId}/targets`);
+      if (!res.ok) return { groups: [] };
+      return res.json();
+    },
+    enabled: !!clientId,
+    staleTime: 5 * 60 * 1000,
   });
 
-  const visibleSkills = filterCatId
-    ? allSkills.filter((s) => s.categoryId === filterCatId && s.clientId === clientId)
-    : allSkills.filter((s) => s.clientId === clientId);
+  /* ── Derived goal list ── */
+  const visibleGoals = useMemo(() => allGoals.filter((g) => {
+    if (filterSkillId) return g.programId === filterSkillId;
+    if (filterCatId) {
+      const skill = (allSkills ?? []).find((s) => s.categoryId === filterCatId && s.clientId === clientId && g.programId === s.id);
+      return !!skill || ((allSkills ?? []).filter((s) => s.categoryId === filterCatId).length === 0 && g.categoryId === filterCatId);
+    }
+    return true;
+  }), [allGoals, allSkills, filterSkillId, filterCatId, clientId]);
+
+  const visibleSkills = useMemo(() => filterCatId
+    ? (allSkills ?? []).filter((s) => s.categoryId === filterCatId && s.clientId === clientId)
+    : (allSkills ?? []).filter((s) => s.clientId === clientId),
+  [allSkills, filterCatId, clientId]);
+
+  /* ── Sync server targetIds into local Zustand store ──────────────────────
+   * This ensures every LocalTarget has a serverId before the user records
+   * trials. Without a serverId, trials would be saved with local IDs that
+   * don't exist in the database → FK violation → silent data loss.
+   *
+   * Actions are accessed via useABAStore.getState() rather than as subscribed
+   * selectors. Including action function selectors in the dep array caused
+   * React error #185 (maximum update depth exceeded) in React 19: Zustand
+   * notifies all subscribers synchronously inside useSyncExternalStore, and
+   * having the action refs in deps caused the effect to re-queue itself on
+   * every store write, producing an unbounded synchronous call chain.
+   * ──────────────────────────────────────────────────────────────────────── */
+  useEffect(() => {
+    if (!serverTargetData?.groups) return;
+
+    // Snapshot current store state + grab actions imperatively (no subscription)
+    const { targets: storeTargets, addTarget, setTargetServerId } = useABAStore.getState();
+
+    for (const group of serverTargetData.groups) {
+      for (const st of group.targets) {
+        // Already linked — skip
+        if (storeTargets.some((t) => t.serverId === st.id)) continue;
+
+        // Try to match an existing local target by title + clientId (case-insensitive)
+        const match = storeTargets.find(
+          (t) =>
+            t.clientId === clientId &&
+            !t.serverId &&
+            (t.title ?? "").trim().toLowerCase() === (st.definition ?? "").trim().toLowerCase(),
+        );
+
+        if (match) {
+          // Link the server ID to the existing local target
+          setTargetServerId(match.id, st.id);
+        } else if (!storeTargets.some((t) => t.id === st.id)) {
+          // Target exists on server but not locally — add it so it's visible in DataEntry
+          addTarget({
+            id: st.id,
+            serverId: st.id,
+            clientId,
+            title: st.definition,
+            operationalDefinition: st.definition,
+            targetType: st.targetType as LocalTarget["targetType"],
+            phase: st.phase as LocalTarget["phase"],
+            status: (st.phase === "MASTERED" ? "mastered" : "active") as LocalTarget["status"],
+            categoryId: "",
+            programId: group.groupType === "program" ? group.groupId : "",
+            masteryCriteria: defaultMastery(),
+            promptLevels: defaultPromptLevels(),
+            isActive: true,
+            synced: true,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      }
+    }
+    // Only re-run when the server data or client changes.
+    // Actions come from getState() so they don't need to be deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverTargetData, clientId]);
 
   /* ── Session timer effect ── */
   useEffect(() => {
@@ -438,16 +651,26 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [isIntervalRunning, intervalDuration]);
 
-  /* ── Start session ── */
-  const startSession = useCallback(async () => {
-    // Check for existing in-progress session in store
-    const existing = useABAStore.getState().activeSession;
-    if (existing && existing.clientId === clientId && !existing.saved) {
-      const lid = existing.localId;
+  /* ── Start session ──
+   * Always routes through resolveSessionStart() so an unsaved session
+   * (this client OR any other client) is NEVER silently discarded. See the
+   * comment on resolveSessionStart in abaStore.ts for why this must be
+   * centralized rather than reimplemented per-caller. */
+  const startSession = useCallback(async (setup?: SessionSetup, opts?: { force?: boolean }) => {
+    const result = resolveSessionStart(clientId, opts);
+
+    if (result.kind === "conflict") {
+      // Do NOT proceed — surface a confirmation instead of wiping data.
+      setConflictingSession({ existing: result.existing, pendingSetup: setup });
+      return;
+    }
+
+    if (result.kind === "resumed") {
+      const lid = result.existing.localId;
       setLocalSessionId(lid);
-      setSessionId(existing.serverId ?? lid);
-      setStartedAtMs(existing.startedAt);
-      const restored: TrialEntry[] = existing.trials.map((t) => ({
+      setSessionId(result.existing.serverId ?? lid);
+      setStartedAtMs(result.existing.startedAt);
+      const restored: TrialEntry[] = result.existing.trials.map((t) => ({
         id: t.id, targetId: t.targetId, targetTitle: t.targetTitle,
         result: t.result, at: t.recordedAt,
       }));
@@ -459,16 +682,27 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
       return;
     }
 
-    const lid = storeStartSession(clientId, null);
+    // result.kind === "started" — brand new local session (or explicit force-discard-and-start)
+    const lid = result.localId;
     setLocalSessionId(lid);
-    setStartedAtMs(Date.now());
+    setTrials([]);
+    setAbcEntries([]);
+    // Timer uses the setup startedAt so live elapsed time is relative to service date
+    setStartedAtMs(setup?.startedAt ? new Date(setup.startedAt).getTime() : Date.now());
+    if (setup?.mode) setMode(setup.mode);
     setView("live");
 
     try {
       const res  = await fetch("/smart-steps/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId }),
+        body: JSON.stringify({
+          clientId,
+          mode: setup?.mode ?? "DTT",
+          ...(setup?.startedAt  ? { startedAt:  setup.startedAt  } : {}),
+          ...(setup?.endedAt    ? { endedAt:    setup.endedAt    } : {}),
+          ...(setup?.providerId ? { providerId: setup.providerId } : {}),
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (data?.id && !String(data.id).startsWith("mock-")) {
@@ -476,13 +710,28 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
         storeSetServerId(lid, data.id);
       } else {
         setSessionId(lid);
+        // Queue the session itself for creation — without this, any trials
+        // recorded against `lid` below would reference a session id that
+        // never exists server-side and could never sync, no matter how
+        // many times it's retried (see queueSession() for full context).
+        queueSession({ localId: lid, clientId, startedAt: new Date(setup?.startedAt ?? Date.now()).toISOString(), mode: setup?.mode ?? "DTT" }).catch(() => {});
         toast.info("Working offline — data saved locally", { duration: 3000 });
       }
     } catch {
       setSessionId(lid);
+      queueSession({ localId: lid, clientId, startedAt: new Date(setup?.startedAt ?? Date.now()).toISOString(), mode: setup?.mode ?? "DTT" }).catch(() => {});
       toast.info("Offline mode — data saved locally", { duration: 3000 });
     }
-  }, [clientId, storeStartSession, storeSetServerId]);
+  }, [clientId, storeSetServerId]);
+
+  /* ── Resolve a pending conflict: user explicitly chose to discard the
+   * other client's unsaved session and proceed with this one. ── */
+  const confirmDiscardAndStart = useCallback(() => {
+    if (!conflictingSession) return;
+    const pendingSetup = conflictingSession.pendingSetup;
+    setConflictingSession(null);
+    void startSession(pendingSetup, { force: true });
+  }, [conflictingSession, startSession]);
 
   /* ── Record trial ── */
   const recordTrial = useCallback(
@@ -496,6 +745,18 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
     },
     [localSessionId, storeAddTrial]
   );
+
+  /* ── Undo last trial (live session only) ── */
+  const undoLastTrial = useCallback(() => {
+    setTrials((prev) => {
+      if (prev.length === 0) return prev;
+      toast.info("Last trial removed");
+      return prev.slice(0, -1);
+    });
+    if (localSessionId) {
+      useABAStore.getState().undoLastTrial(localSessionId);
+    }
+  }, [localSessionId]);
 
   /* ── Record ABC ── */
   const recordABC = useCallback(() => {
@@ -526,13 +787,45 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
 
   /* ── End session ── */
   const endSession = useCallback(async () => {
-    const sid = sessionId ?? localSessionId;
+    let sid = sessionId ?? localSessionId;
     if (!sid || isSaving) return;
     setIsSaving(true);
 
     const endedAt = new Date().toISOString();
 
     try {
+      // If we're still on a local-fallback session ID (server was unreachable
+      // at start), make one more attempt to create a real server session
+      // before saving. Local ids are always formatted "session-<ts>-<n>";
+      // real ones are Prisma cuids — this is the reliable way to tell them
+      // apart (the previous `sid === localSessionId && sid !== sessionId`
+      // check could never be true here since `startSession` always sets
+      // `sessionId` equal to `localSessionId` in its offline-fallback path).
+      const sessionIsLocal = sid.startsWith("session-");
+      if (sessionIsLocal) {
+        const localSid = sid;
+        try {
+          const retryRes = await fetch("/smart-steps/api/sessions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ clientId }),
+          });
+          const retryData = await retryRes.json().catch(() => ({}));
+          if (retryData?.id && !String(retryData.id).startsWith("mock-")) {
+            sid = retryData.id;
+            setSessionId(retryData.id);
+            if (localSessionId) storeSetServerId(localSessionId, retryData.id);
+          } else {
+            queueSession({ localId: localSid, clientId, startedAt: new Date(startedAtMs ?? Date.now()).toISOString() }).catch(() => {});
+          }
+        } catch {
+          // Offline — queue the session itself so it (and anything
+          // referencing it) can be created/resolved on the next successful
+          // sync instead of being lost.
+          queueSession({ localId: localSid, clientId, startedAt: new Date(startedAtMs ?? Date.now()).toISOString() }).catch(() => {});
+        }
+      }
+
       // Patch session end time
       await fetch(`/smart-steps/api/sessions/${sid}`, {
         method: "PATCH",
@@ -540,26 +833,53 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
         body: JSON.stringify({ endedAt }),
       }).catch(() => {});
 
-      // Save trials
-      if (trials.length > 0) {
-        await fetch("/smart-steps/api/trials", {
+      // Re-resolve target IDs — sync may have populated serverId after recording started
+      const freshTargets = useABAStore.getState().targets;
+      const resolvedTrials = trials.map((t) => {
+        if (!t.targetId.startsWith("local-")) return t;
+        const fresh = freshTargets.find((ft) => ft.id === t.targetId);
+        return fresh?.serverId ? { ...t, targetId: fresh.serverId } : t;
+      });
+
+      // Separate server-linked trials from still-local ones
+      const serverTrials  = resolvedTrials.filter((t) => !t.targetId.startsWith("local-"));
+      const localTrials   = resolvedTrials.filter((t) =>  t.targetId.startsWith("local-"));
+
+      // Queue any still-local trials to Dexie for later reconciliation
+      if (localTrials.length > 0) {
+        localTrials.forEach((t) => queueTrial({
+          sessionId: sid!, targetId: t.targetId, result: t.result,
+          promptLevel: t.promptLevel, createdAt: new Date(t.at).toISOString(),
+        }).catch(() => {}));
+        toast.warning(
+          `${localTrials.length} trial${localTrials.length !== 1 ? "s" : ""} queued locally — goals not yet synced to server`,
+          { duration: 5000 },
+        );
+      }
+
+      // Save server-linked trials
+      if (serverTrials.length > 0) {
+        const trialsRes = await fetch("/smart-steps/api/trials", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             sessionId: sid,
-            trials: trials.map((t) => ({
+            trials: serverTrials.map((t) => ({
               targetId:    t.targetId,
               result:      t.result,
               promptLevel: t.promptLevel,
             })),
           }),
-        }).catch((e: unknown) => {
-          trials.forEach((t) => queueTrial({
-            sessionId: sid, targetId: t.targetId, result: t.result,
+        });
+        if (!trialsRes.ok) {
+          // Server rejected — queue all for later sync
+          const errBody = await trialsRes.json().catch(() => ({}));
+          serverTrials.forEach((t) => queueTrial({
+            sessionId: sid!, targetId: t.targetId, result: t.result,
             promptLevel: t.promptLevel, createdAt: new Date(t.at).toISOString(),
           }).catch(() => {}));
-          throw e;
-        });
+          toast.warning(`Trials queued for sync (${errBody?.error ?? trialsRes.status})`);
+        }
       }
 
       // Save ABC events
@@ -614,7 +934,7 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
     } finally {
       setIsSaving(false);
     }
-  }, [sessionId, trials, abcEntries, elapsedSec, localSessionId, allGoals, storeMarkSaved, storeClear, qc, clientId, isSaving]);
+  }, [sessionId, trials, abcEntries, elapsedSec, localSessionId, allGoals, storeMarkSaved, storeClear, storeSetServerId, qc, clientId, isSaving, startedAtMs]);
 
   /* ── Reset to history ── */
   function resetToHistory() {
@@ -631,6 +951,16 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
     setFilterSkillId(null);
     setIntervalCount(0);
     setIsIntervalRunning(false);
+    // Reset setup form defaults for next session
+    const nowDate = new Date();
+    setSetupForm({
+      sessionDate: nowDate.toISOString().slice(0, 10),
+      timeIn: nowDate.toTimeString().slice(0, 5),
+      timeOut: "",
+      mode: "DTT",
+      providerId: loggedInUserId,
+      providerName: loggedInUserName,
+    });
     setView("history");
     refetchSessions();
   }
@@ -643,16 +973,187 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
     );
   }
 
+  const conflictDialog = conflictingSession && (
+    <ConflictDialog
+      trialCount={conflictingSession.existing.trials.length}
+      onCancel={() => setConflictingSession(null)}
+      onDiscard={confirmDiscardAndStart}
+    />
+  );
+
   /* ━━━━ VIEW: SUMMARY ━━━━ */
   if (view === "summary" && summary) {
-    return <SummaryView summary={summary} onDone={resetToHistory} />;
+    return <>
+      <SummaryView summary={summary} onDone={resetToHistory} />
+      {conflictDialog}
+    </>;
+  }
+
+  /* ━━━━ VIEW: SETUP — pre-session form ━━━━ */
+  if (view === "setup") {
+    const isBackdated = setupForm.sessionDate !== new Date().toISOString().slice(0, 10);
+    const handleStartFromSetup = async () => {
+      const startedAt = setupForm.timeIn
+        ? `${setupForm.sessionDate}T${setupForm.timeIn}:00`
+        : `${setupForm.sessionDate}T00:00:00`;
+      const endedAt = setupForm.timeOut
+        ? `${setupForm.sessionDate}T${setupForm.timeOut}:00`
+        : undefined;
+      await startSession({
+        startedAt: new Date(startedAt).toISOString(),
+        endedAt: endedAt ? new Date(endedAt).toISOString() : undefined,
+        providerId: setupForm.providerId || undefined,
+        mode: setupForm.mode,
+      });
+    };
+
+    return (<>
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="space-y-5"
+      >
+        {/* Header */}
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setView("history")}
+            className="rounded-xl p-2 text-zinc-400 hover:bg-white/10 hover:text-zinc-200 transition-colors"
+          >
+            <X className="h-4 w-4" />
+          </button>
+          <div>
+            <h2 className="text-base font-bold text-[var(--foreground)]">New Session Setup</h2>
+            <p className="text-xs text-zinc-500">Session date controls reports, graphs, assessments, and session notes.</p>
+          </div>
+        </div>
+
+        <div className="glass-card rounded-2xl p-5 space-y-4">
+          {/* Provider */}
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 mb-1.5">
+              <User className="inline h-3.5 w-3.5 mr-1" />Provider
+            </label>
+            <div className="relative">
+              <select
+                value={setupForm.providerId}
+                onChange={(e) => {
+                  const opt = providerList.find((p) => p.id === e.target.value);
+                  setSetupForm((f) => ({
+                    ...f,
+                    providerId: e.target.value,
+                    providerName: opt?.name ?? e.target.value,
+                  }));
+                }}
+                className="w-full appearance-none rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] px-3 py-2.5 text-sm text-[var(--foreground)] pr-8"
+              >
+                {providerList.length === 0 && (
+                  <option value={loggedInUserId}>{loggedInUserName || "Me (logged in)"}</option>
+                )}
+                {providerList.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name ?? p.id}{p.displayRole ? ` — ${p.displayRole}` : p.role !== "RBT" ? ` — ${p.role}` : ""}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
+            </div>
+          </div>
+
+          {/* Session Date */}
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 mb-1.5">Session Date</label>
+            <input
+              type="date"
+              max={new Date().toISOString().slice(0, 10)}
+              value={setupForm.sessionDate}
+              onChange={(e) => setSetupForm((f) => ({ ...f, sessionDate: e.target.value }))}
+              className="w-full rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] px-3 py-2.5 text-sm text-[var(--foreground)]"
+            />
+          </div>
+
+          {/* Time In / Time Out */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 mb-1.5">Time In</label>
+              <input
+                type="time"
+                value={setupForm.timeIn}
+                onChange={(e) => setSetupForm((f) => ({ ...f, timeIn: e.target.value }))}
+                className="w-full rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] px-3 py-2.5 text-sm text-[var(--foreground)]"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 mb-1.5">Time Out <span className="font-normal">(optional)</span></label>
+              <input
+                type="time"
+                value={setupForm.timeOut}
+                onChange={(e) => setSetupForm((f) => ({ ...f, timeOut: e.target.value }))}
+                className="w-full rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] px-3 py-2.5 text-sm text-[var(--foreground)]"
+              />
+            </div>
+          </div>
+
+          {/* Session Type */}
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 mb-1.5">Session Type</label>
+            <div className="flex gap-1.5 rounded-xl bg-[var(--glass-bg)] p-1 border border-[var(--glass-border)]">
+              {(["DTT", "INTERVAL", "ABC"] as RecordingMode[]).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setSetupForm((f) => ({ ...f, mode: m }))}
+                  className={`flex-1 rounded-lg px-2 py-2 text-xs font-semibold transition-all ${
+                    setupForm.mode === m
+                      ? "bg-[var(--accent-cyan)]/20 text-[var(--accent-cyan)]"
+                      : "text-zinc-500 hover:text-zinc-300"
+                  }`}
+                >
+                  {m === "DTT" ? "Discrete Trial" : m === "INTERVAL" ? "Interval" : "ABC Data"}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Backdated warning */}
+        {isBackdated && (
+          <motion.div
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4"
+          >
+            <p className="text-sm font-semibold text-amber-300">Backdated Session</p>
+            <p className="text-xs text-amber-400/80 mt-1">
+              You are creating a session for{" "}
+              <span className="font-semibold">
+                {new Date(setupForm.sessionDate + "T12:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}
+              </span>
+              . Reports, graphs, assessments, and session notes will use this service date.
+            </p>
+          </motion.div>
+        )}
+
+        {/* Start button */}
+        <motion.button
+          whileTap={{ scale: 0.98 }}
+          type="button"
+          onClick={handleStartFromSetup}
+          className="w-full flex items-center justify-center gap-2 btn-primary rounded-2xl py-4 font-bold text-base"
+        >
+          <Play className="h-5 w-5" />
+          {isBackdated ? "Create Backdated Session" : "Start Session"}
+        </motion.button>
+      </motion.div>
+      {conflictDialog}
+    </>);
   }
 
   /* ━━━━ VIEW: HISTORY ━━━━ */
   if (view === "history") {
-    return (
+    return (<>
       <div className="space-y-5">
-        {/* Active session restore banner */}
+        {/* Active session restore banner — shown for THIS client's unsaved session */}
         {storeActiveSession && storeActiveSession.clientId === clientId && !storeActiveSession.saved && (
           <motion.div
             initial={{ opacity: 0, y: -8 }}
@@ -667,11 +1168,35 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
             </div>
             <button
               type="button"
-              onClick={startSession}
+              onClick={() => startSession()}
               className="flex items-center gap-1.5 rounded-xl bg-amber-500/20 px-4 py-2.5 text-sm font-semibold text-amber-300 hover:bg-amber-500/30 transition-colors"
             >
               <Play className="h-4 w-4" /> Resume
             </button>
+          </motion.div>
+        )}
+
+        {/* Warn about an unsaved session for a DIFFERENT client — visible no
+         * matter which client's page you're on, so it can never be silently
+         * lost just because you navigated elsewhere before ending it. */}
+        {storeActiveSession && storeActiveSession.clientId !== clientId && !storeActiveSession.saved && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="glass-card rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4 flex items-center justify-between gap-3"
+          >
+            <div>
+              <p className="text-sm font-semibold text-amber-300">Unsaved session for another client</p>
+              <p className="text-xs text-amber-400/70">
+                {storeActiveSession.trials.length} trial{storeActiveSession.trials.length !== 1 ? "s" : ""} recorded there — finish it before starting a new one to avoid losing it
+              </p>
+            </div>
+            <Link
+              href={`/clients/${storeActiveSession.clientId}?tab=data-entry`}
+              className="flex items-center gap-1.5 rounded-xl bg-amber-500/20 px-4 py-2.5 text-sm font-semibold text-amber-300 hover:bg-amber-500/30 transition-colors"
+            >
+              <Play className="h-4 w-4" /> Go resume it
+            </Link>
           </motion.div>
         )}
 
@@ -680,7 +1205,7 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
           whileHover={{ y: -2 }}
           whileTap={{ scale: 0.98 }}
           type="button"
-          onClick={startSession}
+          onClick={() => setView("setup")}
           className="w-full flex items-center justify-between gap-4 glass-card rounded-2xl border border-[var(--accent-cyan)]/30 bg-[var(--accent-cyan)]/5 p-5 hover:border-[var(--accent-cyan)]/60 transition-all"
         >
           <div className="flex items-center gap-4">
@@ -734,7 +1259,7 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
                 const start    = new Date(s.startedAt);
                 const durMin   = s.endedAt ? Math.round((new Date(s.endedAt).getTime() - start.getTime()) / 60000) : null;
                 return (
-                  <div key={s.id} className="glass-card rounded-2xl p-4 flex items-center gap-4">
+                  <button key={s.id} type="button" onClick={() => setSelectedSessionId(s.id)} className="glass-card w-full rounded-2xl p-4 flex items-center gap-4 text-left hover:border-[var(--accent-cyan)]/40 transition-colors">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-cyan)]/10">
                       <Activity className="h-5 w-5 text-[var(--accent-cyan)]" />
                     </div>
@@ -754,18 +1279,20 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
                         {Math.round(s.pctCorrect)}%
                       </span>
                     )}
-                  </div>
+                  </button>
                 );
               })}
             </div>
           )}
         </div>
+        <SessionSnapshotDrawer sessionId={selectedSessionId} onClose={() => setSelectedSessionId(null)} />
       </div>
-    );
+      {conflictDialog}
+    </>);
   }
 
   /* ━━━━ VIEW: LIVE SESSION ━━━━ */
-  return (
+  return (<>
     <div className="space-y-4 -mx-0 relative">
       {/* ── Sticky session header ── */}
       <div className="sticky top-0 z-20 -mx-0 glass-card rounded-2xl border border-[var(--accent-cyan)]/20 p-3 backdrop-blur-xl mb-2">
@@ -792,6 +1319,18 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
           <div className="flex-1 min-w-0 text-center">
             <span className="text-xs text-zinc-500">{trials.length} trial{trials.length !== 1 ? "s" : ""}</span>
           </div>
+
+          {/* Undo last trial */}
+          {trials.length > 0 && (
+            <button
+              type="button"
+              onClick={undoLastTrial}
+              title="Undo last trial"
+              className="flex items-center gap-1 rounded-xl px-2.5 py-1.5 text-xs font-medium text-amber-400 hover:bg-amber-400/10 transition-colors"
+            >
+              <RotateCcw className="h-3.5 w-3.5" /> Undo
+            </button>
+          )}
 
           {/* End session */}
           <button
@@ -1168,5 +1707,6 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
         </AnimatePresence>
       )}
     </div>
-  );
+    {conflictDialog}
+  </>);
 }

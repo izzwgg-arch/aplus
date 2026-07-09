@@ -1,15 +1,18 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { requireSession } from "@/lib/session";
+import { requireClientAccessResponse, requirePermissionResponse } from "@/lib/permissions";
 import { prisma } from "@/lib/db";
 import { auditLog } from "@/lib/auditLogger";
 
 export async function GET(req: Request) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const user = await requireSession();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { searchParams } = new URL(req.url);
   const clientId = searchParams.get("clientId");
   if (!clientId) return NextResponse.json({ error: "clientId required" }, { status: 400 });
+  const denied = await requireClientAccessResponse(user.id, clientId, "smartsteps.programs.view");
+  if (denied) return denied;
 
   try {
     const programs = await prisma.program.findMany({
@@ -44,18 +47,17 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const role = (session.user as { role?: string }).role;
-  if (role === "RBT") return NextResponse.json({ error: "Forbidden — BCBA/Admin only" }, { status: 403 });
+  const user = await requireSession();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const denied = await requirePermissionResponse(user.id, "smartsteps.programs.create");
+  if (denied) return denied;
 
   try {
     const body = await req.json() as { clientId: string; name: string; domain: string; description?: string };
     const program = await prisma.program.create({
       data: { clientId: body.clientId, name: body.name, domain: body.domain },
     });
-    await auditLog(session.user.id!, "UPDATE_PROGRAM", "Program", program.id, { action: "create" });
+    await auditLog(user.id, "UPDATE_PROGRAM", "Program", program.id, { action: "create" });
     return NextResponse.json(program, { status: 201 });
   } catch {
     return NextResponse.json({ error: "Failed" }, { status: 500 });

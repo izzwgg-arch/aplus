@@ -1,30 +1,43 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard, Users, FileBarChart, Settings, Wifi, WifiOff,
   RefreshCw, ClipboardList, Target, ChevronDown, Plus, Zap, Menu, X,
-  ArrowLeft, UserCheck,
+  ArrowLeft, UserCheck, BookOpen, AlertTriangle,
 } from "lucide-react";
 
 const APLUS_CENTER_URL = "https://app.apluscenterinc.org/aplus";
-import { getPendingCount, flushSyncQueue } from "@/lib/dexie";
+import { getPendingCount, getStuckCount, flushSyncQueue } from "@/lib/dexie";
 import { toast } from "sonner";
+import { usePermissions } from "@/hooks/usePermissions";
 
 /* ─── Nav config ─────────────────────────────────────────────────────────── */
+// `anyOf` — nav item is visible if the user holds at least one of these keys.
+// Direct URL access to a page without the required permission is still
+// blocked server-side (route guards) / client-side (RequirePermission) —
+// this list only controls nav visibility.
 
 const NAV = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/clients", label: "Clients", icon: Users },
-  { href: "/goals-and-targets", label: "Goals & Targets", icon: Target },
-  { href: "/assessments", label: "Assessments", icon: ClipboardList },
-  { href: "/reports", label: "Reports", icon: FileBarChart },
-  { href: "/staff", label: "Staff", icon: UserCheck },
-  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/dashboard",            label: "Dashboard",           icon: LayoutDashboard, anyOf: ["smartsteps.dashboard.view"] },
+  { href: "/clients",              label: "Clients",             icon: Users, anyOf: ["smartsteps.clients.view.assigned", "smartsteps.clients.view.all"] },
+  { href: "/goals-and-targets",    label: "Goals & Targets",     icon: Target, anyOf: ["smartsteps.goals.view.assigned", "smartsteps.goals.view.all", "smartsteps.targets.view.assigned", "smartsteps.targets.view.all"] },
+  { href: "/goal-library",         label: "Goal Library",        icon: BookOpen, anyOf: ["smartsteps.goal_library.view"] },
+  { href: "/parent-goal-library",  label: "Parent Goal Library", icon: Target, anyOf: ["smartsteps.parent_goal_library.view"] },
+  // NOTE: "/assessments" is the template-management + report-generation console
+  // (create scoring/report templates, generate a client report), NOT the
+  // per-client assessment viewer — it must be gated by the *template* keys,
+  // not `smartsteps.assessments.view.*` (which RBTs hold for their own
+  // assigned clients' assessment data elsewhere and would incorrectly show
+  // this admin/BCBA-facing page to them).
+  { href: "/assessments",          label: "Assessments",         icon: ClipboardList, anyOf: ["smartsteps.assessment_templates.view", "smartsteps.assessment_templates.manage", "smartsteps.report_templates.view", "smartsteps.report_templates.manage"] },
+  { href: "/reports",              label: "Reports",             icon: FileBarChart, anyOf: ["smartsteps.reports.view.assigned", "smartsteps.reports.view.all", "smartsteps.reports.export"] },
+  { href: "/staff",                label: "Staff",               icon: UserCheck, anyOf: ["smartsteps.staff.view"] },
+  { href: "/settings",             label: "Settings",            icon: Settings, anyOf: null },
 ];
 
 /* ─── Sidebar inner content (shared by desktop & mobile drawer) ──────────── */
@@ -36,6 +49,7 @@ function SidebarContent({
   isGoalsActive,
   isOnline,
   pendingCount,
+  stuckCount,
   syncing,
   handleSync,
 }: {
@@ -45,12 +59,15 @@ function SidebarContent({
   isGoalsActive: boolean;
   isOnline: boolean;
   pendingCount: number;
+  stuckCount: number;
   syncing: boolean;
   handleSync: () => void;
 }) {
   const pathname = usePathname();
   const router = useRouter();
   const { data: session } = useSession();
+  const { canAny } = usePermissions();
+  const visibleNav = NAV.filter((item) => canAny(item.anyOf));
 
   return (
     <>
@@ -92,7 +109,7 @@ function SidebarContent({
 
       {/* Nav items — scrollable if many */}
       <nav className="flex-1 space-y-0.5 overflow-y-auto p-2 scrollbar-none">
-        {NAV.map((item) => {
+        {visibleNav.map((item) => {
           const isGoals = item.href === "/goals-and-targets";
           const active = isGoals
             ? isGoalsActive
@@ -204,6 +221,15 @@ function SidebarContent({
             {syncing ? "Syncing…" : `${pendingCount} pending sync`}
           </button>
         )}
+        {stuckCount > 0 && (
+          <div
+            className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs text-red-400 bg-red-400/10"
+            title="These items have repeatedly failed to sync to the server and have not been saved there yet. Contact support if this doesn't resolve."
+          >
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+            {stuckCount} item{stuckCount !== 1 ? "s" : ""} stuck — not saved to server
+          </div>
+        )}
       </div>
 
       {/* User */}
@@ -236,6 +262,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   const pathname = usePathname();
   const [isOnline, setIsOnline] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
+  const [stuckCount, setStuckCount] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const [goalsOpen, setGoalsOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -249,10 +276,21 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
     setMobileOpen(false);
   }, [pathname]);
 
+  const refreshCounts = useCallback(() => {
+    getPendingCount().then(setPendingCount).catch(() => {});
+    getStuckCount().then(setStuckCount).catch(() => {});
+  }, []);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     setIsOnline(navigator.onLine);
-    const on = () => setIsOnline(true);
+    const on = () => {
+      setIsOnline(true);
+      // Coming back online — attempt to drain the queue automatically
+      // instead of leaving locally-saved data stranded until the user
+      // notices the pending-sync button and clicks it manually.
+      void handleSync();
+    };
     const off = () => setIsOnline(false);
     window.addEventListener("online", on);
     window.addEventListener("offline", off);
@@ -260,32 +298,41 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       window.removeEventListener("online", on);
       window.removeEventListener("offline", off);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    getPendingCount().then(setPendingCount).catch(() => {});
-    const id = setInterval(() => getPendingCount().then(setPendingCount).catch(() => {}), 15_000);
+    refreshCounts();
+    const id = setInterval(refreshCounts, 15_000);
     return () => clearInterval(id);
-  }, []);
+  }, [refreshCounts]);
 
-  async function handleSync() {
-    if (syncing || !isOnline) return;
+  const handleSync = useCallback(async () => {
+    if (syncing || !navigator.onLine) return;
     setSyncing(true);
     try {
       const result = await flushSyncQueue();
       if (result.synced > 0) toast.success(`Synced ${result.synced} items.`);
       if (result.conflicts > 0) toast.warning(`${result.conflicts} conflict(s) — server wins.`);
-      if (result.errors > 0) toast.error(`${result.errors} item(s) failed to sync.`);
-      setPendingCount(0);
+      if (result.errors > 0) toast.error(`${result.errors} item(s) failed to sync — will retry automatically.`);
+      if (result.stuck > 0) {
+        toast.error(`${result.stuck} item(s) have repeatedly failed to sync and need attention.`, { duration: 8000 });
+      }
+      // Re-derive the real pending/stuck counts from IndexedDB instead of
+      // assuming success — flushSyncQueue only marks items synced that the
+      // server explicitly confirmed, so anything still failing correctly
+      // stays counted as pending here rather than being masked as 0.
+      refreshCounts();
     } catch {
       toast.error("Sync failed. Will retry.");
     } finally {
       setSyncing(false);
     }
-  }
+  }, [syncing, refreshCounts]);
 
   const isGoalsActive =
-    pathname.includes("/goals") || pathname === "/goals-and-targets";
+    (pathname.includes("/goals") && !pathname.includes("/goal-library") && !pathname.includes("/parent-goal-library"))
+    || pathname === "/goals-and-targets";
 
   const sharedProps = {
     goalsOpen,
@@ -293,6 +340,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
     isGoalsActive,
     isOnline,
     pendingCount,
+    stuckCount,
     syncing,
     handleSync,
   };

@@ -3,8 +3,10 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { motion } from "framer-motion";
-import { Moon, Sun, Monitor, Shield, Database, User, Building2, Upload } from "lucide-react";
+import Link from "next/link";
+import { Moon, Sun, Monitor, Shield, Database, User, Building2, Upload, ShieldCheck, LifeBuoy } from "lucide-react";
 import { useThemeStore } from "@/store/themeStore";
+import { usePermissions } from "@/hooks/usePermissions";
 import { toast } from "sonner";
 
 type OrgSettings = {
@@ -20,6 +22,7 @@ type OrgSettings = {
 export default function SettingsPage() {
   const { theme, setTheme, resolved } = useThemeStore();
   const { data: session } = useSession();
+  const { can } = usePermissions();
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", resolved);
@@ -31,7 +34,10 @@ export default function SettingsPage() {
   };
 
   const user = session?.user as { name?: string | null; email?: string | null; role?: string } | undefined;
-  const canEditOrg = user?.role === "ADMIN" || user?.role === "BCBA";
+  // Permission-driven (not the legacy role string) so custom roles reassigned
+  // via Settings → Roles & Permissions are respected immediately.
+  const canEditOrg = can("smartsteps.organization_settings.edit");
+  const canViewOrg = can("smartsteps.organization_settings.view");
 
   // ── Org settings state ──────────────────────────────────────────────────────
   const [org, setOrg]           = useState<OrgSettings>({ orgName: "", orgAddress: "", orgPhone: "", orgEmail: "", logoUrl: "", letterheadHtml: "", footerHtml: "" });
@@ -57,7 +63,7 @@ export default function SettingsPage() {
     } catch { /* silent */ } finally { setOrgLoading(false); }
   }, []);
 
-  useEffect(() => { loadOrg(); }, [loadOrg]);
+  useEffect(() => { if (canViewOrg) loadOrg(); else setOrgLoading(false); }, [loadOrg, canViewOrg]);
 
   async function saveOrg(e: React.FormEvent) {
     e.preventDefault();
@@ -169,6 +175,43 @@ export default function SettingsPage() {
         </div>
       </motion.section>
 
+      {/* Roles & Permissions management */}
+      {can("smartsteps.permissions.manage") && (
+        <motion.section
+          initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }}
+          className="glass-card rounded-2xl p-5 mb-4"
+        >
+          <div className="flex items-center gap-3 mb-3">
+            <ShieldCheck className="h-5 w-5 text-[var(--accent-cyan)]" />
+            <h2 className="font-semibold text-[var(--foreground)]">Roles &amp; Permissions</h2>
+          </div>
+          <p className="text-sm text-zinc-500 mb-3">
+            Control what each role can see and do, and assign staff members to roles.
+          </p>
+          <Link href="/settings/permissions" className="btn-primary inline-flex rounded-xl px-4 py-2 text-sm font-semibold">
+            Open Permissions
+          </Link>
+        </motion.section>
+      )}
+
+      {/* Local data recovery */}
+      <motion.section
+        initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.09 }}
+        className="glass-card rounded-2xl p-5 mb-4"
+      >
+        <div className="flex items-center gap-3 mb-3">
+          <LifeBuoy className="h-5 w-5 text-amber-400" />
+          <h2 className="font-semibold text-[var(--foreground)]">Local Data Recovery</h2>
+        </div>
+        <p className="text-sm text-zinc-500 mb-3">
+          If data you entered on THIS device ever seemed to disappear, use this to scan this
+          browser&apos;s offline storage for anything that never made it to the server, and push it up.
+        </p>
+        <Link href="/data-recovery" className="btn-primary inline-flex rounded-xl px-4 py-2 text-sm font-semibold">
+          Open Data Recovery
+        </Link>
+      </motion.section>
+
       {/* Access control info */}
       <motion.section
         initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
@@ -185,7 +228,8 @@ export default function SettingsPage() {
         </div>
       </motion.section>
 
-      {/* Organization branding */}
+      {/* Organization branding — RBT has zero visibility into org settings */}
+      {canViewOrg && (
       <motion.section
         initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
         className="glass-card rounded-2xl p-5 mb-4"
@@ -339,6 +383,7 @@ export default function SettingsPage() {
           </form>
         )}
       </motion.section>
+      )}
 
       {/* System info */}
       <motion.section

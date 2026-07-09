@@ -281,6 +281,50 @@ function localId(prefix = "local") {
   return `${prefix}-${Date.now()}-${++idCounter}`;
 }
 
+/* ─── Shared "start session" guard ───────────────────────────────────────
+ * IMPORTANT: this is the single source of truth for starting a session.
+ * Every entry point (DataEntryTab, session/new page, any future one) MUST
+ * go through this function instead of calling the store's `startSession`
+ * action directly.
+ *
+ * Root cause this fixes: `startSession` used to be called directly by two
+ * separate page components, each with its own (subtly different, and in one
+ * case completely absent) "is there already an unsaved session?" check.
+ * Because `activeSession` is a single slot, calling the raw store action
+ * unconditionally OVERWRITES whatever unsaved session was there — silently
+ * discarding real, unsynced clinical data (trials/ABC events) with zero
+ * warning. This has been the actual mechanism behind "I recorded a session
+ * and it disappeared" reports. Centralizing the guard here means the fix
+ * can't be bypassed or re-broken by a future caller reimplementing it. */
+export type SessionStartResult =
+  | { kind: "resumed"; localId: string; existing: ActiveSession }
+  | { kind: "conflict"; existing: ActiveSession }
+  | { kind: "started"; localId: string };
+
+export function resolveSessionStart(
+  clientId: string,
+  opts?: { force?: boolean }
+): SessionStartResult {
+  const state = useABAStore.getState();
+  const existing = state.activeSession;
+
+  if (existing && !existing.saved) {
+    if (existing.clientId === clientId) {
+      // Same client — always resume, never silently wipe in-progress work.
+      return { kind: "resumed", localId: existing.localId, existing };
+    }
+    if (!opts?.force) {
+      // Different client with unsaved work — refuse to proceed until the
+      // caller explicitly confirms discarding it (opts.force === true).
+      return { kind: "conflict", existing };
+    }
+    // force === true: caller has explicit user confirmation to discard.
+  }
+
+  const newLocalId = state.startSession(clientId, null);
+  return { kind: "started", localId: newLocalId };
+}
+
 export const useABAStore = create<ABAStore>()(
   persist(
     (set, get) => ({

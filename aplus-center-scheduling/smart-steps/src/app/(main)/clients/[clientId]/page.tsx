@@ -14,12 +14,15 @@ import {
   CheckCircle2, Circle, Clock, Star, Plus, Activity, StickyNote,
   BarChart2, LayoutGrid, Zap,
 } from "lucide-react";
-import { useState, useEffect, Suspense, Component, type ReactNode, type ErrorInfo } from "react";
+import { useState, Suspense, Component, type ReactNode, type ErrorInfo } from "react";
 import { toast } from "sonner";
 import { useSession } from "next-auth/react";
 import { TargetDetailPanel, type TargetPanelData } from "./_components/TargetDetailPanel";
 import { ProgramsTab } from "./_components/ProgramsTab";
 import { DataEntryTab } from "./_components/DataEntryTab";
+import { SessionSnapshotDrawer } from "./_components/SessionSnapshotDrawer";
+import { SessionNotesTab } from "./_components/SessionNotesTab";
+import { usePermissions } from "@/hooks/usePermissions";
 
 /* ── Types ── */
 
@@ -253,21 +256,22 @@ function ClientHubInner() {
   const { data: authSession } = useSession();
   const role = (authSession?.user as { role?: string })?.role;
   const qc = useQueryClient();
+  const { canAny } = usePermissions();
+  // RBT has zero access to assessments/reports (even for assigned clients) —
+  // only render these cards for roles holding the `.all` scope.
+  const canSeeAssessments = canAny(["smartsteps.assessments.view.all"]);
+  const canSeeReports = canAny(["smartsteps.reports.view.all"]);
 
   const clientId = String(params.clientId ?? "");
   const tabParam = searchParams.get("tab") as TabId | null;
-  const [activeTab, setActiveTab] = useState<TabId>(tabParam ?? "overview");
+  const activeTab: TabId = TABS.some((tab) => tab.id === tabParam) ? (tabParam as TabId) : "overview";
   const [generatingLink, setGeneratingLink] = useState(false);
   const [selectedTarget, setSelectedTarget] = useState<TargetPanelData | null>(null);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
 
   function setTab(t: TabId) {
-    setActiveTab(t);
     router.replace(`/clients/${clientId}?tab=${t}`, { scroll: false });
   }
-
-  useEffect(() => {
-    setActiveTab(tabParam ?? "overview");
-  }, [tabParam]);
 
   function handleOpenTarget(t: TargetPanelData) {
     setSelectedTarget(t);
@@ -561,11 +565,11 @@ function ClientHubInner() {
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {[
                   { href: `/clients/${clientId}?tab=programs`, icon: Target, label: "Goals & Targets", sub: "Category, skill areas & goals", color: "var(--accent-cyan)" },
-                  { href: `/clients/${clientId}/assessments`, icon: ClipboardList, label: "Assessments", sub: "Assign and complete", color: "var(--accent-purple)" },
+                  canSeeAssessments && { href: `/clients/${clientId}/assessments`, icon: ClipboardList, label: "Assessments", sub: "Assign and complete", color: "var(--accent-purple)" },
                   { href: `/clients/${clientId}/behavior-plan`, icon: Brain, label: "Behavior Plan", sub: "BIP and interventions", color: "#34d399" },
                   { href: `/clients/${clientId}?tab=data-entry`, icon: Zap, label: "Data Entry", sub: "Live session recording", color: "#f59e0b" },
-                  { href: `/reports?clientId=${clientId}`, icon: FileText, label: "Reports", sub: "Export and analyze", color: "#a78bfa" },
-                ].map((item) => (
+                  canSeeReports && { href: `/reports?clientId=${clientId}`, icon: FileText, label: "Reports", sub: "Export and analyze", color: "#a78bfa" },
+                ].filter((item): item is Exclude<typeof item, false> => item !== false).map((item) => (
                   <Link key={item.href} href={item.href}>
                     <motion.div
                       whileHover={{ y: -2 }}
@@ -630,7 +634,7 @@ function ClientHubInner() {
               ) : (
                 <div className="space-y-2">
                   {sessions.map((s) => (
-                    <div key={s.id} className="glass-card rounded-2xl p-4 flex items-center gap-4">
+                    <button key={s.id} type="button" onClick={() => setSelectedSessionId(s.id)} className="glass-card w-full rounded-2xl p-4 flex items-center gap-4 text-left hover:border-[var(--accent-cyan)]/40 transition-colors">
                       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-cyan)]/10">
                         <Activity className="h-5 w-5 text-[var(--accent-cyan)]" />
                       </div>
@@ -650,7 +654,7 @@ function ClientHubInner() {
                         </span>
                       )}
                       <Clock className="h-4 w-4 text-zinc-600 shrink-0" />
-                    </div>
+                    </button>
                   ))}
                 </div>
               )}
@@ -746,16 +750,13 @@ function ClientHubInner() {
 
           {/* NOTES TAB */}
           {activeTab === "notes" && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-zinc-500">Session &amp; progress notes</p>
-              </div>
-              <div className="rounded-2xl border border-dashed border-[var(--glass-border)] py-16 text-center">
-                <StickyNote className="h-10 w-10 text-zinc-600 mx-auto mb-3" />
-                <p className="text-zinc-400 font-medium mb-1">Notes coming soon</p>
-                <p className="text-zinc-600 text-sm">SOAP notes and progress narratives will appear here.</p>
-              </div>
-            </div>
+            <TabErrorBoundary label="Notes">
+              <SessionNotesTab
+                clientId={clientId}
+                clientName={client.name}
+                userName={authSession?.user?.name ?? ""}
+              />
+            </TabErrorBoundary>
           )}
         </motion.div>
       </AnimatePresence>
@@ -770,6 +771,14 @@ function ClientHubInner() {
           />
         )}
       </AnimatePresence>
+      <SessionSnapshotDrawer
+        sessionId={selectedSessionId}
+        onClose={() => setSelectedSessionId(null)}
+        onNoteGenerated={() => {
+          setSelectedSessionId(null);
+          setTab("notes");
+        }}
+      />
     </div>
   );
 }

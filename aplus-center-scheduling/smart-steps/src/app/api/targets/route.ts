@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { requireSession } from "@/lib/session";
+import { requirePermissionResponse } from "@/lib/permissions";
 import { prisma } from "@/lib/db";
 
 export async function POST(req: Request) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const user = await requireSession();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const denied = await requirePermissionResponse(user.id, "smartsteps.targets.create");
+  if (denied) return denied;
 
   try {
     const body = await req.json();

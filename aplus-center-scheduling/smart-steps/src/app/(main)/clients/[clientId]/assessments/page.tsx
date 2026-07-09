@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { ArrowLeft, Plus, ClipboardList, CheckCircle, Clock, FileText, ExternalLink } from "lucide-react";
+import { RequirePermission } from "@/components/common/RequirePermission";
 
 type ClientAssessmentSummary = {
   id: string;
@@ -40,6 +41,14 @@ const REPORT_STATUS_STYLES: Record<string, { bg: string; text: string; label: st
 };
 
 export default function ClientAssessmentsPage() {
+  return (
+    <RequirePermission anyOf={["smartsteps.assessments.view.all", "smartsteps.reports.view.all"]}>
+      <ClientAssessmentsPageInner />
+    </RequirePermission>
+  );
+}
+
+function ClientAssessmentsPageInner() {
   const params = useParams();
   const clientId = String(params.clientId ?? "");
 
@@ -205,7 +214,7 @@ export default function ClientAssessmentsPage() {
             const statusStyle = REPORT_STATUS_STYLES[r.status] ?? REPORT_STATUS_STYLES.DRAFT;
             return (
               <motion.div key={r.id} variants={{ hidden: { opacity: 0, y: 8 }, visible: { opacity: 1, y: 0 } }}>
-                <Link href={`/smart-steps/assessments/reports/${r.id}`} target="_blank" rel="noopener noreferrer">
+                <Link href={`/assessments/reports/${r.id}`} target="_blank" rel="noopener noreferrer">
                   <div className="glass-card rounded-2xl p-4 flex items-center gap-4 hover:shadow-[var(--glow-cyan)] transition-shadow">
                     <div className="rounded-xl p-3 shrink-0 bg-[var(--accent-cyan)]/15">
                       <FileText className="h-5 w-5 text-[var(--accent-cyan)]" />
