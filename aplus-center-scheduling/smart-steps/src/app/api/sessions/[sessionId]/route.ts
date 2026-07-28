@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
-import { requireAnyPermissionResponse, requirePermissionResponse } from "@/lib/permissions";
+import { requireAnyPermissionResponse, requireClientAccessResponse, requirePermissionResponse } from "@/lib/permissions";
 import { prisma } from "@/lib/db";
 
 export async function PATCH(
@@ -18,6 +18,16 @@ export async function PATCH(
   if (sessionId.startsWith("local-")) {
     return NextResponse.json({ ok: true, offline: true });
   }
+
+  // Restrict edits to sessions whose client the user is assigned to (RBTs are
+  // ".assigned"-scoped; ".all" holders like BCBA/Admin pass through).
+  const existing = await prisma.session.findUnique({
+    where: { id: sessionId },
+    select: { clientId: true },
+  });
+  if (!existing) return NextResponse.json({ error: "Session not found" }, { status: 404 });
+  const accessDenied = await requireClientAccessResponse(user.id, existing.clientId, "smartsteps.sessions.view");
+  if (accessDenied) return accessDenied;
 
   try {
     const body = await req.json() as {

@@ -14,6 +14,7 @@ import {
   Pencil,
   Plus,
   Lightbulb,
+  Printer,
   RotateCcw,
   StickyNote,
   Target as TargetIcon,
@@ -22,6 +23,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { printGoals, type GoalStatusFilter, type PrintableGoal, type PrintableTarget } from "@/lib/printGoals";
 import {
   useABAStore,
   defaultMastery,
@@ -783,11 +785,14 @@ export function ProgramsTab({
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [showSkillModal, setShowSkillModal] = useState(false);
   const [showGoalModal, setShowGoalModal] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const addTarget = useABAStore((s) => s.addTarget);
   const updateTarget = useABAStore((s) => s.updateTarget);
   const setTargetServerId = useABAStore((s) => s.setTargetServerId);
   const addCategory = useABAStore((s) => s.addCategory);
   const addProgram = useABAStore((s) => s.addProgram);
+  const updateProgram = useABAStore((s) => s.updateProgram);
   const setCategoryServerId = useABAStore((s) => s.setCategoryServerId);
 
   // Select raw arrays (stable Zustand references) then filter via useMemo.
@@ -849,8 +854,13 @@ export function ProgramsTab({
                 targetType: st.targetType as LocalTarget["targetType"],
                 phase: st.phase as LocalTarget["phase"],
                 status: (st.phase === "MASTERED" ? "mastered" : st.phase === "NEW" ? "new" : "active") as LocalTarget["status"],
-                categoryId: "",
-                programId: group.groupType === "program" ? group.groupId : "",
+                // groupId is the ParentGoal id for "goal" groups (used as the local
+                // skill-area/programId) and the Program id for "program" groups (used
+                // as the local categoryId, with no skill area). Mapping these to the
+                // wrong field leaves the target unmatched by the drill-down and makes
+                // it invisible under its skill area/category.
+                categoryId: group.groupType === "program" ? group.groupId : "",
+                programId: group.groupType === "goal" ? group.groupId : "",
                 masteryCriteria: defaultMastery(),
                 promptLevels: defaultPromptLevels(),
                 isActive: true,
@@ -940,13 +950,22 @@ export function ProgramsTab({
           }> | null,
         ) => {
           if (!serverGoals) return;
-          const { programs: storePrograms, targets: storeTargets } = useABAStore.getState();
+          const { programs: storePrograms, targets: storeTargets, categories: storeCategories } = useABAStore.getState();
           for (const sg of serverGoals) {
-            // categoryId = server Program id (used as local Category id after hydration)
-            const categoryId = sg.programId ?? "";
+            // Resolve the LOCAL category id for this skill area. Locally-created
+            // categories keep a `local-…` id (with serverId set), so we must map the
+            // server Program id (sg.programId) back to that local id — otherwise the
+            // skill area/targets point at an id no category actually has.
+            const serverCategoryId = sg.programId ?? "";
+            const localCategory = serverCategoryId
+              ? storeCategories.find((c) => c.serverId === serverCategoryId || c.id === serverCategoryId)
+              : null;
+            const categoryId = localCategory?.id ?? serverCategoryId;
 
-            // Add skill area if not already present
-            if (!storePrograms.some((p) => p.serverId === sg.id || p.id === sg.id)) {
+            // Add skill area if not already present; otherwise repair a missing
+            // category link (older hydration left orphaned skill areas invisible).
+            const localSkill = storePrograms.find((p) => p.serverId === sg.id || p.id === sg.id);
+            if (!localSkill) {
               addProgram({
                 id: sg.id,
                 serverId: sg.id,
@@ -957,12 +976,29 @@ export function ProgramsTab({
                 createdAt: sg.createdAt ?? now,
                 synced: true,
               });
+            } else if (categoryId && !localSkill.categoryId) {
+              updateProgram(localSkill.id, { categoryId });
             }
+            // The local skill-area id targets must reference (falls back to sg.id when
+            // the skill area was just added above with id === sg.id).
+            const skillLocalId = localSkill?.id ?? sg.id;
 
             // Add targets under this skill area with correct hierarchy IDs
             for (const t of sg.targets ?? []) {
               if (!t.isActive) continue;
-              if (storeTargets.some((lt) => lt.serverId === t.id || lt.id === t.id)) continue;
+              const localTarget = storeTargets.find((lt) => lt.serverId === t.id || lt.id === t.id);
+              if (localTarget) {
+                // Repair goals that a previous hydration saved with an empty parent
+                // id — an empty programId matches no skill area so the goal vanishes
+                // from the drill-down. Only touch the broken (empty) case.
+                if (!localTarget.programId) {
+                  updateTarget(localTarget.id, {
+                    programId: skillLocalId,
+                    ...(categoryId ? { categoryId } : {}),
+                  });
+                }
+                continue;
+              }
               addTarget({
                 id: t.id,
                 serverId: t.id,
@@ -974,8 +1010,8 @@ export function ProgramsTab({
                 status: (
                   t.phase === "MASTERED" ? "mastered" : t.phase === "NEW" ? "new" : "active"
                 ) as LocalTarget["status"],
-                programId: sg.id,   // parent skill area id (ParentGoal.id)
-                categoryId,         // parent category id (Program.id)
+                programId: skillLocalId,   // parent skill area id (local id / ParentGoal.id)
+                categoryId,                // parent category id (local id / Program.id)
                 masteryCriteria: defaultMastery(),
                 promptLevels: defaultPromptLevels(),
                 isActive: true,
@@ -988,7 +1024,7 @@ export function ProgramsTab({
         },
       )
       .catch(() => {});
-  }, [clientId, addCategory, addProgram, addTarget, setCategoryServerId]);
+  }, [clientId, addCategory, addProgram, updateProgram, addTarget, updateTarget, setCategoryServerId]);
 
   const selectedCategory = view.level !== "categories" ? categories.find((item) => item.id === view.categoryId) ?? null : null;
   const selectedSkill = view.level === "goals" || view.level === "goal" ? skills.find((item) => item.id === view.skillId) ?? null : null;
@@ -1215,6 +1251,66 @@ export function ProgramsTab({
     else toast.error("Unable to copy goal to another client.");
   }
 
+  async function exportGoalsPdf(filter: GoalStatusFilter) {
+    setExportOpen(false);
+    setExporting(true);
+    try {
+      // Fetch authoritative goal data (masteryRule / prompts / phase) directly
+      // from the server rather than the local store, so the export reflects the
+      // saved record. This is read-only; nothing is mutated.
+      const res = await fetch(`/smart-steps/api/clients/${clientId}/goals`);
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      const mapTarget = (
+        t: {
+          id: string;
+          definition: string;
+          targetType: string;
+          phase: string;
+          masteryRule?: PrintableTarget["masteryRule"];
+          promptHierarchy?: string[];
+          baseline?: string | null;
+        },
+        subGoalTitle?: string | null,
+      ): PrintableTarget => ({
+        id: t.id,
+        definition: t.definition,
+        targetType: t.targetType,
+        phase: t.phase,
+        masteryRule: t.masteryRule ?? null,
+        promptHierarchy: t.promptHierarchy ?? [],
+        baseline: t.baseline ?? null,
+        subGoalTitle: subGoalTitle ?? null,
+      });
+      const goals: PrintableGoal[] = (data ?? []).map(
+        (g: {
+          id: string;
+          title: string;
+          domain?: string | null;
+          program?: { name?: string | null } | null;
+          targets?: Parameters<typeof mapTarget>[0][];
+          subGoals?: { title: string; targets?: Parameters<typeof mapTarget>[0][] }[];
+        }) => ({
+          id: g.id,
+          title: g.title,
+          domain: g.domain ?? null,
+          programName: g.program?.name ?? null,
+          targets: [
+            ...((g.targets ?? []).map((t) => mapTarget(t))),
+            ...((g.subGoals ?? []).flatMap((sg) => (sg.targets ?? []).map((t) => mapTarget(t, sg.title)))),
+          ],
+        }),
+      );
+      const clientName = availableClients.find((c) => c.id === clientId)?.name ?? "Client";
+      const ok = printGoals(goals, clientName, filter);
+      if (!ok) toast.error("Pop-up blocked — allow pop-ups and try again.");
+    } catch {
+      toast.error("Could not load goals for export.");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   if (!hydrated) {
     return (
       <div className="space-y-3">
@@ -1260,9 +1356,40 @@ export function ProgramsTab({
               <h3 className="font-bold text-[var(--foreground)] text-base">Goals &amp; Targets</h3>
               <p className="text-xs text-zinc-500">{categories.length} categories</p>
             </div>
-            <button type="button" onClick={() => { setEditingCategory(null); setShowCategoryModal(true); }} className="flex items-center gap-1.5 rounded-xl border border-[var(--accent-cyan)]/40 bg-[var(--accent-cyan)]/10 px-3 py-2 text-xs font-semibold text-[var(--accent-cyan)] hover:bg-[var(--accent-cyan)]/20 transition-colors">
-              <Plus className="h-3.5 w-3.5" /> Add Category
-            </button>
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setExportOpen((v) => !v)}
+                  disabled={exporting}
+                  className="flex items-center gap-1.5 rounded-xl border border-[var(--glass-border)] px-3 py-2 text-xs font-semibold text-zinc-300 hover:text-[var(--foreground)] hover:border-[var(--accent-cyan)]/40 transition-colors disabled:opacity-60"
+                >
+                  <Printer className="h-3.5 w-3.5" /> {exporting ? "Exporting…" : "Export PDF"}
+                </button>
+                {exportOpen && (
+                  <div className="absolute right-0 top-11 z-20 w-52 rounded-2xl border border-[var(--glass-border)] bg-[var(--background)]/95 p-2 shadow-2xl backdrop-blur">
+                    <p className="px-3 pt-1 pb-1.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Export goals</p>
+                    <button
+                      type="button"
+                      onClick={() => void exportGoalsPdf("IN_TREATMENT")}
+                      className="flex w-full rounded-xl px-3 py-2 text-left text-xs text-zinc-300 hover:bg-white/5 transition-colors"
+                    >
+                      In Treatment only
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void exportGoalsPdf("ALL")}
+                      className="flex w-full rounded-xl px-3 py-2 text-left text-xs text-zinc-300 hover:bg-white/5 transition-colors"
+                    >
+                      All statuses
+                    </button>
+                  </div>
+                )}
+              </div>
+              <button type="button" onClick={() => { setEditingCategory(null); setShowCategoryModal(true); }} className="flex items-center gap-1.5 rounded-xl border border-[var(--accent-cyan)]/40 bg-[var(--accent-cyan)]/10 px-3 py-2 text-xs font-semibold text-[var(--accent-cyan)] hover:bg-[var(--accent-cyan)]/20 transition-colors">
+                <Plus className="h-3.5 w-3.5" /> Add Category
+              </button>
+            </div>
           </div>
           {categories.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-[var(--glass-border)] py-16 text-center">

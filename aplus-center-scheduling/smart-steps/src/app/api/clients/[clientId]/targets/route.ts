@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
-import { requireClientAccessResponse } from "@/lib/permissions";
+import { requireClientAccessResponse, hasAllScope } from "@/lib/permissions";
 import { prisma } from "@/lib/db";
 
 // Returns ALL active targets for a client, grouped by goal/program
@@ -14,11 +14,17 @@ export async function GET(
   const denied = await requireClientAccessResponse(user.id, clientId, "smartsteps.targets.view");
   if (denied) return denied;
 
+  // BT visibility: restrict assigned-only viewers to In-Treatment (ACQUISITION)
+  // targets. BCBAs/Admins (holding the `.all` scope) see every phase.
+  const restrictToInTreatment = !(await hasAllScope(user.id, "smartsteps.targets.view"));
+  const phaseWhere = restrictToInTreatment ? { phase: "ACQUISITION" as const } : {};
+
   try {
     // Targets via goal hierarchy
     const goalTargets = await prisma.target.findMany({
       where: {
         isActive: true,
+        ...phaseWhere,
         OR: [
           { parentGoal: { clientId } },
           { subGoal: { parentGoal: { clientId } } },
@@ -41,6 +47,7 @@ export async function GET(
     const programTargets = await prisma.target.findMany({
       where: {
         isActive: true,
+        ...phaseWhere,
         programId: { not: null },
         program: { clientId },
         parentGoalId: null,

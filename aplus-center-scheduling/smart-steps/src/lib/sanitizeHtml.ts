@@ -259,6 +259,48 @@ export function replaceBracketPlaceholders(
   });
 }
 
+/**
+ * Placeholder words that resolve to the client's name when importing a Goal
+ * Library template into a client's program. Mirrors BRACKET_PLACEHOLDER_MAP's
+ * client-name aliases, plus ABA-friendly synonyms (child/learner/student).
+ */
+const CLIENT_NAME_PLACEHOLDER_WORDS = new Set([
+  "client",
+  "client name",
+  "clientname",
+  "child",
+  "learner",
+  "student",
+]);
+
+/**
+ * Replaces client-name placeholders in PLAIN TEXT (goal titles / operational
+ * definitions) with the client's name. Supports {{client}}, (Client), and
+ * [Client] forms (case-insensitive) plus the aliases above.
+ *
+ * Unlike replacePlaceholders/replaceBracketPlaceholders, this does NOT
+ * HTML-escape — goal text is rendered as plain text, so escaping would turn
+ * apostrophes into entities. Only known client-name tokens are replaced; every
+ * other bracketed/braced token is preserved untouched.
+ */
+export function replaceClientNamePlaceholders(
+  text: string | null | undefined,
+  clientName: string | null | undefined,
+): string {
+  const src  = text ?? "";
+  const name = (clientName ?? "").trim();
+  if (!src || !name) return src;
+
+  const resolve = (match: string, rawKey: string): string =>
+    CLIENT_NAME_PLACEHOLDER_WORDS.has(rawKey.trim().toLowerCase()) ? name : match;
+
+  return src
+    // {{ client }}
+    .replace(/\{\{\s*([\w\s]+?)\s*\}\}/g, resolve)
+    // (Client) or [Client]
+    .replace(/[(\[]\s*([\w\s]+?)\s*[)\]]/g, resolve);
+}
+
 export function formatDate(value: Date | string | null | undefined): string {
   if (!value) return "";
   const d = new Date(value);

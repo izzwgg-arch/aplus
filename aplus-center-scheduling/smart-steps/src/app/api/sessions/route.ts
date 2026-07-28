@@ -9,7 +9,11 @@ export async function GET(req: Request) {
 
   const { searchParams } = new URL(req.url);
   const clientId = searchParams.get("clientId");
-  const limit = Math.min(Number(searchParams.get("limit") ?? 20), 100);
+  // Pagination: default page size 50, capped at 200 per request to protect the
+  // DB, with `offset` for navigating the COMPLETE history (no arbitrary ceiling
+  // on how far back you can page — today, recent, older, and backdated).
+  const limit = Math.min(Math.max(Number(searchParams.get("limit") ?? 50), 1), 200);
+  const offset = Math.max(0, Number(searchParams.get("offset") ?? 0));
 
   if (clientId) {
     const denied = await requireClientAccessResponse(user.id, clientId, "smartsteps.sessions.view");
@@ -22,6 +26,7 @@ export async function GET(req: Request) {
       where: clientId ? { clientId } : (clientIds === "ALL" ? {} : { clientId: { in: clientIds as string[] } }),
       orderBy: { startedAt: "desc" },
       take: limit,
+      skip: offset,
       select: {
         id: true,
         startedAt: true,

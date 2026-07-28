@@ -89,6 +89,7 @@ model User {
   emailVerified        DateTime?
   phone                String?
   credentials          String?
+  invitedAt            DateTime? // set when the account was created via email invite; cleared once accepted
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
   assignedClients      ClientAssignment[]
@@ -97,7 +98,29 @@ model User {
   auditEntries         AuditEntry[]
   completedAssessments ClientAssessment[]
   targetAnnotations    TargetAnnotation[]
+  passwordResetTokens  PasswordResetToken[]
   appRole              AppRole?           @relation(fields: [appRoleId], references: [id], onDelete: SetNull)
+}
+
+enum TokenPurpose {
+  INVITE
+  RESET
+}
+
+// One-time tokens for email invites and password resets. Only the SHA-256
+// hash of the raw token is stored; the raw token lives solely in the emailed
+// link. A token is spent once `usedAt` is set or once `expiresAt` passes.
+model PasswordResetToken {
+  id        String       @id @default(cuid())
+  tokenHash String       @unique
+  userId    String
+  purpose   TokenPurpose @default(INVITE)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime     @default(now())
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 // ─── Permission System (Phase 1) ─────────────────────────────────────────────
@@ -670,4 +693,17 @@ model OrganizationSettings {
   footerHtml     String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+
+  // SmartSteps outgoing email (SMTP) — independent of A+ Scheduling credentials.
+  // `smtpPasswordEnc` holds the Google App Password encrypted at rest (AES-256-CBC
+  // via src/lib/crypto.ts) and is NEVER returned through any API response.
+  emailEnabled     Boolean @default(false)
+  emailSenderName  String?
+  emailFromAddress String?
+  emailReplyTo     String?
+  emailUser        String?
+  smtpHost         String?
+  smtpPort         Int?    @default(465)
+  smtpSecure       Boolean @default(true)
+  smtpPasswordEnc  String?
 }

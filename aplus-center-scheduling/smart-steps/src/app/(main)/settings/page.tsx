@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { motion } from "framer-motion";
 import Link from "next/link";
-import { Moon, Sun, Monitor, Shield, Database, User, Building2, Upload, ShieldCheck, LifeBuoy } from "lucide-react";
+import { Moon, Sun, Monitor, Shield, Database, User, Building2, Upload, ShieldCheck, LifeBuoy, Mail } from "lucide-react";
 import { useThemeStore } from "@/store/themeStore";
 import { usePermissions } from "@/hooks/usePermissions";
 import { toast } from "sonner";
@@ -17,6 +17,30 @@ type OrgSettings = {
   logoUrl: string;
   letterheadHtml: string;
   footerHtml: string;
+};
+
+type EmailSettings = {
+  emailEnabled: boolean;
+  emailSenderName: string;
+  emailFromAddress: string;
+  emailReplyTo: string;
+  emailUser: string;
+  smtpHost: string;
+  smtpPort: number;
+  smtpSecure: boolean;
+  hasAppPassword: boolean;
+};
+
+const EMPTY_EMAIL: EmailSettings = {
+  emailEnabled: false,
+  emailSenderName: "",
+  emailFromAddress: "",
+  emailReplyTo: "",
+  emailUser: "",
+  smtpHost: "smtp.gmail.com",
+  smtpPort: 465,
+  smtpSecure: true,
+  hasAppPassword: false,
 };
 
 export default function SettingsPage() {
@@ -99,6 +123,113 @@ export default function SettingsPage() {
     reader.readAsDataURL(file);
     // Reset input so the same file can be re-selected if needed
     e.target.value = "";
+  }
+
+  // ── Email integration (ADMIN only) ──────────────────────────────────────────
+  const isAdmin = user?.role === "ADMIN";
+  const [email, setEmail] = useState<EmailSettings>(EMPTY_EMAIL);
+  const [emailLoading, setEmailLoading] = useState(true);
+  const [emailSaving, setEmailSaving] = useState(false);
+  const [emailBusy, setEmailBusy] = useState<null | "test" | "send">(null);
+  // Plaintext app password entered in the form. Blank = keep the stored one.
+  const [appPassword, setAppPassword] = useState("");
+  const [testRecipient, setTestRecipient] = useState("");
+
+  const loadEmail = useCallback(async () => {
+    try {
+      const r = await fetch("/smart-steps/api/organization/email-settings");
+      if (r.ok) {
+        const d = await r.json();
+        setEmail({
+          emailEnabled:     Boolean(d.emailEnabled),
+          emailSenderName:  d.emailSenderName  ?? "",
+          emailFromAddress: d.emailFromAddress ?? "",
+          emailReplyTo:     d.emailReplyTo     ?? "",
+          emailUser:        d.emailUser        ?? "",
+          smtpHost:         d.smtpHost         || "smtp.gmail.com",
+          smtpPort:         d.smtpPort         ?? 465,
+          smtpSecure:       d.smtpSecure       ?? true,
+          hasAppPassword:   Boolean(d.hasAppPassword),
+        });
+      }
+    } catch { /* silent */ } finally { setEmailLoading(false); }
+  }, []);
+
+  useEffect(() => { if (isAdmin) loadEmail(); else setEmailLoading(false); }, [loadEmail, isAdmin]);
+
+  function emailPayload() {
+    return {
+      emailEnabled: email.emailEnabled,
+      emailSenderName: email.emailSenderName,
+      emailFromAddress: email.emailFromAddress,
+      emailReplyTo: email.emailReplyTo,
+      emailUser: email.emailUser,
+      smtpHost: email.smtpHost,
+      smtpPort: email.smtpPort,
+      smtpSecure: email.smtpSecure,
+      // Only send a password when the admin typed a new one. Strip all
+      // whitespace — Google shows app passwords as space-separated groups and
+      // pasted spaces would otherwise break SMTP auth.
+      appPassword: appPassword.replace(/\s+/g, "") || undefined,
+    };
+  }
+
+  async function saveEmail(e: React.FormEvent) {
+    e.preventDefault();
+    setEmailSaving(true);
+    try {
+      const r = await fetch("/smart-steps/api/organization/email-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(emailPayload()),
+      });
+      if (!r.ok) throw new Error();
+      const d = await r.json();
+      setEmail((p) => ({ ...p, hasAppPassword: Boolean(d.hasAppPassword) }));
+      setAppPassword("");
+      toast.success("Email settings saved");
+    } catch {
+      toast.error("Could not save email settings");
+    } finally {
+      setEmailSaving(false);
+    }
+  }
+
+  async function testEmailConnection() {
+    setEmailBusy("test");
+    try {
+      const r = await fetch("/smart-steps/api/organization/email-settings/test-connection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ appPassword: appPassword.replace(/\s+/g, "") || undefined }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d.ok) toast.success("SMTP connection succeeded");
+      else toast.error(d.error || "Connection failed");
+    } catch {
+      toast.error("Connection failed");
+    } finally {
+      setEmailBusy(null);
+    }
+  }
+
+  async function sendTestEmail() {
+    if (!testRecipient.trim()) { toast.error("Enter a test recipient email"); return; }
+    setEmailBusy("send");
+    try {
+      const r = await fetch("/smart-steps/api/organization/email-settings/send-test-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: testRecipient.trim(), appPassword: appPassword.replace(/\s+/g, "") || undefined }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d.ok) toast.success(`Test email sent to ${testRecipient.trim()}`);
+      else toast.error(d.error || "Could not send test email");
+    } catch {
+      toast.error("Could not send test email");
+    } finally {
+      setEmailBusy(null);
+    }
   }
 
   return (
@@ -380,6 +511,178 @@ export default function SettingsPage() {
                 {orgSaving ? "Saving…" : "Save Organization Settings"}
               </button>
             )}
+          </form>
+        )}
+      </motion.section>
+      )}
+
+      {/* Email Integration — ADMIN only (carries outgoing SMTP credentials) */}
+      {isAdmin && (
+      <motion.section
+        initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }}
+        className="glass-card rounded-2xl p-5 mb-4"
+      >
+        <div className="flex items-center gap-3 mb-1">
+          <Mail className="h-5 w-5 text-[var(--accent-cyan)]" />
+          <h2 className="font-semibold text-[var(--foreground)]">Email Integration</h2>
+        </div>
+        <p className="text-sm text-zinc-500 mb-4">
+          Dedicated SmartSteps outgoing email (separate from A+ Scheduling). Use a Google Workspace
+          address and a Google <span className="text-zinc-400">App Password</span> (not the account password).
+        </p>
+
+        {emailLoading ? (
+          <div className="space-y-2">
+            {[1, 2, 3].map((i) => <div key={i} className="h-8 rounded-lg bg-white/5 animate-pulse" />)}
+          </div>
+        ) : (
+          <form onSubmit={saveEmail} className="space-y-3">
+            <label className="flex items-center gap-2 text-sm text-[var(--foreground)]">
+              <input
+                type="checkbox"
+                checked={email.emailEnabled}
+                onChange={(e) => setEmail((p) => ({ ...p, emailEnabled: e.target.checked }))}
+              />
+              Enabled — send SmartSteps email through this account
+            </label>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold text-zinc-500 uppercase tracking-wide">Sender Name</label>
+                <input
+                  className="field-input w-full text-sm"
+                  value={email.emailSenderName}
+                  onChange={(e) => setEmail((p) => ({ ...p, emailSenderName: e.target.value }))}
+                  placeholder="SmartSteps ABA"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold text-zinc-500 uppercase tracking-wide">Workspace Email</label>
+                <input
+                  className="field-input w-full text-sm"
+                  value={email.emailFromAddress}
+                  onChange={(e) => setEmail((p) => ({ ...p, emailFromAddress: e.target.value }))}
+                  placeholder="aba@yourdomain.com"
+                  autoComplete="off"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-[11px] font-semibold text-zinc-500 uppercase tracking-wide">
+                Google App Password
+              </label>
+              <input
+                type="password"
+                className="field-input w-full text-sm"
+                value={appPassword}
+                onChange={(e) => setAppPassword(e.target.value)}
+                placeholder={email.hasAppPassword ? "•••••••••••• (saved — leave blank to keep)" : "16-character app password"}
+                autoComplete="new-password"
+              />
+              <p className="mt-1 text-[11px] text-zinc-600">
+                Stored encrypted. Never displayed after saving. Leave blank to keep the existing password.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold text-zinc-500 uppercase tracking-wide">Reply-To Email <span className="normal-case text-zinc-600 font-normal">(optional)</span></label>
+                <input
+                  className="field-input w-full text-sm"
+                  value={email.emailReplyTo}
+                  onChange={(e) => setEmail((p) => ({ ...p, emailReplyTo: e.target.value }))}
+                  placeholder="replies@yourdomain.com"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold text-zinc-500 uppercase tracking-wide">SMTP Username <span className="normal-case text-zinc-600 font-normal">(defaults to Workspace Email)</span></label>
+                <input
+                  className="field-input w-full text-sm"
+                  value={email.emailUser}
+                  onChange={(e) => setEmail((p) => ({ ...p, emailUser: e.target.value }))}
+                  placeholder="aba@yourdomain.com"
+                  autoComplete="off"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold text-zinc-500 uppercase tracking-wide">SMTP Host</label>
+                <input
+                  className="field-input w-full text-sm"
+                  value={email.smtpHost}
+                  onChange={(e) => setEmail((p) => ({ ...p, smtpHost: e.target.value }))}
+                  placeholder="smtp.gmail.com"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold text-zinc-500 uppercase tracking-wide">SMTP Port</label>
+                <input
+                  type="number"
+                  className="field-input w-full text-sm"
+                  value={email.smtpPort}
+                  onChange={(e) => setEmail((p) => ({ ...p, smtpPort: Number(e.target.value) }))}
+                  placeholder="465"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold text-zinc-500 uppercase tracking-wide">Encryption</label>
+                <select
+                  className="field-input w-full text-sm"
+                  value={email.smtpSecure ? "ssl" : "starttls"}
+                  onChange={(e) => {
+                    const secure = e.target.value === "ssl";
+                    setEmail((p) => ({ ...p, smtpSecure: secure, smtpPort: secure ? 465 : 587 }));
+                  }}
+                >
+                  <option value="ssl">SSL/TLS (465)</option>
+                  <option value="starttls">STARTTLS (587)</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <button
+                type="submit"
+                disabled={emailSaving}
+                className="btn-primary rounded-xl px-5 py-2 text-sm font-semibold disabled:opacity-40"
+              >
+                {emailSaving ? "Saving…" : "Save Settings"}
+              </button>
+              <button
+                type="button"
+                onClick={testEmailConnection}
+                disabled={emailBusy !== null}
+                className="rounded-xl border border-[var(--glass-border)] bg-white/5 px-4 py-2 text-sm font-medium text-zinc-300 hover:text-[var(--foreground)] disabled:opacity-40"
+              >
+                {emailBusy === "test" ? "Testing…" : "Test Connection"}
+              </button>
+            </div>
+
+            <div className="mt-2 rounded-xl border border-[var(--glass-border)] bg-white/5 p-3">
+              <label className="mb-1 block text-[11px] font-semibold text-zinc-500 uppercase tracking-wide">Send Test Email</label>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  className="field-input flex-1 min-w-[220px] text-sm"
+                  value={testRecipient}
+                  onChange={(e) => setTestRecipient(e.target.value)}
+                  placeholder="recipient@example.com"
+                />
+                <button
+                  type="button"
+                  onClick={sendTestEmail}
+                  disabled={emailBusy !== null}
+                  className="rounded-xl border border-[var(--glass-border)] bg-white/5 px-4 py-2 text-sm font-medium text-zinc-300 hover:text-[var(--foreground)] disabled:opacity-40"
+                >
+                  {emailBusy === "send" ? "Sending…" : "Send Test Email"}
+                </button>
+              </div>
+              <p className="mt-1 text-[11px] text-zinc-600">
+                Sends a “SmartSteps Email Test” message from the configured sender account.
+              </p>
+            </div>
           </form>
         )}
       </motion.section>

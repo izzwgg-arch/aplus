@@ -4,9 +4,10 @@ import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X, Save, FileText, User, Calendar, Clock, CheckCircle,
-  ChevronDown, Sparkles, Trash2,
+  ChevronDown, Sparkles, Trash2, Printer,
 } from "lucide-react";
 import { toast } from "sonner";
+import { printSessionNotes, type PrintableNote } from "@/lib/printNotes";
 
 /* ── Types ─────────────────────────────────────────────────────────────────── */
 
@@ -186,6 +187,27 @@ export function NoteEditorModal({
     } finally {
       setSaving(false);
     }
+  }
+
+  function handlePrint() {
+    const printable: PrintableNote = {
+      id: note?.id ?? "draft",
+      title: title || null,
+      type,
+      bcbaServiceType: type === "BCBA" ? bcbaServiceType : null,
+      serviceDate: serviceDate ? new Date(serviceDate + "T12:00:00").toISOString() : null,
+      timeIn: timeIn || null,
+      timeOut: timeOut || null,
+      attendance: attendance || null,
+      content,
+      recommendations: recommendations || null,
+      nextSteps: nextSteps || null,
+      providerName: provider || null,
+      createdAt: note?.createdAt ?? new Date().toISOString(),
+      user: note?.user ? { name: note.user.name, credentials: note.user.credentials ?? null } : null,
+    };
+    const ok = printSessionNotes([printable], clientName);
+    if (!ok) toast.error("Pop-up blocked — allow pop-ups and try again.");
   }
 
   async function handleDelete() {
@@ -532,6 +554,15 @@ export function NoteEditorModal({
               </button>
             )}
             <div className="flex-1" />
+            <button
+              type="button"
+              onClick={handlePrint}
+              className="tap-target inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm text-zinc-400 border border-[var(--glass-border)] hover:text-zinc-200"
+              title="Export this note to PDF"
+            >
+              <Printer className="h-4 w-4" />
+              PDF
+            </button>
             <button
               type="button"
               onClick={onClose}

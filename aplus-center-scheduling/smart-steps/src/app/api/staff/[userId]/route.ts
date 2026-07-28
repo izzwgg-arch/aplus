@@ -43,6 +43,7 @@ export async function GET(_req: Request, { params }: Params) {
         phone:       true,
         credentials: true,
         isActive:    true,
+        invitedAt:   true,
         createdAt:   true,
         passwordHash: true,
         assignedClients: {

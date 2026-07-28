@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
-import { requirePermissionResponse } from "@/lib/permissions";
+import { requireClientAccessResponse, requirePermissionResponse } from "@/lib/permissions";
 import { prisma } from "@/lib/db";
 
 const TRIAL_RESULTS = ["CORRECT", "INCORRECT", "PROMPTED", "NR", "SKIP"] as const;
@@ -62,7 +62,7 @@ export async function POST(req: Request) {
     // Validate session exists before attempting the batch insert
     const sessionExists = await prisma.session.findUnique({
       where: { id: sessionId },
-      select: { id: true },
+      select: { id: true, clientId: true },
     });
     if (!sessionExists) {
       return NextResponse.json(
@@ -70,6 +70,16 @@ export async function POST(req: Request) {
         { status: 422 },
       );
     }
+
+    // Data entry is restricted to clients the user is assigned to (unless they
+    // hold the ".all" scope). RBTs get ".assigned" and are blocked here for any
+    // client not in their caseload, even if they somehow obtained the sessionId.
+    const accessDenied = await requireClientAccessResponse(
+      user.id,
+      sessionExists.clientId,
+      "smartsteps.sessions.view",
+    );
+    if (accessDenied) return accessDenied;
 
     // Validate all targetIds exist in DB (catch local/stale IDs early)
     const targetIds = [...new Set(normalizedTrials.map((t) => t.targetId))];

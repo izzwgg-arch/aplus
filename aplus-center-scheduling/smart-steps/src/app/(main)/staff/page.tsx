@@ -26,6 +26,7 @@ type StaffMember = {
   phone:         string | null;
   credentials:   string | null;
   isActive:      boolean;
+  invitedAt:     string | null;
   createdAt:     string;
   hasLocalLogin: boolean;
   assignedClients: AssignedClient[];
@@ -80,10 +81,15 @@ function StaffEditorModal({ member, onClose, onSaved }: EditorProps) {
   const [isActive,    setIsActive]    = useState(member?.isActive    ?? true);
   const [saving,      setSaving]      = useState(false);
   const [error,       setError]       = useState<string | null>(null);
+  const [info,        setInfo]        = useState<string | null>(null);
 
-  // Login method: "sso" = must sign in via A+ Center SSO (default, no password stored here).
-  // "local" = standalone SmartSteps-only account with its own password.
-  const [loginMethod, setLoginMethod] = useState<"sso" | "local">(member?.hasLocalLogin ? "local" : "sso");
+  // Login method:
+  // "invite" = email the user a link to set their own password (new users only, recommended).
+  // "sso"    = sign in via A+ Center SSO (no password stored here).
+  // "local"  = standalone SmartSteps-only account with an admin-set password.
+  const [loginMethod, setLoginMethod] = useState<"invite" | "sso" | "local">(
+    isEdit ? (member?.hasLocalLogin ? "local" : "sso") : "invite"
+  );
   const [password,        setPassword]        = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
 
@@ -111,6 +117,7 @@ function StaffEditorModal({ member, onClose, onSaved }: EditorProps) {
 
     setSaving(true);
     try {
+      const isInvite = !isEdit && loginMethod === "invite";
       const wantsNewPassword = loginMethod === "local" && password.length > 0;
       const body = {
         name,
@@ -120,6 +127,7 @@ function StaffEditorModal({ member, onClose, onSaved }: EditorProps) {
         phone:       phone       || null,
         credentials: credentials || null,
         ...(isEdit ? { isActive } : {}),
+        ...(isInvite ? { loginMethod: "invite" } : {}),
         ...(wantsNewPassword ? { password } : {}),
         ...(isEdit && loginMethod === "sso" && member?.hasLocalLogin ? { removeLocalLogin: true } : {}),
       };
@@ -132,9 +140,16 @@ function StaffEditorModal({ member, onClose, onSaved }: EditorProps) {
         body: JSON.stringify(body),
       });
 
+      const data = await res.json().catch(() => ({})) as { error?: string; _warning?: string };
       if (!res.ok) {
-        const data = await res.json().catch(() => ({})) as { error?: string };
         throw new Error(data.error ?? "Failed to save");
+      }
+      if (data._warning) {
+        // Account created but the invite email didn't send — keep the modal
+        // open so the admin sees the warning; closing still refreshes the list.
+        setInfo(data._warning);
+        setSaving(false);
+        return;
       }
       onSaved();
     } catch (err) {
@@ -170,7 +185,24 @@ function StaffEditorModal({ member, onClose, onSaved }: EditorProps) {
           {/* Login method */}
           <div>
             <label className="mb-1.5 block text-xs font-medium text-zinc-400">Login Method</label>
-            <div className="grid grid-cols-2 gap-2">
+            <div className={`grid gap-2 ${isEdit ? "grid-cols-2" : "grid-cols-3"}`}>
+              {!isEdit && (
+                <button
+                  type="button"
+                  onClick={() => setLoginMethod("invite")}
+                  className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left text-sm transition-colors ${
+                    loginMethod === "invite"
+                      ? "border-[var(--accent-cyan)]/50 bg-[var(--accent-cyan)]/10 text-[var(--accent-cyan)]"
+                      : "border-[var(--glass-border)] text-zinc-400 hover:bg-white/5"
+                  }`}
+                >
+                  <Mail className="h-4 w-4 shrink-0" />
+                  <span>
+                    <span className="block font-semibold">Email Invite</span>
+                    <span className="block text-[10px] opacity-75">User sets own password</span>
+                  </span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setLoginMethod("sso")}
@@ -198,11 +230,16 @@ function StaffEditorModal({ member, onClose, onSaved }: EditorProps) {
                 <KeyRound className="h-4 w-4 shrink-0" />
                 <span>
                   <span className="block font-semibold">Local Password</span>
-                  <span className="block text-[10px] opacity-75">SmartSteps-only account</span>
+                  <span className="block text-[10px] opacity-75">Admin sets password</span>
                 </span>
               </button>
             </div>
-            {loginMethod === "sso" ? (
+            {loginMethod === "invite" ? (
+              <p className="mt-1.5 text-[10px] leading-relaxed text-zinc-600">
+                We&apos;ll email this person a secure link to set their own password and activate their
+                account. No password is stored until they accept.
+              </p>
+            ) : loginMethod === "sso" ? (
               <p className="mt-1.5 text-[10px] leading-relaxed text-zinc-600">
                 No password is stored here. The user must sign in through A+ Center SSO using this
                 same email address to activate their account.
@@ -358,23 +395,45 @@ function StaffEditorModal({ member, onClose, onSaved }: EditorProps) {
             </p>
           )}
 
+          {info && (
+            <p className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-sm text-amber-400">
+              {info}
+            </p>
+          )}
+
           {/* Footer buttons */}
           <div className="flex justify-end gap-2 pt-1">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-xl border border-[var(--glass-border)] px-4 py-2 text-sm text-zinc-400 hover:text-zinc-200 hover:bg-white/5 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="flex items-center gap-2 rounded-xl bg-[var(--accent-cyan)]/20 border border-[var(--accent-cyan)]/30 px-4 py-2 text-sm font-semibold text-[var(--accent-cyan)] hover:bg-[var(--accent-cyan)]/30 transition-colors disabled:opacity-50"
-            >
-              {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-              {isEdit ? "Save Changes" : "Add Staff Member"}
-            </button>
+            {info ? (
+              <button
+                type="button"
+                onClick={onSaved}
+                className="flex items-center gap-2 rounded-xl bg-[var(--accent-cyan)]/20 border border-[var(--accent-cyan)]/30 px-4 py-2 text-sm font-semibold text-[var(--accent-cyan)] hover:bg-[var(--accent-cyan)]/30 transition-colors"
+              >
+                Done
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="rounded-xl border border-[var(--glass-border)] px-4 py-2 text-sm text-zinc-400 hover:text-zinc-200 hover:bg-white/5 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="flex items-center gap-2 rounded-xl bg-[var(--accent-cyan)]/20 border border-[var(--accent-cyan)]/30 px-4 py-2 text-sm font-semibold text-[var(--accent-cyan)] hover:bg-[var(--accent-cyan)]/30 transition-colors disabled:opacity-50"
+                >
+                  {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {loginMethod === "invite" && !isEdit
+                    ? "Send Invite"
+                    : isEdit
+                      ? "Save Changes"
+                      : "Add Staff Member"}
+                </button>
+              </>
+            )}
           </div>
         </form>
       </motion.div>
@@ -601,18 +660,22 @@ interface CardProps {
   member:         StaffMember;
   userRole:       string | undefined;
   isToggling:     boolean;
+  isResending:    boolean;
   onEdit:         () => void;
   onToggleActive: () => void;
   onManageClients:() => void;
+  onResendInvite: () => void;
 }
 
 function StaffCard({
   member,
   userRole,
   isToggling,
+  isResending,
   onEdit,
   onToggleActive,
   onManageClients,
+  onResendInvite,
 }: CardProps) {
   const [expanded, setExpanded] = useState(false);
 
@@ -620,6 +683,10 @@ function StaffCard({
   const archivedClients = member.assignedClients.filter((a) =>  a.client.isArchived);
   const isAdmin         = userRole === "ADMIN";
   const isAdminOrBcba   = userRole === "ADMIN" || userRole === "BCBA";
+  const isPendingInvite = !!member.invitedAt && !member.hasLocalLogin;
+  // A user can be (re)sent an invite link as long as they haven't set a local
+  // password yet. This includes SSO stubs that were never emailed an invite.
+  const canInvite       = isAdmin && !member.hasLocalLogin;
 
   return (
     <motion.div
@@ -668,14 +735,24 @@ function StaffCard({
               <span className="text-[10px] font-medium text-zinc-500">{member.credentials}</span>
             )}
 
-            {/* Login method badge */}
-            <span
-              title={member.hasLocalLogin ? "Standalone SmartSteps login" : "Signs in via A+ Center SSO"}
-              className="flex items-center gap-1 rounded-full border border-zinc-700 px-2 py-0.5 text-[10px] font-medium text-zinc-500"
-            >
-              {member.hasLocalLogin ? <KeyRound className="h-2.5 w-2.5" /> : <Globe className="h-2.5 w-2.5" />}
-              {member.hasLocalLogin ? "Local login" : "SSO"}
-            </span>
+            {/* Login method / invite badge */}
+            {isPendingInvite ? (
+              <span
+                title="Invited by email — waiting for the user to set their password"
+                className="flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-400"
+              >
+                <Mail className="h-2.5 w-2.5" />
+                Invited · pending
+              </span>
+            ) : (
+              <span
+                title={member.hasLocalLogin ? "Standalone SmartSteps login" : "Signs in via A+ Center SSO"}
+                className="flex items-center gap-1 rounded-full border border-zinc-700 px-2 py-0.5 text-[10px] font-medium text-zinc-500"
+              >
+                {member.hasLocalLogin ? <KeyRound className="h-2.5 w-2.5" /> : <Globe className="h-2.5 w-2.5" />}
+                {member.hasLocalLogin ? "Local login" : "SSO"}
+              </span>
+            )}
 
             {/* Inactive badge */}
             {!member.isActive && (
@@ -716,6 +793,19 @@ function StaffCard({
               className="rounded-lg p-1.5 text-zinc-500 hover:text-[var(--accent-cyan)] hover:bg-[var(--accent-cyan)]/10 transition-colors"
             >
               <Link2 className="h-4 w-4" />
+            </button>
+          )}
+
+          {/* (Re)send invite — admin only, anyone without a local password */}
+          {canInvite && (
+            <button
+              type="button"
+              onClick={onResendInvite}
+              disabled={isResending}
+              title={isPendingInvite ? "Resend invitation email" : "Send an invitation link to set up a password"}
+              className="rounded-lg p-1.5 text-amber-400/80 hover:text-amber-400 hover:bg-amber-500/10 transition-colors disabled:opacity-50"
+            >
+              {isResending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
             </button>
           )}
 
@@ -823,6 +913,8 @@ export default function StaffPage() {
   const [editMember,  setEditMember]  = useState<StaffMember | null>(null);
   const [assignMember,setAssignMember]= useState<StaffMember | null>(null);
   const [togglingId,  setTogglingId]  = useState<string | null>(null);
+  const [resendingId, setResendingId] = useState<string | null>(null);
+  const [toast,       setToast]       = useState<string | null>(null);
 
   const userRole = (session?.user as { role?: string } | undefined)?.role;
 
@@ -864,6 +956,28 @@ export default function StaffPage() {
       }
     },
     [load, togglingId]
+  );
+
+  const handleResendInvite = useCallback(
+    async (member: StaffMember) => {
+      if (resendingId) return;
+      setResendingId(member.id);
+      setToast(null);
+      try {
+        const r = await fetch(`/smart-steps/api/staff/${member.id}/resend-invite`, { method: "POST" });
+        if (!r.ok) {
+          const data = (await r.json().catch(() => ({}))) as { error?: string };
+          throw new Error(data.error ?? "Failed to resend invite");
+        }
+        setToast(`Invitation email sent to ${member.email}.`);
+      } catch (err) {
+        setToast(err instanceof Error ? err.message : "Failed to resend invite");
+      } finally {
+        setResendingId(null);
+        setTimeout(() => setToast(null), 5000);
+      }
+    },
+    [resendingId]
   );
 
   function openAdd() {
@@ -1003,13 +1117,30 @@ export default function StaffPage() {
               member={member}
               userRole={userRole}
               isToggling={togglingId === member.id}
+              isResending={resendingId === member.id}
               onEdit={() => openEdit(member)}
               onToggleActive={() => handleToggleActive(member)}
               onManageClients={() => setAssignMember(member)}
+              onResendInvite={() => handleResendInvite(member)}
             />
           ))}
         </div>
       )}
+
+      {/* Transient toast (invite resend feedback) */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            key="toast"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 12 }}
+            className="fixed bottom-6 right-6 z-50 max-w-sm rounded-xl border border-[var(--glass-border)] bg-[var(--background)] px-4 py-3 text-sm text-zinc-200 shadow-2xl"
+          >
+            {toast}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Modals */}
       <AnimatePresence>

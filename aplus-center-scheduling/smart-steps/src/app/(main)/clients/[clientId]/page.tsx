@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -291,17 +291,27 @@ function ClientHubInner() {
     refetchOnMount: true,
   });
 
-  const { data: sessions = [] } = useQuery<Session[]>({
+  const SESSIONS_PAGE_SIZE = 50;
+  const {
+    data: sessionsData,
+    fetchNextPage: fetchMoreSessions,
+    hasNextPage: hasMoreSessions,
+    isFetchingNextPage: isFetchingMoreSessions,
+  } = useInfiniteQuery({
     queryKey: ["sessions", clientId],
-    queryFn: async () => {
-      const res = await fetch(`/smart-steps/api/sessions?clientId=${clientId}&limit=20`);
-      if (!res.ok) return [];
-      return res.json();
+    initialPageParam: 0,
+    queryFn: async ({ pageParam }) => {
+      const res = await fetch(`/smart-steps/api/sessions?clientId=${clientId}&limit=${SESSIONS_PAGE_SIZE}&offset=${pageParam}`);
+      if (!res.ok) return [] as Session[];
+      return (await res.json()) as Session[];
     },
+    getNextPageParam: (lastPage, allPages) =>
+      lastPage.length === SESSIONS_PAGE_SIZE ? allPages.length * SESSIONS_PAGE_SIZE : undefined,
     enabled: !!clientId,
     staleTime: 0,           // Always treat as stale so it refetches on mount
     refetchOnMount: true,
   });
+  const sessions = sessionsData?.pages.flat() ?? [];
 
   const { data: scheduleData } = useQuery<{ appointments: ScheduleAppointmentData[]; configured: boolean }>({
     queryKey: ["schedule", clientId],
@@ -609,7 +619,7 @@ function ClientHubInner() {
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <p className="text-sm text-zinc-500">
-                  {sessions.length} recent session{sessions.length !== 1 ? "s" : ""}
+                  {sessions.length}{hasMoreSessions ? "+" : ""} session{sessions.length !== 1 ? "s" : ""}
                 </p>
                 <button
                   type="button"
@@ -656,6 +666,16 @@ function ClientHubInner() {
                       <Clock className="h-4 w-4 text-zinc-600 shrink-0" />
                     </button>
                   ))}
+                  {hasMoreSessions && (
+                    <button
+                      type="button"
+                      onClick={() => void fetchMoreSessions()}
+                      disabled={isFetchingMoreSessions}
+                      className="w-full flex items-center justify-center gap-2 rounded-xl border border-[var(--glass-border)] py-2.5 text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:border-[var(--accent-cyan)]/40 transition-colors disabled:opacity-60"
+                    >
+                      {isFetchingMoreSessions ? "Loading…" : "Load older sessions"}
+                    </button>
+                  )}
                 </div>
               )}
             </div>

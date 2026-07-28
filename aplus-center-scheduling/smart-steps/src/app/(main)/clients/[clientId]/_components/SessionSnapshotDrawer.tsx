@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Activity, Clock, Target as TargetIcon, X, FileText, Sparkles,
-  ChevronDown, ChevronUp, Pencil, Trash2, Check, AlertTriangle,
+  ChevronDown, ChevronUp, Pencil, Trash2, Check, AlertTriangle, CalendarClock,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -190,6 +190,57 @@ function TrialEditModal({
   );
 }
 
+/* ─── Duration formatting ──────────────────────────────────────────────────── */
+
+/**
+ * Human-readable session duration. Guards against implausible values (e.g. a
+ * session left open, or a bad end timestamp) so the UI never shows a runaway
+ * minute count like "22,458 minutes".
+ */
+function formatSessionDuration(startedAt: string, endedAt: string | null): string {
+  if (!endedAt) return "In progress";
+  const ms = new Date(endedAt).getTime() - new Date(startedAt).getTime();
+  if (!Number.isFinite(ms) || ms <= 0) return "—";
+  const minutes = Math.round(ms / 60000);
+  // A single clinical session realistically caps out around 8 hours; anything
+  // beyond that indicates bad data, so we avoid displaying a misleading number.
+  if (minutes > 8 * 60) return "—";
+  if (minutes < 60) return `${Math.max(1, minutes)} min`;
+  const hours = Math.floor(minutes / 60);
+  const rem   = minutes % 60;
+  return rem === 0 ? `${hours} hr` : `${hours} hr ${rem} min`;
+}
+
+/* ─── Session edit helpers ─────────────────────────────────────────────────── */
+
+type ProviderOption = { id: string; name: string | null; role: string; displayRole: string | null };
+
+/** ISO → "YYYY-MM-DD" in local time (for <input type="date">). */
+function toDateInputValue(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const y   = d.getFullYear();
+  const mth = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${mth}-${day}`;
+}
+
+/** ISO → "HH:mm" in local time (for <input type="time">). */
+function toTimeInputValue(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+/** Combines a local date ("YYYY-MM-DD") and time ("HH:mm") into an ISO string. */
+function combineToIso(dateStr: string, timeStr: string): string | null {
+  if (!dateStr || !timeStr) return null;
+  const dt = new Date(`${dateStr}T${timeStr}`);
+  if (Number.isNaN(dt.getTime())) return null;
+  return dt.toISOString();
+}
+
 /* ─── Main component ────────────────────────────────────────────────────────── */
 
 export function SessionSnapshotDrawer({
@@ -206,6 +257,11 @@ export function SessionSnapshotDrawer({
   const [showTrials, setShowTrials]   = useState(false);
   const [editingTrial, setEditingTrial] = useState<TrialRecord | null>(null);
   const [deletingTrialId, setDeletingTrialId] = useState<string | null>(null);
+
+  // Session-header editing (date / time in / time out / provider)
+  const [editingSession, setEditingSession] = useState(false);
+  const [savingSession, setSavingSession]   = useState(false);
+  const [sessForm, setSessForm] = useState({ date: "", timeIn: "", timeOut: "", providerId: "" });
 
   async function handleGenerateNote() {
     if (!sessionId) return;
@@ -273,6 +329,85 @@ export function SessionSnapshotDrawer({
     enabled: !!sessionId,
     staleTime: 30_000,
   });
+
+  // Provider list for the session-edit selector (active staff, any role).
+  const { data: providers = [] } = useQuery<ProviderOption[]>({
+    queryKey: ["providers-dropdown"],
+    queryFn: async () => {
+      const res = await fetch("/smart-steps/api/users?forDropdown=1");
+      if (!res.ok) return [];
+      return res.json();
+    },
+    staleTime: 10 * 60 * 1000,
+  });
+
+  // Reset the edit panel whenever a different session is opened.
+  useEffect(() => {
+    setEditingSession(false);
+  }, [sessionId]);
+
+  function startEditSession() {
+    if (!data) return;
+    setSessForm({
+      date:       toDateInputValue(data.startedAt),
+      timeIn:     toTimeInputValue(data.startedAt),
+      timeOut:    toTimeInputValue(data.endedAt),
+      providerId: data.user?.id ?? data.userId ?? "",
+    });
+    setEditingSession(true);
+  }
+
+  async function handleSaveSession() {
+    if (!sessionId || !data) return;
+
+    if (!sessForm.date || !sessForm.timeIn) {
+      toast.error("Session date and time in are required.");
+      return;
+    }
+    const startedAt = combineToIso(sessForm.date, sessForm.timeIn);
+    if (!startedAt) {
+      toast.error("Invalid session date or time in.");
+      return;
+    }
+    // Time out is optional (session may still be in progress); when provided it
+    // must be after time in on the same service date.
+    let endedAt: string | undefined;
+    if (sessForm.timeOut) {
+      const iso = combineToIso(sessForm.date, sessForm.timeOut);
+      if (!iso) { toast.error("Invalid time out."); return; }
+      if (new Date(iso).getTime() <= new Date(startedAt).getTime()) {
+        toast.error("Time out must be after time in.");
+        return;
+      }
+      endedAt = iso;
+    }
+
+    setSavingSession(true);
+    try {
+      const res = await fetch(`/smart-steps/api/sessions/${sessionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          startedAt,
+          ...(endedAt ? { endedAt } : {}),
+          ...(sessForm.providerId ? { providerId: sessForm.providerId } : {}),
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(err.error ?? "Failed to update session");
+      }
+      toast.success("Session updated");
+      setEditingSession(false);
+      qc.invalidateQueries({ queryKey: ["session-snapshot", sessionId] });
+      qc.invalidateQueries({ queryKey: ["sessions"] });
+      qc.invalidateQueries({ queryKey: ["client-schedule"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingSession(false);
+    }
+  }
 
   // Backdated badge: service date differs from when the record was created
   const isBackdated = data
@@ -343,6 +478,107 @@ export function SessionSnapshotDrawer({
                 </div>
               ) : (
                 <div className="space-y-5">
+                  {/* ── Session details header + edit toggle ── */}
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Session Details</div>
+                    {!editingSession && (
+                      <button
+                        type="button"
+                        onClick={startEditSession}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--glass-border)] px-2.5 py-1 text-xs font-semibold text-zinc-400 hover:border-[var(--accent-cyan)]/40 hover:text-[var(--accent-cyan)] transition-colors"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                        Edit date / time / provider
+                      </button>
+                    )}
+                  </div>
+
+                  {/* ── Edit session panel ── */}
+                  <AnimatePresence>
+                    {editingSession && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="space-y-3 rounded-2xl border border-[var(--accent-cyan)]/40 bg-[var(--accent-cyan)]/[0.04] p-4">
+                          <div className="flex items-center gap-2 text-xs font-semibold text-[var(--accent-cyan)]">
+                            <CalendarClock className="h-4 w-4" />
+                            Edit Session
+                          </div>
+                          <div className="grid gap-3 sm:grid-cols-3">
+                            <div>
+                              <label className="mb-1 block text-[11px] text-zinc-400">Session Date</label>
+                              <input
+                                type="date"
+                                value={sessForm.date}
+                                onChange={(e) => setSessForm((f) => ({ ...f, date: e.target.value }))}
+                                className="field-input w-full text-sm"
+                              />
+                            </div>
+                            <div>
+                              <label className="mb-1 block text-[11px] text-zinc-400">Time In</label>
+                              <input
+                                type="time"
+                                value={sessForm.timeIn}
+                                onChange={(e) => setSessForm((f) => ({ ...f, timeIn: e.target.value }))}
+                                className="field-input w-full text-sm"
+                              />
+                            </div>
+                            <div>
+                              <label className="mb-1 block text-[11px] text-zinc-400">Time Out</label>
+                              <input
+                                type="time"
+                                value={sessForm.timeOut}
+                                onChange={(e) => setSessForm((f) => ({ ...f, timeOut: e.target.value }))}
+                                className="field-input w-full text-sm"
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-[11px] text-zinc-400">Provider</label>
+                            <select
+                              value={sessForm.providerId}
+                              onChange={(e) => setSessForm((f) => ({ ...f, providerId: e.target.value }))}
+                              className="field-input w-full text-sm"
+                            >
+                              <option value="">— Select provider —</option>
+                              {providers.map((p) => (
+                                <option key={p.id} value={p.id}>
+                                  {p.name || "(no name)"}{p.displayRole ? ` · ${p.displayRole}` : ` · ${p.role}`}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <p className="text-[11px] leading-relaxed text-zinc-500">
+                            Updating these fields edits this session in place — trials, notes, behaviors, and reports are preserved. No duplicate session is created.
+                          </p>
+                          <div className="flex justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setEditingSession(false)}
+                              disabled={savingSession}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--glass-border)] px-3 py-1.5 text-xs text-zinc-400 hover:bg-white/5 disabled:opacity-50 transition-colors"
+                            >
+                              <X className="h-3.5 w-3.5" /> Cancel
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleSaveSession}
+                              disabled={savingSession}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--accent-cyan)]/40 bg-[var(--accent-cyan)]/10 px-3 py-1.5 text-xs font-semibold text-[var(--accent-cyan)] hover:bg-[var(--accent-cyan)]/20 disabled:opacity-60 transition-colors"
+                            >
+                              {savingSession
+                                ? <><Sparkles className="h-3.5 w-3.5 animate-spin" /> Saving…</>
+                                : <><Check className="h-3.5 w-3.5" /> Save Changes</>}
+                            </button>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
                   {/* ── Metadata cards ── */}
                   <div className="grid gap-3 sm:grid-cols-4">
                     {[
@@ -351,9 +587,7 @@ export function SessionSnapshotDrawer({
                       { label: "Trials",   value: String(data.trialCount) },
                       {
                         label: "Duration",
-                        value: data.endedAt
-                          ? `${Math.max(1, Math.round((new Date(data.endedAt).getTime() - new Date(data.startedAt).getTime()) / 60000))} min`
-                          : "In progress",
+                        value: formatSessionDuration(data.startedAt, data.endedAt),
                       },
                     ].map((item) => (
                       <div key={item.label} className="rounded-2xl border border-[var(--glass-border)] bg-[var(--glass-bg)]/20 p-3">
@@ -516,7 +750,7 @@ export function SessionSnapshotDrawer({
             <div className="flex items-center justify-between border-t border-[var(--glass-border)] px-5 py-3 gap-3">
               <div className="flex items-center gap-2 text-xs text-zinc-500">
                 <Clock className="h-3.5 w-3.5" />
-                {data?.trials?.length ? "Edit or delete individual trials above." : "Session details are read-only here."}
+                {data?.trials?.length ? "Edit the session details or individual trials above." : "Use “Edit” above to update the date, time, or provider."}
               </div>
               {data && (
                 <button

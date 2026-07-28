@@ -20,7 +20,7 @@ import {
   Activity, X, CheckCircle2, Zap, Layers, Target as TargetIcon, Clock,
   RotateCcw, ChevronDown, User,
 } from "lucide-react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import { toast } from "sonner";
 import { queueTrial, queueBehavior, queueSession } from "@/lib/dexie";
@@ -506,16 +506,27 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
   const categories         = useMemo(() => (rawCategories ?? []).filter((c) => c.clientId === clientId), [rawCategories, clientId]);
   const allGoals           = useMemo(() => (rawTargets ?? []).filter((t) => t.clientId === clientId && (t.isActive ?? true)), [rawTargets, clientId]);
 
-  /* ── Past sessions ── */
-  const { data: pastSessions = [], refetch: refetchSessions } = useQuery<PastSession[]>({
+  /* ── Past sessions (paginated — reaches the COMPLETE history via "Load more") ── */
+  const SESSIONS_PAGE_SIZE = 50;
+  const {
+    data: sessionsData,
+    refetch: refetchSessions,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
     queryKey: ["sessions", clientId],
-    queryFn: async () => {
-      const res = await fetch(`/smart-steps/api/sessions?clientId=${clientId}&limit=20`);
-      if (!res.ok) return [];
-      return res.json();
+    initialPageParam: 0,
+    queryFn: async ({ pageParam }) => {
+      const res = await fetch(`/smart-steps/api/sessions?clientId=${clientId}&limit=${SESSIONS_PAGE_SIZE}&offset=${pageParam}`);
+      if (!res.ok) return [] as PastSession[];
+      return (await res.json()) as PastSession[];
     },
+    getNextPageParam: (lastPage, allPages) =>
+      lastPage.length === SESSIONS_PAGE_SIZE ? allPages.length * SESSIONS_PAGE_SIZE : undefined,
     enabled: !!clientId,
   });
+  const pastSessions = useMemo<PastSession[]>(() => sessionsData?.pages.flat() ?? [], [sessionsData]);
 
   /* ── Server target sync: ensures every goal has a serverId before recording ── */
   const { data: serverTargetData } = useQuery<{
@@ -1229,7 +1240,7 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
           return (
             <div className="grid grid-cols-3 gap-3">
               {[
-                { label: "Total sessions", value: pastSessions.length,   color: "var(--foreground)" },
+                { label: "Total sessions", value: `${pastSessions.length}${hasNextPage ? "+" : ""}`,   color: "var(--foreground)" },
                 { label: "Avg % correct",  value: `${Math.round(avgPct)}%`, color: avgPct >= 80 ? "#10b981" : avgPct >= 60 ? "#f59e0b" : "var(--accent-pink)" },
                 { label: "Last session",   value: pastSessions[0] ? new Date(pastSessions[0].startedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—", color: "var(--accent-cyan)" },
               ].map((s) => (
@@ -1283,6 +1294,16 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
                 );
               })}
             </div>
+          )}
+          {hasNextPage && (
+            <button
+              type="button"
+              onClick={() => void fetchNextPage()}
+              disabled={isFetchingNextPage}
+              className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl border border-[var(--glass-border)] py-2.5 text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:border-[var(--accent-cyan)]/40 transition-colors disabled:opacity-60"
+            >
+              {isFetchingNextPage ? "Loading…" : "Load older sessions"}
+            </button>
           )}
         </div>
         <SessionSnapshotDrawer sessionId={selectedSessionId} onClose={() => setSelectedSessionId(null)} />

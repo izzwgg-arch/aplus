@@ -1,7 +1,16 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
-import { requirePermissionResponse } from "@/lib/permissions";
+import { requireClientAccessResponse, requirePermissionResponse } from "@/lib/permissions";
 import { prisma } from "@/lib/db";
+
+/** Resolves the client that owns a trial (via its session). Returns null if the trial doesn't exist. */
+async function getTrialClientId(trialId: string): Promise<string | null> {
+  const trial = await prisma.trial.findUnique({
+    where: { id: trialId },
+    select: { session: { select: { clientId: true } } },
+  });
+  return trial?.session?.clientId ?? null;
+}
 
 const NUMERIC_PROMPT_MAP: Record<string, string> = {
   "0": "INDEPENDENT",
@@ -27,6 +36,11 @@ export async function PATCH(
   if (denied) return denied;
 
   const { trialId } = await params;
+
+  const clientId = await getTrialClientId(trialId);
+  if (!clientId) return NextResponse.json({ error: "Trial not found" }, { status: 404 });
+  const accessDenied = await requireClientAccessResponse(user.id, clientId, "smartsteps.sessions.view");
+  if (accessDenied) return accessDenied;
 
   try {
     const body = await req.json() as {
@@ -62,6 +76,11 @@ export async function DELETE(
   if (denied) return denied;
 
   const { trialId } = await params;
+
+  const clientId = await getTrialClientId(trialId);
+  if (!clientId) return NextResponse.json({ error: "Trial not found" }, { status: 404 });
+  const accessDenied = await requireClientAccessResponse(user.id, clientId, "smartsteps.sessions.view");
+  if (accessDenied) return accessDenied;
 
   try {
     await prisma.trial.update({

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
-import { canForClient, requirePermissionResponse } from "@/lib/permissions";
+import { canForClient, requirePermissionResponse, hasAllScope } from "@/lib/permissions";
 import { prisma } from "@/lib/db";
 
 function asBool(value: string | null) {
@@ -109,6 +109,13 @@ export async function GET(
     if (resolvedClientId) {
       const allowed = await canForClient(user.id, resolvedClientId, "smartsteps.targets.view");
       if (!allowed) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+
+    // BT visibility: assigned-only viewers may only open In-Treatment targets.
+    // Anything not in the ACQUISITION phase is hidden (treated as not found).
+    const restrictToInTreatment = !(await hasAllScope(user.id, "smartsteps.targets.view"));
+    if (restrictToInTreatment && target.phase !== "ACQUISITION") {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
     const trials = target.trials

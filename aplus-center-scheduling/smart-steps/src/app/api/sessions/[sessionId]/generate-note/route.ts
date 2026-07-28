@@ -50,11 +50,10 @@ function generateBTNoteContent(opts: {
   providerName:   string;
   sessionDate:    Date;
   mode:           string;
-  durationMin:    number | null;
   sessionTargets: SessionTargetSummary[];
   behaviors:      BehaviorRecord[];
 }): { title: string; content: string; recommendations: string; nextSteps: string } {
-  const { clientName, providerName, sessionDate, mode, durationMin, sessionTargets, behaviors } = opts;
+  const { clientName, providerName, sessionDate, mode, sessionTargets, behaviors } = opts;
 
   const dateStr  = sessionDate.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
   const shortDate = sessionDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
@@ -68,7 +67,6 @@ function generateBTNoteContent(opts: {
   /* ── Session Summary ── */
   const summaryParts: string[] = [
     `${clientName} participated in a ${modeLabel} ABA therapy session on ${dateStr} with ${providerName}.`,
-    durationMin ? `The session lasted approximately ${durationMin} minutes.` : null,
     totalTrials > 0
       ? `A total of ${totalTrials} discrete trial${totalTrials !== 1 ? "s" : ""} were administered across ${sessionTargets.length} target${sessionTargets.length !== 1 ? "s" : ""}, with an overall session accuracy of ${overallPct}%.`
       : `No discrete trials were recorded during this session.`,
@@ -297,18 +295,13 @@ export async function POST(
       notes:      Array.from(new Set(t.notes)),
     }));
 
-    /* 3. Compute duration */
-    const durationMin = s.endedAt
-      ? Math.max(1, Math.round((s.endedAt.getTime() - s.startedAt.getTime()) / 60000))
-      : null;
-
-    /* 4. Generate note text */
+    /* 3. Generate note text — session times are stored on the session record,
+       so duration is intentionally omitted from the narrative. */
     const generated = generateBTNoteContent({
       clientName:     s.client.name,
       providerName:   s.user?.name ?? "the assigned therapist",
       sessionDate:    s.startedAt,
       mode:           s.mode,
-      durationMin,
       sessionTargets,
       behaviors:      s.behaviors,
     });

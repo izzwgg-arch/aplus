@@ -94,6 +94,20 @@ export async function canForClient(userId: string | undefined | null, clientId: 
   return !!assignment;
 }
 
+/**
+ * Whether the user holds the unrestricted `.all` variant of a scoped base key
+ * (e.g. "smartsteps.goals.view"). Used to distinguish full-visibility roles
+ * (BCBA/Admin) from assigned-only roles (BT/RBT, Parent Viewer) so the latter
+ * can be limited to In-Treatment goals server-side. A user WITHOUT `.all` is
+ * treated as a restricted "assigned-only" viewer.
+ */
+export async function hasAllScope(userId: string | undefined | null, baseKey: string): Promise<boolean> {
+  if (!userId) return false;
+  const { all } = scopedKeyPair(baseKey);
+  const keys = await getUserPermissions(userId);
+  return keys.has(all);
+}
+
 async function logDenied(userId: string, requiredPermission: string | string[], extra?: Record<string, unknown>) {
   try {
     await auditLog(userId, "PERMISSION_DENIED", "Permission", Array.isArray(requiredPermission) ? requiredPermission.join(",") : requiredPermission, {
