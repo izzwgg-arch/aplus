@@ -99,6 +99,20 @@ explicitly in the task summary.
 - `prisma/migrations/migration_lock.toml` was lost in the big local sync and
   has been restored — do not delete it again.
 
+## Tracker user identity (fixed 2026-08-13)
+
+The same person can be known under two ids: staff profiles created in the
+Tracker's Settings → Staff get a cuid, while A+ Center SSO logins arrive with
+the main app's user id as `sub`. `ensureUser()` (smart-steps/src/lib/ensureUser.ts)
+now resolves the CANONICAL id — by id first, then by email (case-insensitive) —
+and every login path plus `requireSession()` uses the returned id. Never trust
+`session.user.id` raw in a new API route; always go through `requireSession()`.
+Before this fix, SSO staff sessions could point at an orphan/placeholder row
+with zero assignments — the "assigned clients don't appear" bug. Orphan rows
+were merged into the real profiles directly in the prod DB on 2026-08-13.
+`smart-steps/scripts/mergeDuplicateUsers.mjs` (dry-run by default, `--apply`
+to write) detects and merges duplicate-email users if it ever recurs.
+
 ## Rule 5: Deploy (step 3 of the Rule 0 end-of-task sequence)
 
 ### Smart Steps ABA Tracker (git-based, re-wired 2026-08-13)
