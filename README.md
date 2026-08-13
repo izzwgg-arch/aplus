@@ -115,3 +115,6 @@ Local Dev -> Git Push -> Server Pull -> `./deploy.sh` -> PM2 restart
   - `A+ Center`
   - `Smart Steps ABA Tracker` (coming soon page)
 - A+ Center UI uses a medical-blue theme with responsive collapsible sidebar.
+- Smart Steps ABA Tracker loads in **light** theme by default; users can switch
+  to dark or system in Settings → Appearance, and that choice persists per
+  browser (`localStorage` key `smart-steps-theme`).
