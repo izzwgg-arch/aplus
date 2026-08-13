@@ -1,12 +1,24 @@
 /**
- * Ensures the authenticated user exists in the Smart Steps User table.
+ * Ensures the authenticated user exists in the Smart Steps User table and
+ * returns the CANONICAL user id every query for this person must run under.
  *
  * Smart Steps uses NextAuth which returns a session.user.id that comes from
  * the main A+ Center app's JWT (SSO). That ID does NOT automatically exist
- * in the smart_steps.User table, causing FK constraint failures on any write
- * (Session, Target, ParentGoal, etc.) that references userId.
+ * in the smart_steps.User table. Worse, admins create staff profiles via
+ * Settings → Staff, which mints a cuid id — so the same person can be known
+ * under two different ids (their profile row vs. their SSO `sub`). Client
+ * assignments hang off the profile row; if the SSO login runs under the other
+ * id, the staff member sees no assigned clients and has zero permissions.
  *
- * Call this at the top of any API route that creates/updates records with a userId.
+ * Resolution order:
+ *   1. A row with the incoming id exists → sync and use it (legacy behavior).
+ *   2. Otherwise a row with the same email (case-insensitive) exists → link to
+ *      it and use ITS id. The admin-created profile is authoritative for
+ *      role/appRole; we only backfill missing fields.
+ *   3. Otherwise create a new row under the incoming id.
+ *
+ * Callers must use the returned id (not the incoming one) for the session and
+ * for all downstream queries.
  */
 
 import { prisma } from "@/lib/db";
@@ -40,44 +52,70 @@ async function resolveDefaultAppRoleId(role: Role): Promise<string | null> {
   return appRole?.isActive ? appRole.id : null;
 }
 
-export async function ensureUser(user: AuthUser): Promise<void> {
-  const email = user.email?.trim() || `sso-${user.id}@smart-steps.local`;
+async function findByEmail(email: string) {
+  return prisma.user.findFirst({
+    where: { email: { equals: email, mode: "insensitive" } },
+    select: { id: true, name: true, role: true, appRoleId: true },
+  });
+}
+
+export async function ensureUser(user: AuthUser): Promise<string> {
+  const email = (user.email?.trim() || `sso-${user.id}@smart-steps.local`).toLowerCase();
   const role = safeRole(user.role);
 
   try {
-    const existing = await prisma.user.findUnique({
+    const byId = await prisma.user.findUnique({
       where: { id: user.id },
       select: { role: true, appRoleId: true, appRole: { select: { key: true } } },
     });
 
-    // Auto-assign a default app role for brand-new users. For EXISTING users,
-    // only re-sync the app role when the incoming SSO role has actually
-    // changed (e.g. promoted to ADMIN in the main A+ Center app) AND the
-    // currently-stored appRoleId still matches the legacy role it was
-    // auto-assigned from (i.e. nobody has since hand-picked a different role
-    // via Roles & Permissions — that customization is always preserved).
-    //
-    // Without this, a user's SmartSteps role/appRoleId is frozen forever at
-    // whatever it was on their very first login, even after being promoted
-    // or demoted in the main app — silently locking them out of features
-    // their new role should grant (or over-granting after a demotion).
-    const roleChanged = existing ? existing.role !== role : false;
-    const currentlyAutoAssigned = !existing?.appRoleId || existing.appRole?.key === existing.role;
-    const shouldSyncAppRole = !existing || (roleChanged && currentlyAutoAssigned);
-    const appRoleId = shouldSyncAppRole ? await resolveDefaultAppRoleId(role) : undefined;
+    if (byId) {
+      // For EXISTING rows, only re-sync the app role when the incoming SSO
+      // role has actually changed (e.g. promoted to ADMIN in the main A+
+      // Center app) AND the currently-stored appRoleId still matches the
+      // legacy role it was auto-assigned from (i.e. nobody has since
+      // hand-picked a different role via Roles & Permissions — that
+      // customization is always preserved).
+      const roleChanged = byId.role !== role;
+      const currentlyAutoAssigned = !byId.appRoleId || byId.appRole?.key === byId.role;
+      const shouldSyncAppRole = roleChanged && currentlyAutoAssigned;
+      const appRoleId = shouldSyncAppRole ? await resolveDefaultAppRoleId(role) : undefined;
 
-    await prisma.user.upsert({
-      where: { id: user.id },
-      update: {
-        // Sync name/email/role from SSO token so promotions/demotions in the
-        // main app propagate here. displayRole and appRoleId customizations
-        // made via Roles & Permissions are preserved (see shouldSyncAppRole).
-        name: user.name ?? undefined,
-        email,
-        ...(roleChanged ? { role } : {}),
-        ...(appRoleId ? { appRoleId } : {}),
-      },
-      create: {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          name: user.name ?? undefined,
+          email,
+          ...(roleChanged ? { role } : {}),
+          ...(appRoleId ? { appRoleId } : {}),
+        },
+      });
+      if (appRoleId || roleChanged) invalidateUserCache(user.id);
+      return user.id;
+    }
+
+    // No row under this id — link to an existing profile with the same email
+    // (Settings → Staff profiles, invite accounts). The profile's role and
+    // appRole were chosen by an admin and are authoritative: never overwrite
+    // them from the SSO token, only backfill what's missing.
+    const byEmail = await findByEmail(email);
+    if (byEmail) {
+      const appRoleId = byEmail.appRoleId ? undefined : await resolveDefaultAppRoleId(safeRole(byEmail.role));
+      await prisma.user.update({
+        where: { id: byEmail.id },
+        data: {
+          email, // normalize casing so future lookups are exact
+          ...(byEmail.name ? {} : { name: user.name ?? undefined }),
+          ...(appRoleId ? { appRoleId } : {}),
+        },
+      });
+      if (appRoleId) invalidateUserCache(byEmail.id);
+      return byEmail.id;
+    }
+
+    const appRoleId = await resolveDefaultAppRoleId(role);
+    await prisma.user.create({
+      data: {
         id: user.id,
         email,
         name: user.name ?? "Therapist",
@@ -86,26 +124,18 @@ export async function ensureUser(user: AuthUser): Promise<void> {
         // isActive defaults to true; displayRole defaults to null
       },
     });
-
-    if (appRoleId || roleChanged) invalidateUserCache(user.id);
+    invalidateUserCache(user.id);
+    return user.id;
   } catch {
-    // If upsert fails (e.g. email unique conflict from different account),
-    // try updating by email instead, or just continue — sessions degrade gracefully.
+    // Last resort (e.g. unique-email race with a concurrent request): never
+    // break the request over identity sync — resolve to whichever row holds
+    // the email, else fall back to the incoming id.
     try {
-      const appRoleId = await resolveDefaultAppRoleId(role);
-      await prisma.user.upsert({
-        where: { email },
-        update: { name: user.name ?? undefined },
-        create: {
-          id: user.id,
-          email: `sso-${user.id}@smart-steps.local`,
-          name: user.name ?? "Therapist",
-          role,
-          appRoleId,
-        },
-      });
+      const byEmail = await findByEmail(email);
+      if (byEmail) return byEmail.id;
     } catch {
-      // Silent — better to attempt the main operation and let it surface a clear error
+      // fall through
     }
+    return user.id;
   }
 }

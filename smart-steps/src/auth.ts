@@ -50,8 +50,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           const role = mapAplusRoleToSmartStepsRole(payload.role);
           const email = payload.email || payload.sub;
           const name = payload.fullName || payload.email?.split("@")[0] || "User";
-          await ensureUser({ id: payload.sub, email, name, role });
-          return { id: payload.sub, email, name, role };
+          // ensureUser resolves the canonical Smart Steps user id — for staff
+          // profiles created via Settings → Staff this is NOT payload.sub but
+          // the profile row matched by email. The session must carry that id,
+          // or the user's assignments/permissions won't be found.
+          const canonicalId = await ensureUser({ id: payload.sub, email, name, role });
+          return { id: canonicalId, email, name, role };
         }
 
         // Standalone SmartSteps-only login: for accounts created directly in
@@ -96,8 +100,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           : credentials.email.toLowerCase().endsWith("@admin.com")
           ? "ADMIN"
           : "RBT";
-        const id = `user-${credentials.email}`;
-        await ensureUser({ id, email: credentials.email, name: credentials.email.split("@")[0], role });
+        const id = await ensureUser({
+          id: `user-${credentials.email}`,
+          email: credentials.email,
+          name: credentials.email.split("@")[0],
+          role,
+        });
         return {
           id,
           email: credentials.email,

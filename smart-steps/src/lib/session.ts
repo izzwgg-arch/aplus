@@ -20,6 +20,12 @@ export async function requireSession(): Promise<SessionUser | null> {
   const session = await auth();
   const user = session?.user as SessionUser | undefined;
   if (!user?.id) return null;
-  await ensureUser({ id: user.id, email: user.email, name: user.name, role: user.role });
-  return user;
+  // ensureUser returns the CANONICAL user id: sessions minted from an A+
+  // Center SSO token carry the main app's user id, but the person's Smart
+  // Steps row (holding their client assignments and appRole) may live under
+  // a different id created via Settings → Staff. All permission checks and
+  // queries must run under the canonical id, so remap it here — this also
+  // heals pre-existing session cookies issued before this fix.
+  const canonicalId = await ensureUser({ id: user.id, email: user.email, name: user.name, role: user.role });
+  return { ...user, id: canonicalId };
 }

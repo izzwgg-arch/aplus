@@ -60,16 +60,19 @@ export async function GET(req: NextRequest) {
 
   // Centralize DB sync here so every SSO login guarantees a matching SmartSteps
   // User row (with the correctly-mapped role) exists before any permission
-  // check downstream can run against it.
-  await ensureUser({ id: payload.sub, email, name, role: mappedRole });
+  // check downstream can run against it. ensureUser returns the CANONICAL user
+  // id: for staff profiles created via Settings → Staff that's the profile row
+  // matched by email, not payload.sub — the session must carry that id or the
+  // user's client assignments and permissions won't be found.
+  const canonicalId = await ensureUser({ id: payload.sub, email, name, role: mappedRole });
 
   const sessionToken = await encode({
     token: {
-      sub: payload.sub,
+      sub: canonicalId,
       email,
       name,
       role: mappedRole,
-      id: payload.sub,
+      id: canonicalId,
     },
     secret: authSecret,
     salt: cookieName,
