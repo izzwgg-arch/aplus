@@ -66,6 +66,19 @@ match reality (this file for build/run/deploy changes; `README.md` for features)
 The MD update is part of the task's commit. If no doc change is needed, say so
 explicitly in the task summary.
 
+## Regression audit (2026-08-13)
+
+`main` was verified as a strict superset of live production:
+
+- Tracker: every live hotfix from `preserve/server-live-20260728` is present in
+  `main` (differences are line-endings or newer feature work). Live server
+  checkout had zero uncommitted changes. `tsc --noEmit` passes.
+- Scheduling: `/opt/aba` source matches `client/` + `server/` except 3 files
+  where the REPO is newer (dev quick-login, invoice edit modal), and 4 stale
+  unused files that exist only on the server. Vite production build passes.
+- `prisma/migrations/migration_lock.toml` was lost in the big local sync and
+  has been restored — do not delete it again.
+
 ## Rule 5: Deploy
 
 **Deploy is currently MANUAL-ONLY and needs care** — do not blindly
