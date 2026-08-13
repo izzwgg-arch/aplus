@@ -14,6 +14,24 @@
 - Pre-split state of both repos is preserved in branch `backup/pre-split-main`
   on each repo. Old layout had these apps under `aplus-center-scheduling/`.
 
+## Rule 0: Task lifecycle (mandatory, every task)
+
+**Start of every task:** read this file and any other relevant `.md` files in
+the repo before doing anything else (Rule 1).
+
+**Immediately after finishing every task** (no batching, no exceptions), in
+this order:
+
+1. **Commit** — `git add -A && git commit -m "<short description>"`.
+2. **Push** — `git push origin main`.
+3. **Deploy** — per Rule 5: if `smart-steps/` changed, run the Tracker
+   git-based deploy; for docs-only changes, `git pull` on the server clone
+   (`/var/www/aplus2`) to keep it in sync; `client/`/`server/` changes are a
+   manual deploy — coordinate with the user before touching `/opt/aba`.
+4. **Update MD files** — per Rule 4. Fold doc updates into the task's commit
+   whenever possible; if any are made after deploying, commit and push them
+   too. The working tree must end clean.
+
 ## Rule 1: Read the MD files first
 
 At the start of **every task**, before doing anything else, read this file and any
@@ -81,7 +99,7 @@ explicitly in the task summary.
 - `prisma/migrations/migration_lock.toml` was lost in the big local sync and
   has been restored — do not delete it again.
 
-## Rule 5: Deploy
+## Rule 5: Deploy (step 3 of the Rule 0 end-of-task sequence)
 
 ### Smart Steps ABA Tracker (git-based, re-wired 2026-08-13)
 
