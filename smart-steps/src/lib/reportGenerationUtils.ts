@@ -189,16 +189,14 @@ function phaseLabel(phase: string): string {
   }
 }
 
-/** Extracts Date Opened from masteryRule.openedDate, falls back to createdAt. */
+/** Extracts Date Opened from masteryRule.openedDate. Returns "—" if never set.
+ *  Never falls back to createdAt — an unset date must show blank per clinical spec. */
 function getTargetStartDate(t: ReportTarget): string {
   const mr = (t.masteryRule != null && typeof t.masteryRule === "object" && !Array.isArray(t.masteryRule))
     ? (t.masteryRule as Record<string, unknown>)
     : null;
   const openedDate = mr?.openedDate;
   if (openedDate && typeof openedDate === "string") return formatDate(openedDate);
-  if (t.createdAt) {
-    return formatDate(t.createdAt instanceof Date ? t.createdAt : new Date(String(t.createdAt)));
-  }
   return "—";
 }
 
@@ -352,7 +350,7 @@ function buildCategoryParagraph(
 
 /**
  * Builds table rows for active (non-mastered) goals.
- * Uses masteryRule.openedDate for Start Date when available, falls back to createdAt.
+ * Uses masteryRule.openedDate for Date Opened. Returns "—" if never set (no createdAt fallback).
  */
 function _buildActiveGoalsRows(
   goals: ReportParentGoal[],
@@ -689,14 +687,17 @@ export function buildCurrentGoalsHtml(
       const newTs = g.targets.filter((t) => t.phase === "NEW");
       if (newTs.length === 0) continue;
       newRows.push(
-        `<tr><th colspan="3" style="text-align:left"><em>Skill Area: ${escapeHtml(g.title)}</em></th></tr>`,
+        `<tr><th colspan="5" style="text-align:left"><em>Skill Area: ${escapeHtml(g.title)}</em></th></tr>`,
       );
       for (const t of newTs) {
+        const dateOpened = getTargetStartDate(t);
         newRows.push(
           `<tr>` +
           `<td>${escapeHtml(t.definition)}</td>` +
-          `<td></td>` +
+          `<td>${escapeHtml(g.domain ?? cat)}</td>` +
+          `<td><strong style="color:#f59e0b">NEW</strong></td>` +
           `<td>${t.baseline ? escapeHtml(t.baseline) : "—"}</td>` +
+          `<td>${dateOpened}</td>` +
           `</tr>`,
         );
       }
@@ -705,7 +706,7 @@ export function buildCurrentGoalsHtml(
       parts.push(
         `<h4>New Goals</h4>`,
         `<table>`,
-        `<thead><tr><th>Objective</th><th>Target Date</th><th>Baseline</th></tr></thead>`,
+        `<thead><tr><th>Goal</th><th>Skill Area</th><th>Status</th><th>Baseline</th><th>Date Opened</th></tr></thead>`,
         `<tbody>`, ...newRows, `</tbody>`,
         `</table>`,
       );
@@ -719,18 +720,19 @@ export function buildCurrentGoalsHtml(
       );
       if (txTs.length === 0) continue;
       inTxRows.push(
-        `<tr><th colspan="5" style="text-align:left"><em>Skill Area: ${escapeHtml(g.title)}</em></th></tr>`,
+        `<tr><th colspan="7" style="text-align:left"><em>Skill Area: ${escapeHtml(g.title)}</em></th></tr>`,
       );
       for (const t of txTs) {
-        const startDate    = getTargetStartDate(t);
-        const currentLevel = computeCurrentLevel(t.id, trialStats);
-        const progress     = computeProgressPct(t.id, trialStats);
+        const startDate = getTargetStartDate(t);
+        const progress  = computeProgressPct(t.id, trialStats);
         inTxRows.push(
           `<tr>` +
           `<td>${escapeHtml(t.definition)}</td>` +
+          `<td>${escapeHtml(g.domain ?? cat)}</td>` +
+          `<td>${phaseLabel(t.phase)}</td>` +
+          `<td>${t.baseline ? escapeHtml(t.baseline) : "—"}</td>` +
           `<td>${startDate}</td>` +
           `<td></td>` +
-          `<td>${currentLevel}</td>` +
           `<td>${progress}</td>` +
           `</tr>`,
         );
@@ -740,7 +742,7 @@ export function buildCurrentGoalsHtml(
       parts.push(
         `<h4>Goals In Treatment</h4>`,
         `<table>`,
-        `<thead><tr><th>Objective</th><th>Start Date</th><th>Target Date</th><th>Current Level</th><th>Progress</th></tr></thead>`,
+        `<thead><tr><th>Goal</th><th>Skill Area</th><th>Status</th><th>Baseline</th><th>Date Opened</th><th>Target Date</th><th>Progress</th></tr></thead>`,
         `<tbody>`, ...inTxRows, `</tbody>`,
         `</table>`,
       );

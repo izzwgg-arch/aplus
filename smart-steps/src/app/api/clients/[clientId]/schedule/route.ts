@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { requireSession } from "@/lib/session";
+import { requireClientAccessResponse } from "@/lib/permissions";
 import { prisma } from "@/lib/db";
 import { PrismaClient } from "@prisma/client";
 
@@ -33,12 +34,14 @@ export async function GET(
   _req: Request,
   { params }: { params: Promise<{ clientId: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user?.id) {
+  const user = await requireSession();
+  if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const { clientId } = await params;
+  const denied = await requireClientAccessResponse(user.id, clientId, "smartsteps.clients.view");
+  if (denied) return denied;
 
   // Check if scheduling DB is configured
   const sp = getSchedulingPrisma();

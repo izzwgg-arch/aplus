@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { requireSession } from "@/lib/session";
+import { requireClientAccessResponse, requirePermissionResponse } from "@/lib/permissions";
 import { prisma } from "@/lib/db";
 import { replacePlaceholders, replaceBracketPlaceholders, sanitizeHtml, formatDate } from "@/lib/sanitizeHtml";
 import {
@@ -26,8 +27,8 @@ export async function POST(
   req: Request,
   { params }: { params: Promise<{ templateId: string }> },
 ) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const user = await requireSession();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { templateId } = await params;
 
   const body = await req.json() as {
@@ -54,6 +55,10 @@ export async function POST(
     bcbaManualCredentials,
   } = body;
   if (!clientId) return NextResponse.json({ error: "clientId required" }, { status: 400 });
+  const createDenied = await requirePermissionResponse(user.id, "smartsteps.reports.create");
+  if (createDenied) return createDenied;
+  const denied = await requireClientAccessResponse(user.id, clientId, "smartsteps.reports.view");
+  if (denied) return denied;
 
   const sixMonthsAgo = new Date();
   sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);

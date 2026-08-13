@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { requireSession } from "@/lib/session";
+import { requirePermissionResponse } from "@/lib/permissions";
 import { prisma } from "@/lib/db";
 import { sanitizeHtml } from "@/lib/sanitizeHtml";
 
@@ -247,8 +248,10 @@ const DEFAULT_ABA_SECTIONS: { title: string; content: string }[] = [
 ];
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const user = await requireSession();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const denied = await requirePermissionResponse(user.id, "smartsteps.report_templates.view");
+  if (denied) return denied;
 
   const templates = await prisma.reportTemplate.findMany({
     where: { isActive: true },
@@ -262,8 +265,10 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const user = await requireSession();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const denied = await requirePermissionResponse(user.id, "smartsteps.report_templates.manage");
+  if (denied) return denied;
 
   const body = await req.json();
   const { name, type = "ABA_ASSESSMENT", description } = body;

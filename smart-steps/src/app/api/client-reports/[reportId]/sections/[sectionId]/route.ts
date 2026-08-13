@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { requireSession } from "@/lib/session";
+import { requirePermissionResponse } from "@/lib/permissions";
 import { prisma } from "@/lib/db";
 import { sanitizeHtml } from "@/lib/sanitizeHtml";
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ reportId: string; sectionId: string }> }) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const user = await requireSession();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const denied = await requirePermissionResponse(user.id, "smartsteps.reports.edit");
+  if (denied) return denied;
   const { sectionId } = await params;
 
   const body = await req.json();
@@ -21,8 +24,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ report
 }
 
 export async function DELETE(_req: Request, { params }: { params: Promise<{ reportId: string; sectionId: string }> }) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const user = await requireSession();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const denied = await requirePermissionResponse(user.id, "smartsteps.reports.edit");
+  if (denied) return denied;
   const { sectionId } = await params;
 
   await prisma.clientReportSection.delete({ where: { id: sectionId } });

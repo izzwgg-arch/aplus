@@ -9,8 +9,20 @@ const APP_BASEPATH = "/smart-steps";
 // (`path.includes("/dashboard"|"/clients"|"/reports"|"/settings")`), which left
 // every other page (e.g. /assessments, /goal-library, /staff,
 // /goals-and-targets) rendering client-side with no server-side auth check.
-const PUBLIC_EXACT_PATHS = ["/", "/login", APP_BASEPATH, `${APP_BASEPATH}/login`];
-const PUBLIC_PREFIXES = ["/parent/", `${APP_BASEPATH}/parent/`]; // parent portal: token-gated separately, not a staff session
+const PUBLIC_EXACT_PATHS = [
+  "/",
+  "/login",
+  APP_BASEPATH,
+  `${APP_BASEPATH}/login`,
+  "/accept-invite",
+  `${APP_BASEPATH}/accept-invite`,
+];
+const PUBLIC_PREFIXES = [
+  "/parent/",
+  `${APP_BASEPATH}/parent/`, // parent portal: token-gated separately, not a staff session
+  "/api/invite/",
+  `${APP_BASEPATH}/api/invite/`, // invite token validate/accept: gated by the one-time token itself
+];
 
 function isPublicPath(path: string): boolean {
   if (PUBLIC_EXACT_PATHS.includes(path)) return true;

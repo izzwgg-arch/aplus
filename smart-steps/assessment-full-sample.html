@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Full Assessment PDF Sample</title>
+  <style>
+    @page { size: letter; margin: 0; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { background: #777; }
+    body {
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 11pt;
+      line-height: 1.6;
+      color: #111;
+      background: #fff;
+      max-width: 8.5in;
+      margin: 0 auto;
+      padding: 0;
+      position: relative;
+      overflow-x: hidden;
+    }
+    .print-watermark {
+      position: fixed;
+      top: 3.15in;
+      left: 50%;
+      width: 6.15in;
+      max-width: 72%;
+      height: auto;
+      transform: translateX(-50%);
+      opacity: 0.24;
+      z-index: 0;
+      pointer-events: none;
+      user-select: none;
+    }
+    .front-page {
+      position: relative;
+      min-height: 11in;
+      padding: 2.32in 0.65in 1.45in;
+      page-break-after: always;
+      break-after: page;
+    }
+    .front-page-letterhead,
+    .front-page-bottom {
+      position: absolute;
+      left: 0;
+      width: 8.5in;
+      height: auto;
+      z-index: 0;
+      pointer-events: none;
+      user-select: none;
+    }
+    .front-page-letterhead { top: 0; }
+    .front-page-bottom { bottom: 0; }
+    .following-pages {
+      position: relative;
+      z-index: 1;
+      padding: 0;
+    }
+    .pagination-source { display: none; }
+    .content-page {
+      position: relative;
+      z-index: 1;
+      width: 8.5in;
+      min-height: 11in;
+      height: 11in;
+      padding: 0.72in 0.65in 0.85in;
+      page-break-after: always;
+      break-after: page;
+      overflow: hidden;
+    }
+    .content-page:last-child {
+      page-break-after: auto;
+      break-after: auto;
+    }
+    .content-page-inner {
+      height: 9.43in;
+      overflow: visible;
+    }
+    .print-content {
+      position: relative;
+      z-index: 1;
+    }
+    .report-header {
+      border-bottom: 1px solid #555;
+      padding-bottom: 10pt;
+      margin-bottom: 20pt;
+      background: transparent;
+    }
+    .report-header h1 {
+      font-size: 16pt;
+      font-weight: bold;
+      line-height: 1.2;
+      margin-bottom: 5pt;
+      visibility: hidden;
+    }
+    .report-meta {
+      font-size: 10pt;
+      color: #111;
+      display: flex;
+      gap: 24pt;
+      flex-wrap: wrap;
+    }
+    .report-section {
+      margin-bottom: 22pt;
+      page-break-inside: auto;
+      break-inside: auto;
+      orphans: 4;
+      widows: 4;
+    }
+    .first-report-section { margin-bottom: 0; }
+    .report-section h2 {
+      font-size: 13pt;
+      font-weight: bold;
+      color: #1a1a2e;
+      border-bottom: 1px solid #ccc;
+      padding-bottom: 4pt;
+      margin-bottom: 10pt;
+      page-break-after: avoid;
+      break-after: avoid;
+      background: transparent;
+    }
+    .continued-label {
+      color: #555;
+      font-size: 10pt;
+      font-style: italic;
+      font-weight: normal;
+    }
+    .section-content {
+      font-size: 11pt;
+      font-family: inherit;
+      background: transparent;
+    }
+    p { margin-bottom: 8pt; orphans: 3; widows: 3; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 10pt 0;
+      font-size: 9.5pt;
+      page-break-inside: auto;
+    }
+    thead { display: table-header-group; }
+    tr { page-break-inside: avoid; page-break-after: auto; }
+    th, td {
+      border: 1px solid #aaa;
+      padding: 4pt 6pt;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: #f0f0f0; font-weight: bold; }
+    @media print {
+      html, body {
+        width: 8.5in;
+        min-height: 11in;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      .front-page {
+        height: 11in;
+      }
+      .report-section {
+        page-break-inside: auto;
+        break-inside: auto;
+      }
+      tr { page-break-inside: avoid; }
+      h2, h3 { page-break-after: avoid; }
+    }
+    @media screen {
+      .following-pages { padding: 0; }
+    }
+  </style>
+</head>
+<body>
+  <img class="print-watermark" src="public/letterhead/smart-steps-watermark.png?v=transparent-soft-20260630" alt="">
+  <main class="front-page">
+    <img class="front-page-letterhead" src="public/letterhead/smart-steps-top.png?v=pdf-sharp-20260630" alt="">
+    <img class="front-page-bottom" src="public/letterhead/smart-steps-bottom.png?v=pdf-sharp-20260630" alt="">
+    <div class="print-content">
+      <div class="report-header">
+        <h1 aria-hidden="true">Initial ABA Assessment Template</h1>
+        <div class="report-meta">
+          <span><strong>Client:</strong> Yakov Dovidson</span>
+          <span><strong>Status:</strong> DRAFT</span>
+          <span><strong>Updated:</strong> June 30, 2026</span>
+        </div>
+      </div>
+      <section class="report-section first-report-section">
+        <h2>Service Period / Provider Information</h2>
+        <div class="section-content">
+          <table>
+            <tbody>
+              <tr><th>Client Name</th><td>Yakov Dovidson</td></tr>
+              <tr><th>Date of Birth</th><td>06/27/2017 (Age 9)</td></tr>
+              <tr><th>Diagnosis</th><td>[Diagnosis]</td></tr>
+              <tr><th>Insurance ID</th><td>Ba7355000</td></tr>
+              <tr><th>Address</th><td>4 Raven Ct Airmont NY 10952</td></tr>
+              <tr><th>School / Program</th><td>[School / Program]</td></tr>
+              <tr><th>Service Period Start</th><td>2025-01-01</td></tr>
+              <tr><th>Service Period End</th><td>2025-12-30</td></tr>
+              <tr><th>Assessment Date</th><td>06/30/2026</td></tr>
+              <tr><th>BCBA Name</th><td>Yehudis Weinstock</td></tr>
+              <tr><th>BCBA Credentials</th><td>BCBA/LBA</td></tr>
+              <tr><th>BCBA Email</th><td>provider@example.com</td></tr>
+              <tr><th>BCBA Phone</th><td>845-837-6001</td></tr>
+              <tr><th>Guardian / Parent</th><td>Faigy Dovidson</td></tr>
+              <tr><th>Guardian Phone</th><td>929-437-5896</td></tr>
+              <tr><th>Guardian Email</th><td>parent@example.com</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </main>
+  <main class="following-pages" id="paginated-pages"></main>
+  <div class="pagination-source" id="pagination-source">
+    <section class="report-section">
+      <h2>1. Biopsychosocial Information</h2>
+      <div class="section-content">
+        <p>Yakov is a 9-year-old individual with clinical and developmental history relevant to ABA treatment planning. This sample text is included to demonstrate how narrative assessment content flows after the first page.</p>
+        <p>He benefits from predictable routines, clear visual supports, repeated practice, and systematic teaching procedures across communication, social, adaptive, and behavioral domains.</p>
+      </div>
+    </section>
+    <section class="report-section">
+      <h2>2. Why ABA Services Are Needed</h2>
+      <div class="section-content">
+        <p>Applied Behavior Analysis services are recommended to address skill acquisition, functional communication, adaptive behavior, and reduction of behaviors that interfere with learning and daily participation.</p>
+        <p>Services are medically necessary because the client requires consistent instruction, data-based decision making, and caregiver training to support generalization across environments.</p>
+      </div>
+    </section>
+    <section class="report-section">
+      <h2>3. Current Goals and Treatment Targets</h2>
+      <div class="section-content">
+        <table>
+          <thead><tr><th>Domain</th><th>Baseline</th><th>Goal</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>Communication</td><td>Emerging</td><td>Use functional communication across daily routines.</td><td>Prompt fading and reinforcement procedures will be used.</td></tr>
+            <tr><td>Social Skills</td><td>Emerging</td><td>Respond to peers and adults during structured play.</td><td>Targets will be practiced in naturalistic settings.</td></tr>
+            <tr><td>Adaptive Skills</td><td>Variable</td><td>Follow hygiene and self-help routines with reduced prompting.</td><td>Caregiver practice will support generalization.</td></tr>
+            <tr><td>Behavior Reduction</td><td>Variable</td><td>Decrease interfering behavior and increase replacement responses.</td><td>Intervention will be based on function and ongoing data review.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+    <section class="report-section">
+      <h2>4. Treatment Recommendations</h2>
+      <div class="section-content">
+        <p>ABA treatment is recommended multiple days per week with ongoing supervision by a qualified behavior analyst. Parent training should occur regularly to promote carryover and continuity between therapy sessions and home routines.</p>
+        <p>Progress should be reviewed through direct observation, trial data, caregiver report, and periodic treatment plan updates. Goals should be adjusted as mastery is demonstrated or as clinical priorities change.</p>
+        <p>This additional paragraph helps confirm that longer content continues onto later pages without touching the first-page letterhead or bottom accent. The watermark remains behind content on subsequent pages.</p>
+        <p>This additional paragraph helps confirm that longer content continues onto later pages without touching the first-page letterhead or bottom accent. The watermark remains behind content on subsequent pages.</p>
+        <p>This additional paragraph helps confirm that longer content continues onto later pages without touching the first-page letterhead or bottom accent. The watermark remains behind content on subsequent pages.</p>
+      </div>
+    </section>
+    <section class="report-section">
+      <h2>5. Transition Safety Proof</h2>
+      <div class="section-content">
+        <p>This section intentionally adds enough content to force additional page transitions. The printed content pages use browser-level page margins, so every new page receives the same professional top, side, and bottom spacing.</p>
+        <p>Page breaks should never leave text pressed against the bottom edge. Headings stay with their following content, table rows stay intact, and paragraphs honor widow and orphan rules where the browser print engine supports them.</p>
+        <p>Additional assessment narrative line for transition testing. The goal is to confirm that page breaks remain professional even as more pages are added to the assessment report.</p>
+        <p>Additional assessment narrative line for transition testing. The goal is to confirm that page breaks remain professional even as more pages are added to the assessment report.</p>
+        <p>Additional assessment narrative line for transition testing. The goal is to confirm that page breaks remain professional even as more pages are added to the assessment report.</p>
+        <p>Additional assessment narrative line for transition testing. The goal is to confirm that page breaks remain professional even as more pages are added to the assessment report.</p>
+        <p>Additional assessment narrative line for transition testing. The goal is to confirm that page breaks remain professional even as more pages are added to the assessment report.</p>
+        <p>Additional assessment narrative line for transition testing. The goal is to confirm that page breaks remain professional even as more pages are added to the assessment report.</p>
+      </div>
+    </section>
+    <section class="report-section">
+      <h2>6. Continued Multi-Page Content</h2>
+      <div class="section-content">
+        <p>More sample clinical text continues here to validate that later pages do not inherit the first-page bottom accent and that content pages maintain consistent margins across every printed page.</p>
+        <p>More sample clinical text continues here to validate that later pages do not inherit the first-page bottom accent and that content pages maintain consistent margins across every printed page.</p>
+        <p>More sample clinical text continues here to validate that later pages do not inherit the first-page bottom accent and that content pages maintain consistent margins across every printed page.</p>
+        <p>More sample clinical text continues here to validate that later pages do not inherit the first-page bottom accent and that content pages maintain consistent margins across every printed page.</p>
+        <p>More sample clinical text continues here to validate that later pages do not inherit the first-page bottom accent and that content pages maintain consistent margins across every printed page.</p>
+      </div>
+    </section>
+  </div>
+  <script>
+    function paginatePrintDocument(doc) {
+      const source = doc.getElementById("pagination-source");
+      const target = doc.getElementById("paginated-pages");
+      if (!source || !target) return;
+      const pageInnerHeightTolerance = 2;
+      let pageInner = null;
+      function createPage() {
+        const page = doc.createElement("section");
+        page.className = "content-page";
+        const inner = doc.createElement("div");
+        inner.className = "content-page-inner";
+        page.appendChild(inner);
+        target.appendChild(page);
+        pageInner = inner;
+        return inner;
+      }
+      function createSectionShell(titleHtml, continued) {
+        const shell = doc.createElement("section");
+        shell.className = "report-section";
+        const titleEl = doc.createElement("h2");
+        titleEl.innerHTML = continued ? `${titleHtml} <span class="continued-label">(continued)</span>` : titleHtml;
+        const contentEl = doc.createElement("div");
+        contentEl.className = "section-content";
+        shell.append(titleEl, contentEl);
+        return { shell, contentEl };
+      }
+      function pageOverflows() {
+        return !!pageInner && pageInner.scrollHeight > pageInner.clientHeight + pageInnerHeightTolerance;
+      }
+      function appendSectionToPages(section) {
+        const heading = section.querySelector("h2");
+        const content = section.querySelector(".section-content");
+        const titleHtml = heading?.innerHTML || "";
+        const blocks = content ? Array.from(content.childNodes) : [];
+        let continued = false;
+        let current = createSectionShell(titleHtml, continued);
+        if (!pageInner) createPage();
+        pageInner.appendChild(current.shell);
+        if (pageOverflows()) {
+          current.shell.remove();
+          createPage();
+          pageInner.appendChild(current.shell);
+        }
+        for (const block of blocks) {
+          current.contentEl.appendChild(block);
+          if (!pageOverflows()) continue;
+          current.contentEl.removeChild(block);
+          if (!current.contentEl.childNodes.length) {
+            current.contentEl.appendChild(block);
+            continue;
+          }
+          continued = true;
+          createPage();
+          current = createSectionShell(titleHtml, continued);
+          pageInner.appendChild(current.shell);
+          current.contentEl.appendChild(block);
+        }
+      }
+      createPage();
+      Array.from(source.querySelectorAll(".report-section")).forEach(appendSectionToPages);
+      if (target.lastElementChild?.querySelector(".content-page-inner")?.childNodes.length === 0) {
+        target.lastElementChild.remove();
+      }
+      source.remove();
+    }
+    window.addEventListener("load", () => paginatePrintDocument(document));
+  </script>
+</body>
+</html>

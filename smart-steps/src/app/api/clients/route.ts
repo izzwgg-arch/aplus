@@ -1,17 +1,21 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { requireSession } from "@/lib/session";
+import { accessibleClientIds, requirePermissionResponse } from "@/lib/permissions";
 import { prisma } from "@/lib/db";
 
 export async function GET() {
-  const session = await auth();
-  if (!session?.user?.id) {
+  const user = await requireSession();
+  if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  const clientIds = await accessibleClientIds(user.id, "smartsteps.clients.view");
 
   try {
     const clients = await prisma.client.findMany({
       where: {
         isArchived: false,
+        ...(clientIds === "ALL" ? {} : { id: { in: clientIds } }),
       },
       orderBy: { updatedAt: "desc" },
       include: {
@@ -60,15 +64,13 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const session = await auth();
-  if (!session?.user?.id) {
+  const user = await requireSession();
+  if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const role = (session.user as { role?: string }).role;
-  if (role !== "ADMIN" && role !== "BCBA") {
-    return NextResponse.json({ error: "Only BCBA or Admin can create clients" }, { status: 403 });
-  }
+  const denied = await requirePermissionResponse(user.id, "smartsteps.clients.create");
+  if (denied) return denied;
 
   try {
     const body = await req.json();

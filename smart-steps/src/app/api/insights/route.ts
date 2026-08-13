@@ -1,15 +1,20 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { requireSession } from "@/lib/session";
+import { requirePermissionResponse, requireClientAccessResponse } from "@/lib/permissions";
 import { prisma } from "@/lib/db";
 import { generateInsights } from "@/lib/behaviorInsights";
 
 export async function GET(req: Request) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const user = await requireSession();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const denied = await requirePermissionResponse(user.id, "smartsteps.insights.view");
+  if (denied) return denied;
 
   const { searchParams } = new URL(req.url);
   const clientId = searchParams.get("clientId");
   if (!clientId) return NextResponse.json({ error: "clientId required" }, { status: 400 });
+  const accessDenied = await requireClientAccessResponse(user.id, clientId, "smartsteps.clients.view");
+  if (accessDenied) return accessDenied;
 
   try {
     const programs = await prisma.program.findMany({

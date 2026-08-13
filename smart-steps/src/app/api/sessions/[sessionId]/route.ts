@@ -1,13 +1,16 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { requireSession } from "@/lib/session";
+import { requireAnyPermissionResponse, requireClientAccessResponse, requirePermissionResponse } from "@/lib/permissions";
 import { prisma } from "@/lib/db";
 
 export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ sessionId: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const user = await requireSession();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const denied = await requirePermissionResponse(user.id, "smartsteps.sessions.edit");
+  if (denied) return denied;
 
   const { sessionId } = await params;
 
@@ -15,6 +18,16 @@ export async function PATCH(
   if (sessionId.startsWith("local-")) {
     return NextResponse.json({ ok: true, offline: true });
   }
+
+  // Restrict edits to sessions whose client the user is assigned to (RBTs are
+  // ".assigned"-scoped; ".all" holders like BCBA/Admin pass through).
+  const existing = await prisma.session.findUnique({
+    where: { id: sessionId },
+    select: { clientId: true },
+  });
+  if (!existing) return NextResponse.json({ error: "Session not found" }, { status: 404 });
+  const accessDenied = await requireClientAccessResponse(user.id, existing.clientId, "smartsteps.sessions.view");
+  if (accessDenied) return accessDenied;
 
   try {
     const body = await req.json() as {
@@ -45,8 +58,10 @@ export async function GET(
   req: Request,
   { params }: { params: Promise<{ sessionId: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const user = await requireSession();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const denied = await requireAnyPermissionResponse(user.id, ["smartsteps.sessions.view.assigned", "smartsteps.sessions.view.all"]);
+  if (denied) return denied;
 
   const { sessionId } = await params;
 

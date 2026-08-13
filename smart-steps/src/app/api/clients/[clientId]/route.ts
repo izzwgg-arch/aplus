@@ -1,16 +1,19 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { requireSession } from "@/lib/session";
+import { requireClientAccessResponse, requirePermissionResponse } from "@/lib/permissions";
 import { prisma } from "@/lib/db";
 
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ clientId: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user?.id) {
+  const user = await requireSession();
+  if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const { clientId } = await params;
+  const denied = await requireClientAccessResponse(user.id, clientId, "smartsteps.clients.view");
+  if (denied) return denied;
 
   try {
     const client = await prisma.client.findUnique({
@@ -129,16 +132,13 @@ export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ clientId: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user?.id) {
+  const user = await requireSession();
+  if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const role = (session.user as { role?: string }).role;
-  if (role !== "ADMIN" && role !== "BCBA") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-
   const { clientId } = await params;
+  const denied = await requireClientAccessResponse(user.id, clientId, "smartsteps.clients.edit");
+  if (denied) return denied;
 
   try {
     const body = await req.json();
@@ -173,14 +173,12 @@ export async function DELETE(
   _req: Request,
   { params }: { params: Promise<{ clientId: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user?.id) {
+  const user = await requireSession();
+  if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const role = (session.user as { role?: string }).role;
-  if (role !== "ADMIN") {
-    return NextResponse.json({ error: "Only Admin can delete clients" }, { status: 403 });
-  }
+  const denied = await requirePermissionResponse(user.id, "smartsteps.clients.delete");
+  if (denied) return denied;
 
   const { clientId } = await params;
 

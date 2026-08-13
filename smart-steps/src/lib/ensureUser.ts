@@ -45,18 +45,36 @@ export async function ensureUser(user: AuthUser): Promise<void> {
   const role = safeRole(user.role);
 
   try {
-    const existing = await prisma.user.findUnique({ where: { id: user.id }, select: { appRoleId: true } });
-    // Only auto-assign when the user has no app role yet — never override a
-    // custom role an admin has deliberately assigned via Roles & Permissions.
-    const appRoleId = existing && existing.appRoleId !== null ? undefined : await resolveDefaultAppRoleId(role);
+    const existing = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: { role: true, appRoleId: true, appRole: { select: { key: true } } },
+    });
+
+    // Auto-assign a default app role for brand-new users. For EXISTING users,
+    // only re-sync the app role when the incoming SSO role has actually
+    // changed (e.g. promoted to ADMIN in the main A+ Center app) AND the
+    // currently-stored appRoleId still matches the legacy role it was
+    // auto-assigned from (i.e. nobody has since hand-picked a different role
+    // via Roles & Permissions — that customization is always preserved).
+    //
+    // Without this, a user's SmartSteps role/appRoleId is frozen forever at
+    // whatever it was on their very first login, even after being promoted
+    // or demoted in the main app — silently locking them out of features
+    // their new role should grant (or over-granting after a demotion).
+    const roleChanged = existing ? existing.role !== role : false;
+    const currentlyAutoAssigned = !existing?.appRoleId || existing.appRole?.key === existing.role;
+    const shouldSyncAppRole = !existing || (roleChanged && currentlyAutoAssigned);
+    const appRoleId = shouldSyncAppRole ? await resolveDefaultAppRoleId(role) : undefined;
 
     await prisma.user.upsert({
       where: { id: user.id },
       update: {
-        // Sync name/email from SSO token. isActive and displayRole are
-        // intentionally NOT updated here — admin-managed values are preserved.
+        // Sync name/email/role from SSO token so promotions/demotions in the
+        // main app propagate here. displayRole and appRoleId customizations
+        // made via Roles & Permissions are preserved (see shouldSyncAppRole).
         name: user.name ?? undefined,
         email,
+        ...(roleChanged ? { role } : {}),
         ...(appRoleId ? { appRoleId } : {}),
       },
       create: {
@@ -69,7 +87,7 @@ export async function ensureUser(user: AuthUser): Promise<void> {
       },
     });
 
-    if (appRoleId) invalidateUserCache(user.id);
+    if (appRoleId || roleChanged) invalidateUserCache(user.id);
   } catch {
     // If upsert fails (e.g. email unique conflict from different account),
     // try updating by email instead, or just continue — sessions degrade gracefully.

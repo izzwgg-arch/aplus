@@ -3,6 +3,7 @@ import { requireSession } from "@/lib/session";
 import { requirePermissionResponse } from "@/lib/permissions";
 import { hashPassword, isValidPassword, MIN_PASSWORD_LENGTH } from "@/lib/password";
 import { auditLog } from "@/lib/auditLogger";
+import { sendInvite } from "@/lib/invite";
 import { prisma } from "@/lib/db";
 
 const VALID_ROLES = ["RBT", "BCBA", "ADMIN"] as const;
@@ -16,6 +17,7 @@ const STAFF_SELECT = {
   phone:       true,
   credentials: true,
   isActive:    true,
+  invitedAt:   true,
   createdAt:   true,
   appRoleId:   true,
   appRole:     { select: { id: true, key: true, name: true } },
@@ -71,11 +73,12 @@ export async function GET(req: Request) {
  * Creates a new SmartSteps user profile by email.
  * ADMIN only.
  *
- * Login method is chosen by the caller:
- * - Omit `password` (or send loginMethod: "sso") to create an SSO-linked
- *   profile — the user must log in via A+ Center SSO with a matching email.
- * - Provide `password` (loginMethod: "local") to create a standalone
- *   SmartSteps-only account that logs in directly, independent of A+ Center.
+ * Login method is chosen by the caller (`loginMethod`):
+ * - "sso" (or omit password): SSO-linked profile — the user logs in via A+
+ *   Center SSO with a matching email.
+ * - "local" (with `password`): standalone account with an admin-set password.
+ * - "invite": creates the account with no password, emails the user a
+ *   one-time link to set their own password and activate the account.
  */
 export async function POST(req: Request) {
   const user = await requireSession();
@@ -86,7 +89,7 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-    const { name, email, role, displayRole, phone, credentials, password } = body;
+    const { name, email, role, displayRole, phone, credentials, password, loginMethod } = body;
 
     if (!email?.trim()) return NextResponse.json({ error: "Email is required" }, { status: 400 });
     if (!name?.trim()) return NextResponse.json({ error: "Name is required" }, { status: 400 });
@@ -94,8 +97,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid role. Must be RBT, BCBA, or ADMIN" }, { status: 400 });
     }
 
+    const isInvite = loginMethod === "invite";
+
     let passwordHash: string | null = null;
-    if (password !== undefined && password !== "") {
+    if (!isInvite && password !== undefined && password !== "") {
       if (!isValidPassword(password)) {
         return NextResponse.json(
           { error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` },
@@ -111,6 +116,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "A user with this email already exists" }, { status: 409 });
     }
 
+    // Assign the default AppRole matching the legacy role (keys align: RBT/BCBA/
+    // ADMIN) so the new account has working permissions immediately — otherwise
+    // the fail-closed resolver grants zero access until manually role-assigned.
+    const defaultAppRole = await prisma.appRole.findUnique({
+      where: { key: role },
+      select: { id: true, isActive: true },
+    });
+
     const created = await prisma.user.create({
       data: {
         email:       normalized,
@@ -121,15 +134,33 @@ export async function POST(req: Request) {
         credentials: credentials?.trim() || null,
         isActive:    true,
         passwordHash,
+        invitedAt:   isInvite ? new Date() : null,
+        appRoleId:   defaultAppRole?.isActive ? defaultAppRole.id : null,
       },
       select: STAFF_SELECT,
     });
 
-    await auditLog(user.id, "USER_CREATED", "User", created.id, {
+    await auditLog(user.id, isInvite ? "USER_INVITED" : "USER_CREATED", "User", created.id, {
       email: normalized,
       role,
-      loginMethod: passwordHash ? "local" : "sso",
+      loginMethod: isInvite ? "invite" : passwordHash ? "local" : "sso",
     });
+
+    if (isInvite) {
+      try {
+        await sendInvite({ id: created.id, email: created.email, name: created.name });
+      } catch (err) {
+        console.error("[staff POST] invite email failed:", err);
+        return NextResponse.json(
+          {
+            ...serialize(created),
+            _warning:
+              "Account created, but the invitation email could not be sent. Use \u201cResend invite\u201d once email is configured.",
+          },
+          { status: 201 }
+        );
+      }
+    }
 
     return NextResponse.json(serialize(created), { status: 201 });
   } catch (err) {

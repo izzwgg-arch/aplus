@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -98,7 +98,11 @@ export default function SessionNewPage() {
   const storeMarkSaved = useABAStore((s) => s.markSessionSaved);
   const storeClear = useABAStore((s) => s.clearActiveSession);
   const storeActiveSession = useABAStore((s) => s.activeSession);
-  const storeTargets = useABAStore((s) => s.targets.filter((t) => t.clientId === clientId && t.isActive));
+  const rawStoreTargets = useABAStore((s) => s.targets);
+  const storeTargets = useMemo(
+    () => rawStoreTargets.filter((t) => t.clientId === clientId && t.isActive),
+    [rawStoreTargets, clientId],
+  );
   const [storeLocalSessionId, setStoreLocalSessionId] = useState<string | null>(null);
   /* Unsaved-session conflict guard — set when starting this session would
    * silently discard a DIFFERENT client's still-unsaved session data. */
