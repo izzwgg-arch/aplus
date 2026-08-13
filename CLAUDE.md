@@ -32,16 +32,18 @@ ssh -i "C:\Users\A Plus Server\.ssh\id_ed25519" root@91.229.245.143 "<command>"
 Never generate a new key, never ask for a password, and never print or copy the
 **private** key anywhere (not into files, commits, logs, or chat).
 
-Server layout (verified 2026-08-12):
+Server layout (verified 2026-08-13):
 
 - A+ Scheduling runs from `/opt/aba` (port 4000, `node server/src/server.js`,
   **not git-managed** — deployed as tarball).
-- ABA Tracker runs from `/var/www/aplus/aplus-center-scheduling/smart-steps`
-  (port 3000, PM2 process `smart-steps`). That checkout is on branch
-  `preserve/server-live-20260728` with the OLD (pre-split) layout.
+- ABA Tracker runs from `/var/www/aplus2/smart-steps` (port 3000, PM2 process
+  `smart-steps`). `/var/www/aplus2` is a clean clone of this repo on `main`.
+- `/var/www/aplus` is the FROZEN pre-split live state (branch
+  `preserve/server-live-20260728`, old layout) — kept as rollback. Do not
+  modify or delete it.
 - nginx: `app.apluscenterinc.org` → `/` to 4000, `/smart-steps` to 3000.
-  The `smartsteps-abapc` nginx site (port 3001) is a dead leftover — DNS for
-  that domain points to the other server.
+  (The dead `smartsteps-abapc` nginx site was removed 2026-08-13; backup in
+  `/root/nginx-backup`.)
 
 ## Rule 3: Git — commit and push after EVERY task
 
@@ -81,14 +83,25 @@ explicitly in the task summary.
 
 ## Rule 5: Deploy
 
-**Deploy is currently MANUAL-ONLY and needs care** — do not blindly
-`git pull` on the server:
+### Smart Steps ABA Tracker (git-based, re-wired 2026-08-13)
 
-- The server checkout tracks the pre-split layout on a `preserve/*` branch;
-  pulling the new `main` into it would rearrange paths under PM2's feet.
-- A+ Scheduling (`/opt/aba`) is not connected to git at all.
+Production runs from `/var/www/aplus2/smart-steps`. To deploy after pushing
+to `main`:
 
-Until deployment is re-wired (fresh clone of the new layout + PM2 path update),
-after pushing: tell the user the push is done and that deploy is pending the
-new deploy setup. Do NOT run destructive git commands (`reset`, `checkout`,
-`clean`) on the server's `/var/www/aplus` — it is the preserved live state.
+```
+ssh -i "C:\Users\A Plus Server\.ssh\id_ed25519" root@91.229.245.143 "cd /var/www/aplus2 && git pull && cd smart-steps && npm ci --no-audit --no-fund && npx prisma generate && npm run build && pm2 restart smart-steps && sleep 5 && curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/smart-steps"
+```
+
+Expect `200` at the end. If new prisma migrations were added, run
+`npx prisma migrate deploy` before the restart.
+
+**Rollback:** `pm2 delete smart-steps`, then `pm2 start npm --name smart-steps
+-- run start` from `/var/www/aplus/aplus-center-scheduling/smart-steps`
+(the frozen pre-split live state), then `pm2 save`.
+
+### A+ Center Scheduling
+
+Still manual: `/opt/aba` is not git-managed. Changes to `client/` or
+`server/` do NOT reach production via git pull — coordinate with the user
+before touching `/opt/aba`. Never run destructive git commands on
+`/var/www/aplus` (frozen rollback state).
