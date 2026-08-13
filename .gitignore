@@ -8,3 +8,9 @@ server/.env
 client/.env
 *.log
 *.tmp
+
+# no packed deploy bundles in the repo
+*.tar.gz
+*.tgz
+*.zip
+*.tar
