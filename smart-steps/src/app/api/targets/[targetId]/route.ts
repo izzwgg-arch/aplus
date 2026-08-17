@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
 import { canForClient, requirePermissionResponse, hasAllScope } from "@/lib/permissions";
+import { isPhaseVisibleToRestrictedViewer } from "@/lib/targetVisibility";
 import { prisma } from "@/lib/db";
 
 function asBool(value: string | null) {
@@ -111,10 +112,10 @@ export async function GET(
       if (!allowed) return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
-    // BT visibility: assigned-only viewers may only open In-Treatment targets.
-    // Anything not in the ACQUISITION phase is hidden (treated as not found).
-    const restrictToInTreatment = !(await hasAllScope(user.id, "smartsteps.targets.view"));
-    if (restrictToInTreatment && target.phase !== "ACQUISITION") {
+    // BT visibility: assigned-only viewers may open any active target except a
+    // MASTERED one, which is hidden (treated as not found).
+    const restricted = !(await hasAllScope(user.id, "smartsteps.targets.view"));
+    if (restricted && !isPhaseVisibleToRestrictedViewer(target.phase)) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 

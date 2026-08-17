@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
 import { requireClientAccessResponse, requirePermissionResponse, hasAllScope } from "@/lib/permissions";
+import { restrictedPhaseWhere } from "@/lib/targetVisibility";
 import { prisma } from "@/lib/db";
 
 export async function GET(
@@ -14,10 +15,11 @@ export async function GET(
   if (denied) return denied;
 
   // BT visibility: users without the `.all` scope (e.g. Behavior Technicians,
-  // Parent Viewers) may only see goals currently "In Treatment" — i.e. targets
-  // in the ACQUISITION phase. BCBAs/Admins (holding `.all`) see everything.
-  const restrictToInTreatment = !(await hasAllScope(user.id, "smartsteps.goals.view"));
-  const targetPhaseWhere = restrictToInTreatment ? { phase: "ACQUISITION" as const } : {};
+  // Parent Viewers) see every active goal except MASTERED ones. BCBAs/Admins
+  // (holding `.all`) see everything. See @/lib/targetVisibility for why this is
+  // not restricted to ACQUISITION.
+  const restricted = !(await hasAllScope(user.id, "smartsteps.goals.view"));
+  const targetPhaseWhere = restrictedPhaseWhere(restricted);
 
   try {
     const goals = await prisma.parentGoal.findMany({
@@ -45,9 +47,9 @@ export async function GET(
       },
     });
 
-    // For restricted viewers, drop parent goals that have no In-Treatment
-    // targets (directly or via sub-goals) so New/Mastered/etc. goals stay hidden.
-    const result = restrictToInTreatment
+    // For restricted viewers, drop parent goals left with no visible targets
+    // (directly or via sub-goals) so fully-mastered goals stay hidden.
+    const result = restricted
       ? goals.filter((g) => g.targets.length > 0 || g.subGoals.some((sg) => sg.targets.length > 0))
       : goals;
 

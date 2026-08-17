@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
 import { requireClientAccessResponse, hasAllScope } from "@/lib/permissions";
+import { restrictedPhaseWhere } from "@/lib/targetVisibility";
 import { prisma } from "@/lib/db";
 
 // Returns ALL active targets for a client, grouped by goal/program
@@ -14,10 +15,10 @@ export async function GET(
   const denied = await requireClientAccessResponse(user.id, clientId, "smartsteps.targets.view");
   if (denied) return denied;
 
-  // BT visibility: restrict assigned-only viewers to In-Treatment (ACQUISITION)
-  // targets. BCBAs/Admins (holding the `.all` scope) see every phase.
-  const restrictToInTreatment = !(await hasAllScope(user.id, "smartsteps.targets.view"));
-  const phaseWhere = restrictToInTreatment ? { phase: "ACQUISITION" as const } : {};
+  // BT visibility: assigned-only viewers see every active phase except
+  // MASTERED. BCBAs/Admins (holding the `.all` scope) see every phase.
+  const restricted = !(await hasAllScope(user.id, "smartsteps.targets.view"));
+  const phaseWhere = restrictedPhaseWhere(restricted);
 
   try {
     // Targets via goal hierarchy

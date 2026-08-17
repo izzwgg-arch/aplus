@@ -113,6 +113,24 @@ were merged into the real profiles directly in the prod DB on 2026-08-13.
 `smart-steps/scripts/mergeDuplicateUsers.mjs` (dry-run by default, `--apply`
 to write) detects and merges duplicate-email users if it ever recurs.
 
+## Tracker BT goal visibility (fixed 2026-08-17)
+
+Assigned-only viewers (BT/RBT, Parent Viewer — anyone WITHOUT the `.all` scope
+on `smartsteps.goals.view` / `smartsteps.targets.view`) used to be filtered to
+`Target.phase === "ACQUISITION"` only. That was a deadlock: every target is
+created with `phase: "NEW"` (`POST /api/targets`, goals-page target form),
+nothing bulk-promotes them, and the NEW -> ACQUISITION promotion only fires
+when a BT logs the first trial — which requires the target to be visible. Net
+effect: a BT assigned to a client whose goals were all still NEW saw an empty
+goals list (reported for client Risi Weiss; 155 of 269 prod targets were NEW).
+
+`smart-steps/src/lib/targetVisibility.ts` is now the single source of truth:
+restricted viewers see NEW / BASELINE / ACQUISITION / MAINTENANCE /
+GENERALIZATION — everything active except `MASTERED`. Used by
+`/api/clients/[clientId]/goals`, `/api/clients/[clientId]/targets`, and
+`/api/targets/[targetId]`. Do not re-add an ACQUISITION-only filter; if
+finished goals need hiding, extend the exclusion list in that one file.
+
 ## Rule 5: Deploy (step 3 of the Rule 0 end-of-task sequence)
 
 ### Smart Steps ABA Tracker (git-based, re-wired 2026-08-13)
