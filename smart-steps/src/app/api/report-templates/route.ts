@@ -245,6 +245,17 @@ const DEFAULT_ABA_SECTIONS: { title: string; content: string }[] = [
       "<p><strong>Clinic / Agency:</strong> A+ Center</p>" +
       "<p>This report is confidential and intended solely for the use of the identified client, their authorized caregivers, and treating providers. Unauthorized disclosure is prohibited.</p>",
   },
+  {
+    title: "Attachment A: Behavior Intervention Plan",
+    content:
+      "<p><strong>TARGET BEHAVIOR #1:</strong> [Behavior name]</p>" +
+      "<p>Operational Definition of Behavior: [Definition]</p>" +
+      "<p>Function of Behavior: [Access to tangible / Escape / Attention / Sensory]</p>" +
+      "<p>Reactive Strategies: [Strategies]</p>" +
+      "<p>Proactive Strategies: [Strategies]</p>" +
+      "<p>Replacement Behaviors to be Taught: [Behaviors]</p>" +
+      "<p>Plan for Generalization Across Settings: parents and caregivers will be trained in following this goal</p>",
+  },
 ];
 
 export async function GET() {

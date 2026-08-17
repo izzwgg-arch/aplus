@@ -131,6 +131,41 @@ GENERALIZATION — everything active except `MASTERED`. Used by
 `/api/targets/[targetId]`. Do not re-add an ACQUISITION-only filter; if
 finished goals need hiding, extend the exclusion list in that one file.
 
+## Tracker assessment reports — classic letterhead layout (2026-08-17)
+
+Report generation follows the approved Smart Steps assessment document (sample:
+Gavriel Schiff-Weiss initial assessment). Key rules, all implemented in
+`smart-steps/src/lib/reportGenerationUtils.ts` (builders) and
+`smart-steps/src/app/(main)/assessments/reports/[id]/printAssessment.ts` (print):
+
+- **First name only** in all narrative prose; the full legal name appears only
+  in the header block / provider-info fact table. `{{client}}`-style tokens in
+  BT-entered goal text also resolve to the first name.
+- **Biopsychosocial** generates from Client Info (age from DOB, address,
+  diagnosis, Intake Notes verbatim, school, ABA history line — initial vs
+  reassessment variant).
+- **Domain paragraphs** (Language & Communication, Social/Emotional, Challenging
+  Behavior, Adaptive Behavior, Executive Functioning) generate from that
+  domain's MASTERED, active, and NEW targets.
+- **Goal tables** generate from BT-entered data: the mastered-goals table keeps
+  the fixed category/skill skeleton (empty on an initial assessment); the
+  skill-acquisition chart is grouped under fixed category headers with
+  "NEW GOALS – To Be Mastered by <service period end>" rows (Start Date =
+  masteryRule.openedDate or TBD, Baseline = target.baseline or "Low", Current
+  level = last-30-day trial % — blank on initial).
+- **Default paragraphs** (Why-ABA boilerplate, Coordination, Team Training,
+  Parent Involvement, Crisis Plan, Transition, Discharge, closing/signature)
+  are fixed text with the first name substituted; `detectSectionType()` maps
+  section titles to builders, so renaming template sections changes behavior.
+- **Print/PDF** renders the classic letterhead on every page (top strip +
+  watermark + gold/navy bottom band from `public/letterhead/`), the underlined
+  fill-in header block on page 1 (values read from the provider-info section's
+  label/value table — keep those labels stable), numbered sections, and
+  row-level table splitting across pages (nothing is clipped).
+- `public/letterhead/smart-steps-top.png` was edited 2026-08-17 to align the
+  envelope icon and email text with the other contact rows (cache-buster
+  `?v=aligned-20260817`).
+
 ## Rule 5: Deploy (step 3 of the Rule 0 end-of-task sequence)
 
 ### Smart Steps ABA Tracker (git-based, re-wired 2026-08-13)

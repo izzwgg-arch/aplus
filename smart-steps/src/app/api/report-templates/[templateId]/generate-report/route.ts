@@ -13,13 +13,19 @@ import {
   buildCurrentGoalsHtml,
   buildParentGoalsHtml,
   buildNewGoalsHtml,
+  buildCoordinationHtml,
+  buildTeamTrainingHtml,
+  buildCrisisPlanHtml,
+  buildTransitionPlanHtml,
+  buildDischargeCriteriaHtml,
+  buildServiceRecommendationsHtml,
+  buildScheduleHtml,
+  buildSummaryContactHtml,
+  buildBehaviorPlanHtml,
   computeAge,
-  computeCurrentLevel,
-  computeProgressPct,
   type ReportClient,
   type ReportBcba,
   type ServicePeriod,
-  type AssessmentType,
   type TrialStats,
 } from "@/lib/reportGenerationUtils";
 
@@ -214,40 +220,57 @@ export async function POST(
   const servicePeriod: ServicePeriod = { start: servicePeriodStart, end: servicePeriodEnd };
 
   // ── Build section content (REPLACE behavior — Option B1) ──────────────────
-  const reportSections = template.sections.map((s) => {
-    const sectionType = detectSectionType(s.title);
-    let generatedHtml: string | null = null;
+  const buildSectionContent = (title: string): string | null => {
+    const sectionType = detectSectionType(title);
 
     switch (sectionType.kind) {
       case "provider_info":
-        generatedHtml = buildProviderInfoHtml(reportClient, provider, servicePeriod, generationDate);
-        break;
+        return buildProviderInfoHtml(reportClient, provider, servicePeriod, generationDate);
       case "biopsychosocial":
-        generatedHtml = buildBiopsychosocialHtml(reportClient, generationDate);
-        break;
+        return buildBiopsychosocialHtml(reportClient, generationDate, assessmentType);
       case "why_aba":
-        generatedHtml = buildWhyAbaHtml(reportClient, generationDate);
-        break;
+        return buildWhyAbaHtml(reportClient, generationDate);
       case "category_goals":
-        generatedHtml = buildCategoryGoalsHtml(
+        return buildCategoryGoalsHtml(
           programs, parentGoals, sectionType.keywords,
-          generationDate, trialStats, assessmentType, client.name,
+          generationDate, trialStats, assessmentType, client.name, sectionType.label,
         );
-        break;
       case "mastered_goals":
-        generatedHtml = buildMasteredGoalsHtml(parentGoals, programs, generationDate, assessmentType);
-        break;
+        return buildMasteredGoalsHtml(parentGoals, programs, generationDate, assessmentType, client.name);
       case "current_goals":
-        generatedHtml = buildCurrentGoalsHtml(parentGoals, programs, generationDate, trialStats, assessmentType);
-        break;
+        return buildCurrentGoalsHtml(
+          parentGoals, programs, generationDate, trialStats,
+          assessmentType, client.name, servicePeriodEnd,
+        );
       case "parent_goals":
-        generatedHtml = buildParentGoalsHtml(parentGoals, programs, generationDate, trialStats);
-        break;
+        return buildParentGoalsHtml(parentGoals, programs, generationDate, trialStats, client.name);
       case "new_goals":
-        generatedHtml = buildNewGoalsHtml(parentGoals, programs, generationDate);
-        break;
-      // passthrough: placeholder substitution only
+        return buildNewGoalsHtml(parentGoals, programs, generationDate, client.name);
+      case "coordination":
+        return buildCoordinationHtml(client.name);
+      case "team_training":
+        return buildTeamTrainingHtml(client.name);
+      case "crisis_plan":
+        return buildCrisisPlanHtml(client.name);
+      case "transition_plan":
+        return buildTransitionPlanHtml(client.name);
+      case "discharge_criteria":
+        return buildDischargeCriteriaHtml(client.name);
+      case "service_recommendations":
+        return buildServiceRecommendationsHtml();
+      case "schedule":
+        return buildScheduleHtml(servicePeriodStart);
+      case "summary_contact":
+        return buildSummaryContactHtml(provider, generationDate);
+      case "behavior_plan":
+        return buildBehaviorPlanHtml(parentGoals, programs, client.name);
+      default:
+        return null; // passthrough
     }
+  };
+
+  const reportSections = template.sections.map((s) => {
+    const generatedHtml = buildSectionContent(s.title);
 
     let finalContent: string;
     if (generatedHtml !== null) {
@@ -263,6 +286,20 @@ export async function POST(
 
     return { title: s.title, order: s.order, content: finalContent };
   });
+
+  // ── Ensure standard sections missing from older templates are appended ─────
+  const detectedKinds = new Set(template.sections.map((s) => detectSectionType(s.title).kind));
+  const STANDARD_APPEND: { title: string; kind: ReturnType<typeof detectSectionType>["kind"] }[] = [
+    { title: "Attachment A: Behavior Intervention Plan", kind: "behavior_plan" },
+  ];
+  let nextOrder = reportSections.length;
+  for (const std of STANDARD_APPEND) {
+    if (detectedKinds.has(std.kind)) continue;
+    const html = buildSectionContent(std.title);
+    if (html !== null) {
+      reportSections.push({ title: std.title, order: nextOrder++, content: sanitizeHtml(html) });
+    }
+  }
 
   const report = await prisma.clientReport.create({
     data: {
