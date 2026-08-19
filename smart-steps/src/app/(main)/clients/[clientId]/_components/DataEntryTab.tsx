@@ -451,6 +451,14 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
   const [sessionId, setSessionId]               = useState<string | null>(null);
   const [localSessionId, setLocalSessionId]     = useState<string | null>(null);
 
+  /* ── The setup this session was actually started with ──
+   * The date / time in / time out / provider the user TYPED. Everything that
+   * later writes the session (the end-of-session PATCH, the offline retry POST,
+   * the Dexie queue) reads from here, so an entered service time is never
+   * overwritten with the current clock. A ref, not state, because it must be
+   * readable from callbacks without re-creating them. */
+  const activeSetupRef = useRef<SessionSetup | null>(null);
+
   /* ── Recording mode ── */
   const [mode, setMode]           = useState<RecordingMode>("DTT");
   const [trials, setTrials]       = useState<TrialEntry[]>([]);
@@ -682,6 +690,9 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
       setLocalSessionId(lid);
       setSessionId(result.existing.serverId ?? lid);
       setStartedAtMs(result.existing.startedAt);
+      // A resumed session keeps its original start; it has no entered time out
+      // (the user never got to the end-of-session step).
+      activeSetupRef.current = { startedAt: new Date(result.existing.startedAt).toISOString() };
       const restored: TrialEntry[] = result.existing.trials.map((t) => ({
         id: t.id, targetId: t.targetId, targetTitle: t.targetTitle,
         result: t.result, at: t.recordedAt,
@@ -696,6 +707,7 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
 
     // result.kind === "started" — brand new local session (or explicit force-discard-and-start)
     const lid = result.localId;
+    activeSetupRef.current = setup ?? null;
     setLocalSessionId(lid);
     setTrials([]);
     setAbcEntries([]);
@@ -726,12 +738,12 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
         // recorded against `lid` below would reference a session id that
         // never exists server-side and could never sync, no matter how
         // many times it's retried (see queueSession() for full context).
-        queueSession({ localId: lid, clientId, startedAt: new Date(setup?.startedAt ?? Date.now()).toISOString(), mode: setup?.mode ?? "DTT" }).catch(() => {});
+        queueSession({ localId: lid, clientId, startedAt: new Date(setup?.startedAt ?? Date.now()).toISOString(), endedAt: setup?.endedAt, providerId: setup?.providerId, mode: setup?.mode ?? "DTT" }).catch(() => {});
         toast.info("Working offline — data saved locally", { duration: 3000 });
       }
     } catch {
       setSessionId(lid);
-      queueSession({ localId: lid, clientId, startedAt: new Date(setup?.startedAt ?? Date.now()).toISOString(), mode: setup?.mode ?? "DTT" }).catch(() => {});
+      queueSession({ localId: lid, clientId, startedAt: new Date(setup?.startedAt ?? Date.now()).toISOString(), endedAt: setup?.endedAt, providerId: setup?.providerId, mode: setup?.mode ?? "DTT" }).catch(() => {});
       toast.info("Offline mode — data saved locally", { duration: 3000 });
     }
   }, [clientId, storeSetServerId]);
@@ -803,7 +815,14 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
     if (!sid || isSaving) return;
     setIsSaving(true);
 
-    const endedAt = new Date().toISOString();
+    // Honour the Time Out the user entered on the setup form. Only when none was
+    // entered do we stamp the end ourselves — and then it is anchored to the
+    // entered start plus the measured elapsed time, NOT the current clock. For a
+    // backdated session the clock would put the end days after the start and
+    // report an absurd duration.
+    const setup = activeSetupRef.current;
+    const endedAt = setup?.endedAt
+      ?? new Date((startedAtMs ?? Date.now()) + Math.max(elapsedSec, 0) * 1000).toISOString();
 
     try {
       // If we're still on a local-fallback session ID (server was unreachable
@@ -820,7 +839,16 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
           const retryRes = await fetch("/smart-steps/api/sessions", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ clientId }),
+            body: JSON.stringify({
+              clientId,
+              // Recreate it with what the user entered — a bare { clientId }
+              // would default startedAt to now and silently lose the service
+              // date of a backdated session.
+              ...(setup?.startedAt  ? { startedAt:  setup.startedAt  } : startedAtMs ? { startedAt: new Date(startedAtMs).toISOString() } : {}),
+              ...(setup?.providerId ? { providerId: setup.providerId } : {}),
+              ...(setup?.mode       ? { mode:       setup.mode       } : {}),
+              endedAt,
+            }),
           });
           const retryData = await retryRes.json().catch(() => ({}));
           if (retryData?.id && !String(retryData.id).startsWith("mock-")) {
@@ -828,13 +856,13 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
             setSessionId(retryData.id);
             if (localSessionId) storeSetServerId(localSessionId, retryData.id);
           } else {
-            queueSession({ localId: localSid, clientId, startedAt: new Date(startedAtMs ?? Date.now()).toISOString() }).catch(() => {});
+            queueSession({ localId: localSid, clientId, startedAt: new Date(startedAtMs ?? Date.now()).toISOString(), endedAt, providerId: setup?.providerId, mode: setup?.mode }).catch(() => {});
           }
         } catch {
           // Offline — queue the session itself so it (and anything
           // referencing it) can be created/resolved on the next successful
           // sync instead of being lost.
-          queueSession({ localId: localSid, clientId, startedAt: new Date(startedAtMs ?? Date.now()).toISOString() }).catch(() => {});
+          queueSession({ localId: localSid, clientId, startedAt: new Date(startedAtMs ?? Date.now()).toISOString(), endedAt, providerId: setup?.providerId, mode: setup?.mode }).catch(() => {});
         }
       }
 
@@ -963,6 +991,7 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
     setFilterSkillId(null);
     setIntervalCount(0);
     setIsIntervalRunning(false);
+    activeSetupRef.current = null;
     // Reset setup form defaults for next session
     const nowDate = new Date();
     setSetupForm({
@@ -1011,6 +1040,12 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
       const endedAt = setupForm.timeOut
         ? `${setupForm.sessionDate}T${setupForm.timeOut}:00`
         : undefined;
+      // These times are saved verbatim, so reject a range that would store a
+      // negative duration rather than persisting it and showing "—" later.
+      if (endedAt && new Date(endedAt).getTime() <= new Date(startedAt).getTime()) {
+        toast.error("Time Out must be after Time In.");
+        return;
+      }
       await startSession({
         startedAt: new Date(startedAt).toISOString(),
         endedAt: endedAt ? new Date(endedAt).toISOString() : undefined,

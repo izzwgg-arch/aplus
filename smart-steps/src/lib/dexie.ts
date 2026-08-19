@@ -85,6 +85,10 @@ export async function queueSession(payload: {
   localId: string;
   clientId: string;
   startedAt: string;
+  /** The Time Out the user entered, when they entered one. */
+  endedAt?: string;
+  /** The provider the user picked on the setup form. */
+  providerId?: string;
   mode?: string;
 }) {
   await db.syncQueue.add({

@@ -102,8 +102,11 @@ export async function POST(req: Request) {
             const created = await prisma.session.create({
               data: {
                 clientId: p.clientId as string,
-                userId: user.id,
+                // The provider the user picked on the setup form, not whoever
+                // happens to be running the sync.
+                userId: (p.providerId as string | undefined) || user.id,
                 startedAt: new Date(p.startedAt as string),
+                ...(p.endedAt ? { endedAt: new Date(p.endedAt as string) } : {}),
                 mode: (p.mode as string | undefined) || "DTT",
               },
             });

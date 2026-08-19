@@ -234,6 +234,38 @@ note PDF (`printNotes.ts`), the client Schedule tab, and the parent portal.
 Add new duration displays through this module rather than dividing by 60000
 inline.
 
+## Tracker session timing saves what was ENTERED (fixed 2026-08-19)
+
+The New Session Setup form collects Session Date, Time In, Time Out and
+Provider, and `POST /api/sessions` stored them correctly — but **End Session
+then overwrote the end with `new Date()`**, the current clock. On a backdated
+session that put the end days after the start; on a same-day session it
+discarded the Time Out the user had typed. Both entry points had the bug:
+`DataEntryTab.endSession()` and `session/new/page.tsx`'s save mutation.
+
+The fix, in both files:
+
+- The setup the session was started with is kept in `activeSetupRef` (a ref, so
+  callbacks read it without being re-created). Every later write — the
+  end-of-session PATCH, the offline retry POST, the Dexie queue — reads its
+  timing from there.
+- End time = the entered Time Out. Only when none was entered is it stamped as
+  `startedAt + measured elapsed`, **never** `Date.now()`, so an unfinished
+  backdated session still ends on its own service date.
+- The offline retry `POST /api/sessions` used to send a bare `{ clientId }`,
+  which defaulted `startedAt` to now and silently lost the service date of a
+  backdated session. It now resends the entered start/end/mode/provider.
+- `queueSession()` (`src/lib/dexie.ts`) carries `endedAt` and `providerId`, and
+  `/api/sync` persists them — an offline session used to sync back with no end
+  time and the syncing user as provider.
+- Both setup forms now reject a Time Out at or before Time In, since the values
+  are stored verbatim and a negative span renders as "—".
+
+The ad-hoc single-trial log in `TargetDetailPanel` has no date field and is
+correctly stamped "now" — left alone. Trial-level reporting already keys off
+`session.startedAt`, not `trial.createdAt`, so backdated trials land on the
+right date in graphs.
+
 ## Rule 5: Deploy (step 3 of the Rule 0 end-of-task sequence)
 
 ### Smart Steps ABA Tracker (git-based, re-wired 2026-08-13)

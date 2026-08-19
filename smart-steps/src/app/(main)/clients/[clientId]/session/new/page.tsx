@@ -148,6 +148,10 @@ export default function SessionNewPage() {
   /* session state */
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [startedAt, setStartedAt] = useState<number | null>(null); // epoch ms
+  /* The date / time in / time out / provider the user TYPED on the setup form.
+   * The save path reads the end time from here so an entered Time Out is never
+   * overwritten with the current clock. */
+  const activeSetupRef = useRef<{ startedAt?: string; endedAt?: string; providerId?: string } | null>(null);
   const [elapsedSec, setElapsedSec] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const pausedAccumulatedRef = useRef(0);
@@ -257,6 +261,8 @@ export default function SessionNewPage() {
       setStoreLocalSessionId(existing.localId);
       setSessionId(existing.serverId ?? existing.localId);
       setStartedAt(existing.startedAt);
+      // A resumed session keeps its original start and has no entered time out.
+      activeSetupRef.current = { startedAt: new Date(existing.startedAt).toISOString() };
       const restoredTrials: TrialEntry[] = existing.trials.map((t) => ({
         targetId: t.targetId,
         targetLabel: t.targetTitle,
@@ -274,6 +280,7 @@ export default function SessionNewPage() {
 
     // result.kind === "started" — brand new local session
     const localSessionId = result.localId;
+    activeSetupRef.current = setup ?? null;
     setStoreLocalSessionId(localSessionId);
 
     try {
@@ -301,6 +308,8 @@ export default function SessionNewPage() {
           localId: localSessionId,
           clientId,
           startedAt: setup?.startedAt ?? new Date().toISOString(),
+          endedAt: setup?.endedAt,
+          providerId: setup?.providerId,
         }).catch(() => {});
         toast.info("Working offline — session saved locally", { duration: 3000 });
       }
@@ -310,6 +319,8 @@ export default function SessionNewPage() {
         localId: localSessionId,
         clientId,
         startedAt: setup?.startedAt ?? new Date().toISOString(),
+        endedAt: setup?.endedAt,
+        providerId: setup?.providerId,
       }).catch(() => {});
       toast.info("Offline mode — trials saved locally", { duration: 3000 });
     }
@@ -317,9 +328,16 @@ export default function SessionNewPage() {
   }, [clientId, storeSetServerId]);
 
   const startSetupSession = useCallback(() => {
+    const startedAt = setupForm.timeIn ? new Date(`${setupForm.sessionDate}T${setupForm.timeIn}:00`).toISOString() : undefined;
+    const endedAt = setupForm.timeOut ? new Date(`${setupForm.sessionDate}T${setupForm.timeOut}:00`).toISOString() : undefined;
+    // Saved verbatim, so reject a range that would store a negative duration.
+    if (startedAt && endedAt && new Date(endedAt).getTime() <= new Date(startedAt).getTime()) {
+      toast.error("Time Out must be after Time In.");
+      return;
+    }
     void createSession({
-      startedAt: setupForm.timeIn ? new Date(`${setupForm.sessionDate}T${setupForm.timeIn}:00`).toISOString() : undefined,
-      endedAt: setupForm.timeOut ? new Date(`${setupForm.sessionDate}T${setupForm.timeOut}:00`).toISOString() : undefined,
+      startedAt,
+      endedAt,
       providerId: setupForm.providerId || undefined,
     });
   }, [createSession, setupForm]);
@@ -463,8 +481,13 @@ export default function SessionNewPage() {
     mutationFn: async () => {
       if (!sessionId) throw new Error("No session ID");
 
-      // Always mark session as ended
-      const endedAt = new Date().toISOString();
+      // Mark the session ended with the Time Out the user entered. Only when
+      // none was entered do we stamp it ourselves, anchored to the entered start
+      // plus measured elapsed time — never the current clock, which on a
+      // backdated session would place the end days after the start.
+      const setup = activeSetupRef.current;
+      const endedAt = setup?.endedAt
+        ?? new Date((startedAt ?? Date.now()) + Math.max(elapsedSec, 0) * 1000).toISOString();
       const patchPromise = fetch(`/smart-steps/api/sessions/${sessionId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
