@@ -212,6 +212,28 @@ SessionNotesTab).
   "Delete Goal"; that menu item is now gated on `smartsteps.targets.delete`.
 - Notes already had delete inside `NoteEditorModal` — unchanged.
 
+## Tracker durations are shown in HOURS (2026-08-19)
+
+`smart-steps/src/lib/formatDuration.ts` is the single source of truth for how
+long a session or note ran. Clinical staff read and bill service time in hours,
+so nothing in the Tracker prints a raw minute count any more.
+
+- `formatMinutesAsHours(150)` → `"2.5 hrs"`; trailing zeros are trimmed
+  (`120` → `"2 hrs"`) and 60 minutes is singular (`"1 hr"`).
+- `formatSessionHours(startedAt, endedAt)` returns null — so callers render
+  nothing or an em dash — when there is no end time, the span is negative, or it
+  exceeds `MAX_PLAUSIBLE_SESSION_MINUTES` (8 h). A session left open overnight
+  must never read as billable service time.
+- `formatClockRangeHours(timeIn, timeOut)` works off the `"HH:MM"` strings a
+  Note stores, and treats a time-out before time-in as crossing midnight.
+
+Call sites: SessionsTab cards, SessionSnapshotDrawer, DataEntryTab session
+history, SessionNotesTab note cards (the time range now renders for BT notes
+too, not only BCBA notes — it was already stored, just hidden), the printed
+note PDF (`printNotes.ts`), the client Schedule tab, and the parent portal.
+Add new duration displays through this module rather than dividing by 60000
+inline.
+
 ## Rule 5: Deploy (step 3 of the Rule 0 end-of-task sequence)
 
 ### Smart Steps ABA Tracker (git-based, re-wired 2026-08-13)

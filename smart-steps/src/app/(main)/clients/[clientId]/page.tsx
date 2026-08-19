@@ -24,6 +24,7 @@ import { SessionSnapshotDrawer } from "./_components/SessionSnapshotDrawer";
 import { SessionNotesTab } from "./_components/SessionNotesTab";
 import { SessionsTab } from "./_components/SessionsTab";
 import { usePermissions } from "@/hooks/usePermissions";
+import { formatMinutesAsHours } from "@/lib/formatDuration";
 
 /* ── Types ── */
 
@@ -163,7 +164,7 @@ function ApptCard({ appt }: { appt: ScheduleAppointmentData }) {
           <span>
             {start.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
             {end && ` – ${end.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`}
-            {!end && appt.durationMinutes && ` (${appt.durationMinutes} min)`}
+            {!end && appt.durationMinutes && ` (${formatMinutesAsHours(appt.durationMinutes)})`}
           </span>
           {appt.providerName && <span>Provider: {appt.providerName}</span>}
           {appt.serviceName && <span>{appt.serviceName}</span>}

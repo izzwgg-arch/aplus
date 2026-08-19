@@ -1,4 +1,5 @@
 import { escapeHtml } from "@/lib/sanitizeHtml";
+import { formatClockRangeHours } from "@/lib/formatDuration";
 
 /**
  * Client-side session-note → PDF export.
@@ -72,7 +73,10 @@ function noteHtml(note: PrintableNote, index: number): string {
   const typeLabel = TYPE_LABEL[note.type] ?? "Note";
   const provider = note.providerName ?? note.user?.name ?? "—";
   const credentials = note.user?.credentials ? `, ${note.user.credentials}` : "";
-  const timeRange = note.timeIn ? `${note.timeIn}${note.timeOut ? ` – ${note.timeOut}` : ""}` : "";
+  const noteHours = formatClockRangeHours(note.timeIn, note.timeOut);
+  const timeRange = note.timeIn
+    ? `${note.timeIn}${note.timeOut ? ` – ${note.timeOut}` : ""}${noteHours ? ` (${noteHours})` : ""}`
+    : "";
 
   return `
   <article class="note-page" ${index > 0 ? 'style="page-break-before: always;"' : ""}>

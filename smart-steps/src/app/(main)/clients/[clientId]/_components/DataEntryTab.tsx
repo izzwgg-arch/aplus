@@ -34,6 +34,7 @@ import {
   type ActiveSession,
   type LocalTarget,
 } from "@/store/abaStore";
+import { formatSessionHours } from "@/lib/formatDuration";
 import { SessionSnapshotDrawer } from "./SessionSnapshotDrawer";
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
@@ -1268,7 +1269,7 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
             <div className="space-y-2">
               {pastSessions.map((s) => {
                 const start    = new Date(s.startedAt);
-                const durMin   = s.endedAt ? Math.round((new Date(s.endedAt).getTime() - start.getTime()) / 60000) : null;
+                const duration = formatSessionHours(s.startedAt, s.endedAt);
                 return (
                   <button key={s.id} type="button" onClick={() => setSelectedSessionId(s.id)} className="glass-card w-full rounded-2xl p-4 flex items-center gap-4 text-left hover:border-[var(--accent-cyan)]/40 transition-colors">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-cyan)]/10">
@@ -1280,7 +1281,7 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
                       </p>
                       <p className="text-xs text-zinc-500">
                         {start.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
-                        {durMin !== null && ` · ${durMin} min`}
+                        {duration && ` · ${duration}`}
                         {` · ${s.trialCount} trial${s.trialCount !== 1 ? "s" : ""}`}
                         {s.therapistName && ` · ${s.therapistName}`}
                       </p>

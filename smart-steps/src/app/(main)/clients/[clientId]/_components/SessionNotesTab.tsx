@@ -11,6 +11,7 @@ import {
 import { toast } from "sonner";
 import { NoteEditorModal, type NoteRecord } from "./NoteEditorModal";
 import { printSessionNotes, type PrintableNote } from "@/lib/printNotes";
+import { formatClockRangeHours } from "@/lib/formatDuration";
 
 /* ── Types ───────────────────────────────────────────────────────────────── */
 
@@ -46,6 +47,11 @@ const BCBA_BADGE: Record<string, string> = {
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+/** Note length in hours from its time in / time out, or null when not derivable. */
+function noteHours(note: NoteRecord): string | null {
+  return formatClockRangeHours(note.timeIn, note.timeOut);
 }
 
 function contentPreview(content: string, maxLen = 120): string {
@@ -423,8 +429,11 @@ export function SessionNotesTab({ clientId, clientName = "Client", userName = ""
                         {note.providerName ?? note.user?.name}
                       </span>
                     )}
-                    {note.type === "BCBA" && note.timeIn && (
-                      <span>{note.timeIn}{note.timeOut ? ` – ${note.timeOut}` : ""}</span>
+                    {note.timeIn && (
+                      <span>
+                        {note.timeIn}{note.timeOut ? ` – ${note.timeOut}` : ""}
+                        {noteHours(note) && ` · ${noteHours(note)}`}
+                      </span>
                     )}
                     {note.attendance && (
                       <span className={note.attendance === "Present" ? "text-emerald-400" : "text-zinc-500"}>

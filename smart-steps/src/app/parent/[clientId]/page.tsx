@@ -8,6 +8,7 @@ import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from "recharts";
 import { TrendingUp, Activity, Calendar, Lock, ShieldAlert } from "lucide-react";
+import { formatMinutesAsHours } from "@/lib/formatDuration";
 
 type ClientDetail = {
   id: string;
@@ -194,7 +195,7 @@ function ParentPortalInner() {
                       </div>
                       {s.duration !== null && (
                         <span className="shrink-0 rounded-full bg-[var(--glass-bg)] px-2.5 py-1 text-xs text-zinc-400">
-                          {s.duration} min
+                          {formatMinutesAsHours(s.duration)}
                         </span>
                       )}
                     </div>

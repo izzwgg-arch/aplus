@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { usePermissions } from "@/hooks/usePermissions";
+import { formatSessionHours } from "@/lib/formatDuration";
 
 /* ── Types ───────────────────────────────────────────────────────────────── */
 
@@ -58,12 +59,12 @@ function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 }
 
-/** "9:00 AM – 11:30 AM · 150 min", or just the start time when still open. */
+/** "9:00 AM – 11:30 AM · 2.5 hrs", or just the start time when still open. */
 function formatTimeRange(startedAt: string, endedAt?: string | null): string {
   const start = formatTime(startedAt);
   if (!endedAt) return `${start} – in progress`;
-  const minutes = Math.round((new Date(endedAt).getTime() - new Date(startedAt).getTime()) / 60000);
-  return `${start} – ${formatTime(endedAt)} · ${minutes} min`;
+  const hours = formatSessionHours(startedAt, endedAt);
+  return `${start} – ${formatTime(endedAt)}${hours ? ` · ${hours}` : ""}`;
 }
 
 /* ── Component ───────────────────────────────────────────────────────────── */

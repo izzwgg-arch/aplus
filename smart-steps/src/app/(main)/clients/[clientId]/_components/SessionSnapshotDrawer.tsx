@@ -9,6 +9,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { usePermissions } from "@/hooks/usePermissions";
+import { formatSessionHours } from "@/lib/formatDuration";
 
 /* ─── Types ────────────────────────────────────────────────────────────────── */
 
@@ -194,22 +195,13 @@ function TrialEditModal({
 /* ─── Duration formatting ──────────────────────────────────────────────────── */
 
 /**
- * Human-readable session duration. Guards against implausible values (e.g. a
- * session left open, or a bad end timestamp) so the UI never shows a runaway
- * minute count like "22,458 minutes".
+ * Human-readable session duration, in hours. `formatSessionHours` guards against
+ * implausible values (a session left open, a bad end timestamp) so the UI never
+ * shows a runaway figure like "374 hrs".
  */
 function formatSessionDuration(startedAt: string, endedAt: string | null): string {
   if (!endedAt) return "In progress";
-  const ms = new Date(endedAt).getTime() - new Date(startedAt).getTime();
-  if (!Number.isFinite(ms) || ms <= 0) return "—";
-  const minutes = Math.round(ms / 60000);
-  // A single clinical session realistically caps out around 8 hours; anything
-  // beyond that indicates bad data, so we avoid displaying a misleading number.
-  if (minutes > 8 * 60) return "—";
-  if (minutes < 60) return `${Math.max(1, minutes)} min`;
-  const hours = Math.floor(minutes / 60);
-  const rem   = minutes % 60;
-  return rem === 0 ? `${hours} hr` : `${hours} hr ${rem} min`;
+  return formatSessionHours(startedAt, endedAt) ?? "—";
 }
 
 /* ─── Session edit helpers ─────────────────────────────────────────────────── */
