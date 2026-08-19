@@ -47,9 +47,11 @@ export async function GET(req: Request) {
       const trialData = clientId
         ? await prisma.trial.findMany({
             where: {
+              deletedAt: null,
               session: {
                 clientId,
                 startedAt: { gte: startDate, lte: endDate },
+                deletedAt: null,
               },
             },
             include: {
@@ -95,7 +97,7 @@ export async function GET(req: Request) {
     if (type === "behaviors") {
       const behaviors = clientId
         ? await prisma.behaviorEvent.findMany({
-            where: { session: { clientId, startedAt: { gte: startDate, lte: endDate } } },
+            where: { session: { clientId, startedAt: { gte: startDate, lte: endDate }, deletedAt: null } },
             include: { session: { select: { startedAt: true, client: { select: { name: true } } } } },
             orderBy: { createdAt: "desc" },
             take: 200,

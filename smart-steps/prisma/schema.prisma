@@ -301,6 +301,7 @@ model Session {
   endedAt            DateTime?
   notes              String?
   voiceNotes         String?
+  deletedAt          DateTime?
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
   client             Client              @relation(fields: [clientId], references: [id], onDelete: Cascade)
@@ -309,6 +310,9 @@ model Session {
   behaviors          BehaviorEvent[]
   intervalRecordings IntervalRecording[]
   sessionNotes       Note[]
+
+  @@index([clientId, startedAt])
+  @@index([deletedAt])
 }
 
 model Trial {

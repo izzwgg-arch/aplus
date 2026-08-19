@@ -24,9 +24,10 @@ export async function GET(
         },
         programs: { include: { targets: true } },
         sessions: {
+          where: { deletedAt: null },
           take: 20,
           orderBy: { startedAt: "desc" },
-          include: { trials: true },
+          include: { trials: { where: { deletedAt: null } } },
         },
       },
     });

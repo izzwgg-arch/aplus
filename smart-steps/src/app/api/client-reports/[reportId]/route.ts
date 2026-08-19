@@ -52,6 +52,16 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ repo
   if (denied) return denied;
   const { reportId } = await params;
 
+  // Same client-scope check GET applies — the delete permission alone must not
+  // reach a report belonging to a client this user cannot see.
+  const report = await prisma.clientReport.findUnique({
+    where: { id: reportId },
+    select: { clientId: true },
+  });
+  if (!report) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const allowed = await canForClient(user.id, report.clientId, "smartsteps.reports.view");
+  if (!allowed) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
   await prisma.clientReport.delete({ where: { id: reportId } });
   return new NextResponse(null, { status: 204 });
 }

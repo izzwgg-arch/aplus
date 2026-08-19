@@ -16,7 +16,7 @@ export async function GET() {
 
     // Sessions today (all therapists)
     const sessionsToday = await prisma.session.count({
-      where: { startedAt: { gte: today } },
+      where: { startedAt: { gte: today }, deletedAt: null },
     });
 
     // Total active clients
@@ -37,13 +37,13 @@ export async function GET() {
 
     // Recent sessions (last 5)
     const recentSessions = await prisma.session.findMany({
-      where: {},
+      where: { deletedAt: null },
       take: 5,
       orderBy: { startedAt: "desc" },
       include: {
         client: { select: { id: true, name: true } },
         user: { select: { name: true } },
-        _count: { select: { trials: true } },
+        _count: { select: { trials: { where: { deletedAt: null } } } },
       },
     });
 

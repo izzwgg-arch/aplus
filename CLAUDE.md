@@ -166,6 +166,52 @@ Gavriel Schiff-Weiss initial assessment). Key rules, all implemented in
   envelope icon and email text with the other contact rows (cache-buster
   `?v=aligned-20260817`).
 
+## Tracker sessions — soft delete, filters, at-a-glance cards (2026-08-19)
+
+The client Sessions tab lives in
+`smart-steps/src/app/(main)/clients/[clientId]/_components/SessionsTab.tsx`
+(extracted out of the client page, alongside DataEntryTab / ProgramsTab /
+SessionNotesTab).
+
+- **Session cards show date, time and provider without opening the session**:
+  service date + session type badge, `time in – time out · N min` (or
+  "in progress"), then provider name + role and the trial count, with the
+  %-correct badge on the right.
+- **Filters are SERVER-side** (`GET /api/sessions` accepts `from`, `to`,
+  `providerId`, `mode`, `withData=1`). The list is paginated — filtering only
+  the loaded pages would silently hide older matches. The filter values are
+  part of the React Query key, so changing one refetches from offset 0.
+- **Delete is a soft delete.** `DELETE /api/sessions/[sessionId]` requires
+  `smartsteps.sessions.delete` plus client access, and stamps `deletedAt` on
+  `Session` AND on each of its trials (migration
+  `20260819000000_session_soft_delete`). Stamping the trials is what makes the
+  delete propagate for free: every analytics/report query already filters
+  `deletedAt: null` on trials. Session-level `deletedAt: null` filters were
+  added to `GET /api/sessions`, `GET/PATCH /api/sessions/[sessionId]`,
+  `generate-note`, `GET /api/clients/[clientId]` (overview stats + chart),
+  `/api/dashboard/stats` and `/api/reports`. Nothing is destroyed — an admin
+  can clear `deletedAt` in the DB to restore a session.
+- Delete is offered both on the session card and in the Session Snapshot
+  drawer, and is permission-gated in the UI so a BT never sees a button the
+  API would refuse.
+
+## Tracker delete affordances elsewhere (2026-08-19)
+
+- **Assessments**: `DELETE /api/clients/[clientId]/assessments/[assessmentId]`
+  (hard delete; responses cascade) — `smartsteps.assessments.delete` + client
+  access, and the URL's `clientId` must match the row. Surfaced on
+  `/clients/[clientId]/assessments`.
+- **Clinical reports**: the existing `DELETE /api/client-reports/[reportId]`
+  gained the `canForClient` scope check GET already had, and is surfaced on the
+  same page (`smartsteps.reports.delete`).
+- **Goal hierarchy** (ProgramsTab): categories (DB `Program`) and skill areas
+  (DB `ParentGoal`) can now be deleted; deleting a category archives its skill
+  areas too, otherwise they survive server-side pointing at an archived parent
+  and read as data loss. Both list endpoints already exclude archived rows, so
+  the delete sticks across reloads. Individual goals (DB `Target`) already had
+  "Delete Goal"; that menu item is now gated on `smartsteps.targets.delete`.
+- Notes already had delete inside `NoteEditorModal` — unchanged.
+
 ## Rule 5: Deploy (step 3 of the Rule 0 end-of-task sequence)
 
 ### Smart Steps ABA Tracker (git-based, re-wired 2026-08-13)

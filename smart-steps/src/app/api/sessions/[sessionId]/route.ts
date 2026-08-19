@@ -23,9 +23,9 @@ export async function PATCH(
   // ".assigned"-scoped; ".all" holders like BCBA/Admin pass through).
   const existing = await prisma.session.findUnique({
     where: { id: sessionId },
-    select: { clientId: true },
+    select: { clientId: true, deletedAt: true },
   });
-  if (!existing) return NextResponse.json({ error: "Session not found" }, { status: 404 });
+  if (!existing || existing.deletedAt) return NextResponse.json({ error: "Session not found" }, { status: 404 });
   const accessDenied = await requireClientAccessResponse(user.id, existing.clientId, "smartsteps.sessions.view");
   if (accessDenied) return accessDenied;
 
@@ -101,7 +101,7 @@ export async function GET(
       },
     });
 
-    if (!s) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    if (!s || s.deletedAt) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     const grouped = new Map<string, {
       targetId: string;
@@ -230,5 +230,53 @@ export async function GET(
     });
   } catch (e) {
     return NextResponse.json({ error: "Failed" }, { status: 500 });
+  }
+}
+
+/**
+ * Soft-delete a session that is not needed (accidental start, duplicate, empty
+ * entry). The row is kept — `deletedAt` is stamped on the session AND on each of
+ * its trials, so every list, graph, report, and analytics query that already
+ * filters `deletedAt: null` excludes it automatically. Nothing is destroyed, so
+ * an admin can un-stamp the rows in the DB if a delete was a mistake.
+ */
+export async function DELETE(
+  _req: Request,
+  { params }: { params: Promise<{ sessionId: string }> }
+) {
+  const user = await requireSession();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const denied = await requirePermissionResponse(user.id, "smartsteps.sessions.delete");
+  if (denied) return denied;
+
+  const { sessionId } = await params;
+
+  // Offline/local ids were never persisted — nothing to delete server-side.
+  if (sessionId.startsWith("local-")) {
+    return NextResponse.json({ ok: true, offline: true });
+  }
+
+  const existing = await prisma.session.findUnique({
+    where: { id: sessionId },
+    select: { clientId: true, deletedAt: true },
+  });
+  if (!existing) return NextResponse.json({ error: "Session not found" }, { status: 404 });
+  const accessDenied = await requireClientAccessResponse(user.id, existing.clientId, "smartsteps.sessions.view");
+  if (accessDenied) return accessDenied;
+  if (existing.deletedAt) return NextResponse.json({ ok: true, alreadyDeleted: true });
+
+  try {
+    const now = new Date();
+    const [, trials] = await prisma.$transaction([
+      prisma.session.update({ where: { id: sessionId }, data: { deletedAt: now } }),
+      prisma.trial.updateMany({
+        where: { sessionId, deletedAt: null },
+        data: { deletedAt: now },
+      }),
+    ]);
+    return NextResponse.json({ ok: true, trialsRemoved: trials.count });
+  } catch (e) {
+    console.error("DELETE /sessions/[sessionId] error:", e);
+    return NextResponse.json({ error: "Failed to delete session" }, { status: 500 });
   }
 }

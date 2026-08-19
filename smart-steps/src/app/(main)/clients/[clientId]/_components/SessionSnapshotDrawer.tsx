@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { usePermissions } from "@/hooks/usePermissions";
 
 /* ─── Types ────────────────────────────────────────────────────────────────── */
 
@@ -253,7 +254,10 @@ export function SessionSnapshotDrawer({
   onNoteGenerated?: () => void;
 }) {
   const qc = useQueryClient();
+  const { can } = usePermissions();
+  const canDeleteSession = can("smartsteps.sessions.delete");
   const [generating, setGenerating]   = useState(false);
+  const [deletingSession, setDeletingSession] = useState(false);
   const [showTrials, setShowTrials]   = useState(false);
   const [editingTrial, setEditingTrial] = useState<TrialRecord | null>(null);
   const [deletingTrialId, setDeletingTrialId] = useState<string | null>(null);
@@ -283,6 +287,39 @@ export function SessionSnapshotDrawer({
       toast.error(String(e));
     } finally {
       setGenerating(false);
+    }
+  }
+
+  async function handleDeleteSession() {
+    if (!sessionId || !data) return;
+    const when = new Date(data.startedAt).toLocaleString("en-US", {
+      weekday: "short", month: "short", day: "numeric", year: "numeric",
+      hour: "numeric", minute: "2-digit",
+    });
+    const ok = window.confirm(
+      `Delete the session on ${when}?
+
+` +
+      `Its ${data.trialCount} trial${data.trialCount !== 1 ? "s" : ""} will be removed from graphs and reports. ` +
+      `The record is kept in the database and can be restored by an administrator.`
+    );
+    if (!ok) return;
+
+    setDeletingSession(true);
+    try {
+      const res = await fetch(`/smart-steps/api/sessions/${sessionId}`, { method: "DELETE" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(err.error ?? "Failed to delete session");
+      }
+      toast.success("Session deleted");
+      qc.invalidateQueries({ queryKey: ["sessions"] });
+      qc.invalidateQueries({ queryKey: ["client", data.clientId] });
+      onClose();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDeletingSession(false);
     }
   }
 
@@ -482,14 +519,27 @@ export function SessionSnapshotDrawer({
                   <div className="flex items-center justify-between">
                     <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Session Details</div>
                     {!editingSession && (
-                      <button
-                        type="button"
-                        onClick={startEditSession}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--glass-border)] px-2.5 py-1 text-xs font-semibold text-zinc-400 hover:border-[var(--accent-cyan)]/40 hover:text-[var(--accent-cyan)] transition-colors"
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                        Edit date / time / provider
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={startEditSession}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--glass-border)] px-2.5 py-1 text-xs font-semibold text-zinc-400 hover:border-[var(--accent-cyan)]/40 hover:text-[var(--accent-cyan)] transition-colors"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                          Edit date / time / provider
+                        </button>
+                        {canDeleteSession && (
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteSession()}
+                            disabled={deletingSession}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--glass-border)] px-2.5 py-1 text-xs font-semibold text-zinc-400 hover:border-[var(--accent-pink)]/50 hover:text-[var(--accent-pink)] transition-colors disabled:opacity-50"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            {deletingSession ? "Deleting…" : "Delete session"}
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
 

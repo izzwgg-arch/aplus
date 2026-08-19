@@ -250,7 +250,7 @@ export async function POST(
       },
     });
 
-    if (!s) return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    if (!s || s.deletedAt) return NextResponse.json({ error: "Session not found" }, { status: 404 });
 
     /* 2. Aggregate trials by target */
     const grouped = new Map<string, SessionTargetSummary>();

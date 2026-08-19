@@ -2,10 +2,13 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { ArrowLeft, Plus, ClipboardList, CheckCircle, Clock, FileText, ExternalLink } from "lucide-react";
+import { ArrowLeft, Plus, ClipboardList, CheckCircle, Clock, FileText, ExternalLink, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
 import { RequirePermission } from "@/components/common/RequirePermission";
+import { usePermissions } from "@/hooks/usePermissions";
 
 type ClientAssessmentSummary = {
   id: string;
@@ -51,6 +54,59 @@ export default function ClientAssessmentsPage() {
 function ClientAssessmentsPageInner() {
   const params = useParams();
   const clientId = String(params.clientId ?? "");
+  const qc = useQueryClient();
+  const { can } = usePermissions();
+  const canDeleteAssessment = can("smartsteps.assessments.delete");
+  const canDeleteReport = can("smartsteps.reports.delete");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  async function deleteAssessment(a: ClientAssessmentSummary) {
+    const ok = window.confirm(
+      `Delete the "${a.template.name}" assessment started ${new Date(a.startedAt).toLocaleDateString()}?
+
+` +
+      `${a._count.responses} saved response${a._count.responses !== 1 ? "s" : ""} will be permanently removed. This cannot be undone.`
+    );
+    if (!ok) return;
+    setDeletingId(a.id);
+    try {
+      const res = await fetch(`/smart-steps/api/clients/${clientId}/assessments/${a.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(err.error ?? "Failed to delete assessment");
+      }
+      toast.success("Assessment deleted");
+      qc.invalidateQueries({ queryKey: ["client-assessments", clientId] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  async function deleteReport(r: ClientReport) {
+    const ok = window.confirm(
+      `Delete the clinical report "${r.title}"?
+
+` +
+      `Its ${r._count.sections} section${r._count.sections !== 1 ? "s" : ""} will be permanently removed. This cannot be undone.`
+    );
+    if (!ok) return;
+    setDeletingId(r.id);
+    try {
+      const res = await fetch(`/smart-steps/api/client-reports/${r.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(err.error ?? "Failed to delete report");
+      }
+      toast.success("Report deleted");
+      qc.invalidateQueries({ queryKey: ["client-reports", clientId] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   const { data: assessments = [], isLoading, error } = useQuery<ClientAssessmentSummary[]>({
     queryKey: ["client-assessments", clientId],
@@ -135,8 +191,8 @@ function ClientAssessmentsPageInner() {
         >
           {assessments.map((a) => (
             <motion.div key={a.id} variants={{ hidden: { opacity: 0, y: 8 }, visible: { opacity: 1, y: 0 } }}>
-              <Link href={`/clients/${clientId}/assessments/${a.id}`}>
-                <div className="glass-card rounded-2xl p-4 flex items-center gap-4 hover:shadow-[var(--glow-cyan)] transition-shadow">
+              <div className="glass-card rounded-2xl p-4 flex items-center gap-4 hover:shadow-[var(--glow-cyan)] transition-shadow">
+                <Link href={`/clients/${clientId}/assessments/${a.id}`} className="flex flex-1 items-center gap-4 min-w-0">
                   <div className={`rounded-xl p-3 shrink-0 ${a.status === "COMPLETED" ? "bg-emerald-500/20" : "bg-amber-500/20"}`}>
                     {a.status === "COMPLETED"
                       ? <CheckCircle className="h-5 w-5 text-emerald-400" />
@@ -169,8 +225,20 @@ function ClientAssessmentsPageInner() {
                       <p className="text-xs text-zinc-500">total score</p>
                     </div>
                   )}
-                </div>
-              </Link>
+                </Link>
+                {canDeleteAssessment && (
+                  <button
+                    type="button"
+                    onClick={() => void deleteAssessment(a)}
+                    disabled={deletingId === a.id}
+                    aria-label="Delete assessment"
+                    title="Delete assessment"
+                    className="shrink-0 rounded-lg p-2 text-zinc-600 hover:bg-[var(--accent-pink)]/10 hover:text-[var(--accent-pink)] transition-colors disabled:opacity-50"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
             </motion.div>
           ))}
         </motion.div>
@@ -214,8 +282,8 @@ function ClientAssessmentsPageInner() {
             const statusStyle = REPORT_STATUS_STYLES[r.status] ?? REPORT_STATUS_STYLES.DRAFT;
             return (
               <motion.div key={r.id} variants={{ hidden: { opacity: 0, y: 8 }, visible: { opacity: 1, y: 0 } }}>
-                <Link href={`/assessments/reports/${r.id}`} target="_blank" rel="noopener noreferrer">
-                  <div className="glass-card rounded-2xl p-4 flex items-center gap-4 hover:shadow-[var(--glow-cyan)] transition-shadow">
+                <div className="glass-card rounded-2xl p-4 flex items-center gap-4 hover:shadow-[var(--glow-cyan)] transition-shadow">
+                  <Link href={`/assessments/reports/${r.id}`} target="_blank" rel="noopener noreferrer" className="flex flex-1 items-center gap-4 min-w-0">
                     <div className="rounded-xl p-3 shrink-0 bg-[var(--accent-cyan)]/15">
                       <FileText className="h-5 w-5 text-[var(--accent-cyan)]" />
                     </div>
@@ -238,8 +306,20 @@ function ClientAssessmentsPageInner() {
                       </p>
                     </div>
                     <ExternalLink className="h-4 w-4 text-zinc-600 shrink-0" />
-                  </div>
-                </Link>
+                  </Link>
+                  {canDeleteReport && (
+                    <button
+                      type="button"
+                      onClick={() => void deleteReport(r)}
+                      disabled={deletingId === r.id}
+                      aria-label="Delete report"
+                      title="Delete report"
+                      className="shrink-0 rounded-lg p-2 text-zinc-600 hover:bg-[var(--accent-pink)]/10 hover:text-[var(--accent-pink)] transition-colors disabled:opacity-50"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
               </motion.div>
             );
           })}

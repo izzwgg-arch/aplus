@@ -21,6 +21,7 @@ export async function GET(
       orderBy: { createdAt: "asc" },
       include: {
         trials: {
+          where: { deletedAt: null },
           include: { session: { select: { startedAt: true } } },
           orderBy: { createdAt: "desc" },
           take: 100,

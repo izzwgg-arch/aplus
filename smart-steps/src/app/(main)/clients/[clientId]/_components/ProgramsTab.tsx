@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { printGoals, type GoalStatusFilter, type PrintableGoal, type PrintableTarget } from "@/lib/printGoals";
+import { usePermissions } from "@/hooks/usePermissions";
 import {
   useABAStore,
   defaultMastery,
@@ -712,7 +713,7 @@ function GoalActionsMenu({
   onClone: () => void;
   onCopyToAnotherClient: () => void;
   onMove: () => void;
-  onDelete: () => void;
+  onDelete: (() => void) | null;
   onSetLevel: () => void;
   onReopen: () => void;
   onAddToLibrary: () => void;
@@ -728,7 +729,7 @@ function GoalActionsMenu({
     { label: "Clone Goal", onClick: onClone },
     { label: "Copy to Another Client", onClick: onCopyToAnotherClient },
     { label: "Move Goal", onClick: onMove },
-    { label: "Delete Goal", onClick: onDelete, destructive: true },
+    ...(onDelete ? [{ label: "Delete Goal", onClick: onDelete, destructive: true }] : []),
     { label: "Set Level", onClick: onSetLevel },
     ...(canReopen ? [{ label: "Reopen Goal", onClick: onReopen }] : []),
     { label: "Add to Library", onClick: onAddToLibrary },
@@ -794,6 +795,16 @@ export function ProgramsTab({
   const addProgram = useABAStore((s) => s.addProgram);
   const updateProgram = useABAStore((s) => s.updateProgram);
   const setCategoryServerId = useABAStore((s) => s.setCategoryServerId);
+  const removeCategory = useABAStore((s) => s.removeCategory);
+  const removeProgram = useABAStore((s) => s.removeProgram);
+  const removeTarget = useABAStore((s) => s.removeTarget);
+
+  // Delete affordances mirror the server-side permission checks, so a user who
+  // would be refused by the API never sees the button.
+  const { can } = usePermissions();
+  const canDeleteCategory = can("smartsteps.programs.delete");
+  const canDeleteSkill = can("smartsteps.goals.delete");
+  const canDeleteGoal = can("smartsteps.targets.delete");
 
   // Select raw arrays (stable Zustand references) then filter via useMemo.
   // NEVER call .filter() inside a useABAStore selector — filter() always returns
@@ -1194,6 +1205,65 @@ export function ProgramsTab({
     toast.success("Goal deleted.");
   }
 
+  /**
+   * Delete a skill area (DB: ParentGoal) that is not needed. The server archives
+   * it (`status: ARCHIVED`) rather than dropping the row, and the goals endpoint
+   * already excludes archived parents — so it stays gone after a reload without
+   * any trial history being destroyed.
+   */
+  async function deleteSkillArea(skill: LocalProgram) {
+    const childGoals = goals.filter((item) => item.programId === skill.id);
+    const consequence = childGoals.length
+      ? `
+
+The ${childGoals.length} goal${childGoals.length !== 1 ? "s" : ""} under it will be hidden with it.`
+      : "";
+    if (!confirm(`Delete the skill area "${skill.name}"?${consequence}
+
+Trial history is kept — nothing is erased.`)) return;
+
+    if (skill.serverId) {
+      const res = await fetch(`/smart-steps/api/clients/${clientId}/goals/${skill.serverId}`, { method: "DELETE" }).catch(() => null);
+      if (!res?.ok) { toast.error("Unable to delete skill area."); return; }
+    }
+    childGoals.forEach((item) => removeTarget(item.id));
+    removeProgram(skill.id);
+    toast.success("Skill area deleted.");
+  }
+
+  /**
+   * Delete a category (DB: Program). Its skill areas are archived too — the
+   * category archive alone would leave them orphaned under an id no category
+   * has, which reads as data loss rather than a delete.
+   */
+  async function deleteCategory(category: LocalCategory) {
+    const childSkills = skills.filter((item) => item.categoryId === category.id);
+    const childGoals = goals.filter((item) => item.categoryId === category.id);
+    const parts: string[] = [];
+    if (childSkills.length) parts.push(`${childSkills.length} skill area${childSkills.length !== 1 ? "s" : ""}`);
+    if (childGoals.length) parts.push(`${childGoals.length} goal${childGoals.length !== 1 ? "s" : ""}`);
+    const consequence = parts.length ? `
+
+${parts.join(" and ")} under it will be hidden with it.` : "";
+    if (!confirm(`Delete the category "${category.name}"?${consequence}
+
+Trial history is kept — nothing is erased.`)) return;
+
+    if (category.serverId) {
+      const res = await fetch(`/smart-steps/api/programs/${category.serverId}`, { method: "DELETE" }).catch(() => null);
+      if (!res?.ok) { toast.error("Unable to delete category."); return; }
+    }
+    await Promise.all(
+      childSkills
+        .filter((item) => item.serverId)
+        .map((item) => fetch(`/smart-steps/api/clients/${clientId}/goals/${item.serverId}`, { method: "DELETE" }).catch(() => null)),
+    );
+    childGoals.forEach((item) => removeTarget(item.id));
+    childSkills.forEach((item) => removeProgram(item.id));
+    removeCategory(category.id);
+    toast.success("Category deleted.");
+  }
+
   async function moveGoal(goal: LocalTarget) {
     const options = skills.map((skill) => `${skill.id}: ${skill.name}`).join("\n");
     const destinationSkillId = window.prompt(`Move goal to skill area.\nEnter skill id:\n${options}`, goal.programId || "");
@@ -1418,6 +1488,11 @@ export function ProgramsTab({
                       <button type="button" onClick={(e) => { e.stopPropagation(); setEditingCategory(category); setShowCategoryModal(true); }} className="rounded-lg p-1.5 text-zinc-500 hover:text-[var(--accent-cyan)] hover:bg-[var(--accent-cyan)]/10 transition-colors">
                         <Pencil className="h-3.5 w-3.5" />
                       </button>
+                      {canDeleteCategory && (
+                        <button type="button" aria-label="Delete category" title="Delete category" onClick={(e) => { e.stopPropagation(); void deleteCategory(category); }} className="rounded-lg p-1.5 text-zinc-600 hover:text-[var(--accent-pink)] hover:bg-[var(--accent-pink)]/10 transition-colors">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
                     </div>
                   </button>
                 );
@@ -1459,9 +1534,16 @@ export function ProgramsTab({
                       <p className="text-xs text-zinc-500">{item.goalCount} goals · {item.masteredCount} mastered</p>
                     </div>
                     {!item.isUnassigned && item.skill && (
-                      <button type="button" onClick={(e) => { e.stopPropagation(); setEditingSkill(item.skill); setShowSkillModal(true); }} className="rounded-lg p-1.5 text-zinc-500 hover:text-[var(--accent-cyan)] hover:bg-[var(--accent-cyan)]/10 transition-colors">
-                        <Pencil className="h-3.5 w-3.5" />
-                      </button>
+                      <>
+                        <button type="button" onClick={(e) => { e.stopPropagation(); setEditingSkill(item.skill); setShowSkillModal(true); }} className="rounded-lg p-1.5 text-zinc-500 hover:text-[var(--accent-cyan)] hover:bg-[var(--accent-cyan)]/10 transition-colors">
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        {canDeleteSkill && (
+                          <button type="button" aria-label="Delete skill area" title="Delete skill area" onClick={(e) => { e.stopPropagation(); void deleteSkillArea(item.skill!); }} className="rounded-lg p-1.5 text-zinc-600 hover:text-[var(--accent-pink)] hover:bg-[var(--accent-pink)]/10 transition-colors">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </>
                     )}
                   </div>
                 </button>
@@ -1534,7 +1616,7 @@ export function ProgramsTab({
                           onClone={() => { void cloneGoal(goal); }}
                           onCopyToAnotherClient={() => { void copyGoalToAnotherClient(goal); }}
                           onMove={() => { void moveGoal(goal); }}
-                          onDelete={() => { void deleteGoal(goal); }}
+                          onDelete={canDeleteGoal ? () => { void deleteGoal(goal); } : null}
                           onSetLevel={() => { void setGoalLevel(goal); }}
                           onReopen={() => { void reopenGoal(goal); }}
                           onAddToLibrary={() => { void addGoalToLibrary(goal); }}

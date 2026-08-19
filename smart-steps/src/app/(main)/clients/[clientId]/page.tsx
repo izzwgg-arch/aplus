@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -11,7 +11,7 @@ import {
 import {
   ArrowLeft, BookOpen, Brain, Calendar, ChevronRight, ClipboardList, Edit2,
   FileText, Target, TrendingUp, User, Share2, Play, Layers,
-  CheckCircle2, Circle, Clock, Star, Plus, Activity, StickyNote,
+  CheckCircle2, Circle, Star, Plus, Activity, StickyNote,
   BarChart2, LayoutGrid, Zap,
 } from "lucide-react";
 import { useState, Suspense, Component, type ReactNode, type ErrorInfo } from "react";
@@ -22,6 +22,7 @@ import { ProgramsTab } from "./_components/ProgramsTab";
 import { DataEntryTab } from "./_components/DataEntryTab";
 import { SessionSnapshotDrawer } from "./_components/SessionSnapshotDrawer";
 import { SessionNotesTab } from "./_components/SessionNotesTab";
+import { SessionsTab } from "./_components/SessionsTab";
 import { usePermissions } from "@/hooks/usePermissions";
 
 /* ── Types ── */
@@ -46,15 +47,6 @@ type ClientDetail = {
   lastSessionAt?: string;
   chartData: { date: string; correct: number; total: number; pct: number }[];
   behaviorBreakdown: { name: string; count: number }[];
-};
-
-type Session = {
-  id: string;
-  startedAt: string;
-  endedAt?: string | null;
-  trialCount: number;
-  pctCorrect?: number;
-  therapistName?: string | null;
 };
 
 type GoalSummary = {
@@ -290,28 +282,6 @@ function ClientHubInner() {
     staleTime: 0,
     refetchOnMount: true,
   });
-
-  const SESSIONS_PAGE_SIZE = 50;
-  const {
-    data: sessionsData,
-    fetchNextPage: fetchMoreSessions,
-    hasNextPage: hasMoreSessions,
-    isFetchingNextPage: isFetchingMoreSessions,
-  } = useInfiniteQuery({
-    queryKey: ["sessions", clientId],
-    initialPageParam: 0,
-    queryFn: async ({ pageParam }) => {
-      const res = await fetch(`/smart-steps/api/sessions?clientId=${clientId}&limit=${SESSIONS_PAGE_SIZE}&offset=${pageParam}`);
-      if (!res.ok) return [] as Session[];
-      return (await res.json()) as Session[];
-    },
-    getNextPageParam: (lastPage, allPages) =>
-      lastPage.length === SESSIONS_PAGE_SIZE ? allPages.length * SESSIONS_PAGE_SIZE : undefined,
-    enabled: !!clientId,
-    staleTime: 0,           // Always treat as stale so it refetches on mount
-    refetchOnMount: true,
-  });
-  const sessions = sessionsData?.pages.flat() ?? [];
 
   const { data: scheduleData } = useQuery<{ appointments: ScheduleAppointmentData[]; configured: boolean }>({
     queryKey: ["schedule", clientId],
@@ -616,69 +586,13 @@ function ClientHubInner() {
 
           {/* SESSIONS TAB */}
           {activeTab === "sessions" && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-zinc-500">
-                  {sessions.length}{hasMoreSessions ? "+" : ""} session{sessions.length !== 1 ? "s" : ""}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setTab("data-entry")}
-                  className="btn-primary tap-target inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold"
-                >
-                  <Zap className="h-4 w-4" /> New Session
-                </button>
-              </div>
-              {sessions.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-[var(--glass-border)] py-12 text-center">
-                  <Activity className="h-10 w-10 text-zinc-600 mx-auto mb-3" />
-                  <p className="text-zinc-400 font-medium mb-1">No sessions recorded yet</p>
-                  <button
-                    type="button"
-                    onClick={() => setTab("data-entry")}
-                    className="btn-primary inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold mt-4"
-                  >
-                    <Zap className="h-4 w-4" /> Start first session
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {sessions.map((s) => (
-                    <button key={s.id} type="button" onClick={() => setSelectedSessionId(s.id)} className="glass-card w-full rounded-2xl p-4 flex items-center gap-4 text-left hover:border-[var(--accent-cyan)]/40 transition-colors">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-cyan)]/10">
-                        <Activity className="h-5 w-5 text-[var(--accent-cyan)]" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-[var(--foreground)] text-sm">
-                          {new Date(s.startedAt).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
-                        </p>
-                        <p className="text-xs text-zinc-500">
-                          {s.trialCount} trial{s.trialCount !== 1 ? "s" : ""}
-                          {s.therapistName && ` · ${s.therapistName}`}
-                          {s.endedAt && ` · ${Math.round((new Date(s.endedAt).getTime() - new Date(s.startedAt).getTime()) / 60000)} min`}
-                        </p>
-                      </div>
-                      {s.pctCorrect != null && (
-                        <span className={`text-sm font-bold shrink-0 ${s.pctCorrect >= 80 ? "text-emerald-400" : s.pctCorrect >= 60 ? "text-amber-400" : "text-[var(--accent-pink)]"}`}>
-                          {Math.round(s.pctCorrect)}%
-                        </span>
-                      )}
-                      <Clock className="h-4 w-4 text-zinc-600 shrink-0" />
-                    </button>
-                  ))}
-                  {hasMoreSessions && (
-                    <button
-                      type="button"
-                      onClick={() => void fetchMoreSessions()}
-                      disabled={isFetchingMoreSessions}
-                      className="w-full flex items-center justify-center gap-2 rounded-xl border border-[var(--glass-border)] py-2.5 text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:border-[var(--accent-cyan)]/40 transition-colors disabled:opacity-60"
-                    >
-                      {isFetchingMoreSessions ? "Loading…" : "Load older sessions"}
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
+            <TabErrorBoundary label="Sessions">
+              <SessionsTab
+                clientId={clientId}
+                onOpenSession={setSelectedSessionId}
+                onStartSession={() => setTab("data-entry")}
+              />
+            </TabErrorBoundary>
           )}
 
           {/* SCHEDULE TAB */}

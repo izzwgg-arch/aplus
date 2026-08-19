@@ -15,15 +15,42 @@ export async function GET(req: Request) {
   const limit = Math.min(Math.max(Number(searchParams.get("limit") ?? 50), 1), 200);
   const offset = Math.max(0, Number(searchParams.get("offset") ?? 0));
 
+  // Filters. These MUST be applied server-side: the list is paginated, so
+  // filtering only the loaded page would silently hide matches that live on a
+  // page the user has not scrolled to yet.
+  const from = searchParams.get("from");        // yyyy-mm-dd, inclusive (service date)
+  const to = searchParams.get("to");            // yyyy-mm-dd, inclusive (service date)
+  const providerId = searchParams.get("providerId");
+  const mode = searchParams.get("mode");
+  const withData = searchParams.get("withData") === "1"; // hide empty (0-trial) sessions
+
   if (clientId) {
     const denied = await requireClientAccessResponse(user.id, clientId, "smartsteps.sessions.view");
     if (denied) return denied;
   }
   const clientIds = clientId ? null : await accessibleClientIds(user.id, "smartsteps.sessions.view");
 
+  const startedAt: { gte?: Date; lte?: Date } = {};
+  if (from) {
+    const d = new Date(`${from}T00:00:00`);
+    if (!Number.isNaN(d.getTime())) startedAt.gte = d;
+  }
+  if (to) {
+    const d = new Date(`${to}T23:59:59.999`);
+    if (!Number.isNaN(d.getTime())) startedAt.lte = d;
+  }
+
   try {
     const sessions = await prisma.session.findMany({
-      where: clientId ? { clientId } : (clientIds === "ALL" ? {} : { clientId: { in: clientIds as string[] } }),
+      where: {
+        // Soft-deleted sessions never appear in any list.
+        deletedAt: null,
+        ...(clientId ? { clientId } : (clientIds === "ALL" ? {} : { clientId: { in: clientIds as string[] } })),
+        ...(startedAt.gte || startedAt.lte ? { startedAt } : {}),
+        ...(providerId ? { userId: providerId } : {}),
+        ...(mode ? { mode } : {}),
+        ...(withData ? { trials: { some: { deletedAt: null } } } : {}),
+      },
       orderBy: { startedAt: "desc" },
       take: limit,
       skip: offset,
@@ -34,7 +61,9 @@ export async function GET(req: Request) {
         createdAt: true,
         mode: true,
         clientId: true,
-        user: { select: { name: true } },
+        userId: true,
+        notes: true,
+        user: { select: { id: true, name: true, displayRole: true, role: true } },
         _count: { select: { trials: true } },
         trials: {
           where: { deletedAt: null },
@@ -55,12 +84,16 @@ export async function GET(req: Request) {
         clientId: s.clientId,
         trialCount: total,
         pctCorrect: total > 0 ? (correct / total) * 100 : null,
+        providerId: s.userId,
         therapistName: s.user?.name ?? null,
+        therapistRole: s.user?.displayRole ?? s.user?.role ?? null,
+        hasNotes: Boolean(s.notes?.trim()),
       };
     });
 
     return NextResponse.json(result);
   } catch (e) {
+    console.error("GET /sessions error:", e);
     return NextResponse.json({ error: "Failed to load sessions" }, { status: 500 });
   }
 }
