@@ -99,6 +99,10 @@ const RESULT_STYLES: Record<string, { label: string; className: string }> = {
   INCORRECT:   { label: "Incorrect",   className: "bg-rose-500/20 text-rose-300" },
   PROMPTED:    { label: "Prompted",    className: "bg-purple-500/20 text-purple-300" },
   NO_RESPONSE: { label: "No Response", className: "bg-zinc-500/20 text-zinc-400" },
+  // `POST /api/trials` normalises "no response" to "NR"; older rows edited
+  // through the trial modal carry "NO_RESPONSE". Both must render.
+  NR:          { label: "No Response", className: "bg-zinc-500/20 text-zinc-400" },
+  SKIP:        { label: "Skipped",     className: "bg-zinc-500/20 text-zinc-400" },
 };
 
 function ResultBadge({ result }: { result: string }) {
@@ -113,6 +117,21 @@ function ResultBadge({ result }: { result: string }) {
 /* ─── Trial edit modal ─────────────────────────────────────────────────────── */
 
 const RESULTS = ["CORRECT", "INCORRECT", "PROMPTED", "NO_RESPONSE"] as const;
+
+/** Result choices offered when logging trials onto an existing session. The
+ *  values are the ones `POST /api/trials` accepts verbatim -- "NO_RESPONSE"
+ *  would be silently coerced to "NR" there, so store "NR" from the start. */
+const TRIAL_ENTRY_RESULTS = [
+  { value: "CORRECT",   label: "Correct",   activeClassName: "bg-emerald-500/25 text-emerald-300" },
+  { value: "PROMPTED",  label: "Prompted",  activeClassName: "bg-purple-500/25 text-purple-300" },
+  { value: "INCORRECT", label: "Incorrect", activeClassName: "bg-rose-500/25 text-rose-300" },
+  { value: "NR",        label: "No resp.",  activeClassName: "bg-zinc-500/30 text-zinc-200" },
+] as const;
+
+/** A trial batch is 1-50 rows; anything typed outside that is clamped. */
+function clampTrialCount(value: number): number {
+  return Math.min(Math.max(Math.round(Number(value)) || 1, 1), 50);
+}
 const PROMPT_LEVELS = ["FULL_PHYSICAL", "PARTIAL_PHYSICAL", "GESTURAL", "VERBAL", "MODEL", "INDEPENDENT"] as const;
 
 function TrialEditModal({
@@ -288,6 +307,19 @@ export function SessionSnapshotDrawer({
   const [savingGoalId, setSavingGoalId] = useState<string | null>(null);
   const [removingGoalId, setRemovingGoalId] = useState<string | null>(null);
 
+  // Logging trial data against a goal already on the session
+  const canLogTrials = can("smartsteps.trials.create");
+  const [trialTargetId, setTrialTargetId] = useState<string | null>(null);
+  const [savingTrials, setSavingTrials]   = useState(false);
+  const [trialForm, setTrialForm] = useState<{ result: string; promptLevel: string; count: number; notes: string }>(
+    { result: "CORRECT", promptLevel: "", count: 1, notes: "" }
+  );
+
+  function openTrialEntry(targetId: string) {
+    setTrialTargetId(targetId);
+    setTrialForm({ result: "CORRECT", promptLevel: "", count: 1, notes: "" });
+  }
+
   async function handleGenerateNote() {
     if (!sessionId) return;
     // Generating twice creates a SECOND note rather than replacing the first —
@@ -454,9 +486,14 @@ export function SessionSnapshotDrawer({
         const err = await res.json().catch(() => ({})) as { error?: string };
         throw new Error(err.error ?? "Failed to add goal");
       }
-      toast.success("Goal added to this session — it will appear on the session note.");
+      toast.success("Goal added — add trial data for it below, or leave it as a goal with no data.");
       setGoalNote("");
-      qc.invalidateQueries({ queryKey: ["session-snapshot", sessionId] });
+      setGoalSearch("");
+      setAddingGoal(false);
+      // Trial entry opens on the goal that was just added, so logging data for
+      // it is the next thing in front of you rather than a second hunt.
+      if (canLogTrials) openTrialEntry(targetId);
+      await qc.invalidateQueries({ queryKey: ["session-snapshot", sessionId] });
       qc.invalidateQueries({ queryKey: ["sessions"] });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
@@ -487,10 +524,75 @@ export function SessionSnapshotDrawer({
     }
   }
 
+  /**
+   * Logs trial data against a goal on this session.
+   *
+   * Trials are stamped INSIDE the session's own window rather than at `now`:
+   * a session backdated to last week must not collect trials timestamped today,
+   * or the Trial History reads as if the work happened at the moment it was
+   * typed. Reporting already keys off `session.startedAt`, so this only affects
+   * the per-trial clock — but that clock is what a reviewer reads.
+   */
+  async function handleAddTrials(targetId: string) {
+    if (!sessionId || !data) return;
+    const count = clampTrialCount(trialForm.count);
+
+    const base     = new Date(data.startedAt).getTime();
+    const endLimit = data.endedAt ? new Date(data.endedAt).getTime() : null;
+    const offset   = data.trials.length;
+
+    const trials = Array.from({ length: count }, (_, i) => {
+      const stamp = base + (offset + i) * 1000;
+      return {
+        targetId,
+        result: trialForm.result,
+        promptLevel: trialForm.result === "PROMPTED" ? (trialForm.promptLevel || null) : null,
+        notes: trialForm.notes.trim() || null,
+        createdAt: new Date(endLimit && stamp > endLimit ? endLimit : stamp).toISOString(),
+      };
+    });
+
+    setSavingTrials(true);
+    try {
+      const res = await fetch(`/smart-steps/api/trials`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId, trials }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(err.error ?? "Failed to save trial data");
+      }
+
+      /* First data on a NEW goal promotes it to ACQUISITION — the same
+         promotion the live data-entry panel performs. Fire-and-forget: a BT
+         without `targets.edit` still gets their trials saved. */
+      const phase = data.sessionTargets.find((t) => t.targetId === targetId)?.phase;
+      if (phase === "NEW") {
+        void fetch(`/smart-steps/api/targets/${targetId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ phase: "ACQUISITION" }),
+        }).catch(() => {});
+      }
+
+      toast.success(`${count} trial${count !== 1 ? "s" : ""} added to this session`);
+      setTrialForm((f) => ({ ...f, count: 1, notes: "" }));
+      qc.invalidateQueries({ queryKey: ["session-snapshot", sessionId] });
+      qc.invalidateQueries({ queryKey: ["sessions"] });
+      qc.invalidateQueries({ queryKey: ["client", data.clientId] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingTrials(false);
+    }
+  }
+
   // Reset the edit panel whenever a different session is opened.
   useEffect(() => {
     setEditingSession(false);
     setAddingGoal(false);
+    setTrialTargetId(null);
     setGoalSearch("");
     setGoalNote("");
   }, [sessionId]);
@@ -934,6 +1036,115 @@ export function SessionSnapshotDrawer({
                               {item.notes.length > 0 && (
                                 <div className="mt-3 rounded-xl border border-[var(--glass-border)] bg-black/10 p-3 text-xs text-zinc-300">
                                   {item.notes.join(" | ")}
+                                </div>
+                              )}
+
+                              {/* -- Trial data for this goal -- */}
+                              {canLogTrials && (
+                                <div className="mt-3">
+                                  <button
+                                    type="button"
+                                    onClick={() => (trialTargetId === item.targetId ? setTrialTargetId(null) : openTrialEntry(item.targetId))}
+                                    className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--glass-border)] px-2.5 py-1.5 text-[11px] font-semibold text-zinc-400 hover:border-[var(--accent-cyan)]/40 hover:text-[var(--accent-cyan)] transition-colors"
+                                  >
+                                    {trialTargetId === item.targetId
+                                      ? <><X className="h-3.5 w-3.5" /> Close</>
+                                      : <><Plus className="h-3.5 w-3.5" /> {item.trialCount === 0 ? "Add trial data" : "Add more trials"}</>}
+                                  </button>
+
+                                  <AnimatePresence>
+                                    {trialTargetId === item.targetId && (
+                                      <motion.div
+                                        initial={{ opacity: 0, height: 0 }}
+                                        animate={{ opacity: 1, height: "auto" }}
+                                        exit={{ opacity: 0, height: 0 }}
+                                        className="overflow-hidden"
+                                      >
+                                        <div className="mt-3 space-y-3 rounded-2xl border border-[var(--accent-cyan)]/30 bg-[var(--accent-cyan)]/5 p-3">
+                                          <div>
+                                            <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Result</div>
+                                            <div className="grid grid-cols-4 gap-1.5">
+                                              {TRIAL_ENTRY_RESULTS.map((r) => (
+                                                <button
+                                                  key={r.value}
+                                                  type="button"
+                                                  onClick={() => setTrialForm((f) => ({ ...f, result: r.value }))}
+                                                  className={`rounded-xl px-2 py-1.5 text-[11px] font-semibold transition-all ${
+                                                    trialForm.result === r.value
+                                                      ? r.activeClassName
+                                                      : "bg-[var(--glass-bg)] text-zinc-400 hover:text-zinc-200"
+                                                  }`}
+                                                >
+                                                  {r.label}
+                                                </button>
+                                              ))}
+                                            </div>
+                                          </div>
+
+                                          {/* Prompt level only means something on a prompted trial. */}
+                                          {trialForm.result === "PROMPTED" && (
+                                            <div>
+                                              <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Prompt level</div>
+                                              <div className="grid grid-cols-3 gap-1.5">
+                                                {PROMPT_LEVELS.map((pl) => (
+                                                  <button
+                                                    key={pl}
+                                                    type="button"
+                                                    onClick={() => setTrialForm((f) => ({ ...f, promptLevel: pl }))}
+                                                    className={`rounded-xl px-2 py-1.5 text-[10px] font-medium transition-all ${
+                                                      trialForm.promptLevel === pl
+                                                        ? "bg-[var(--accent-purple)]/30 text-[var(--accent-purple)]"
+                                                        : "bg-[var(--glass-bg)] text-zinc-400 hover:text-zinc-200"
+                                                    }`}
+                                                  >
+                                                    {pl.replace(/_/g, " ")}
+                                                  </button>
+                                                ))}
+                                              </div>
+                                            </div>
+                                          )}
+
+                                          <div className="flex gap-2">
+                                            <div className="w-24">
+                                              <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">How many</div>
+                                              <input
+                                                type="number"
+                                                min={1}
+                                                max={50}
+                                                value={trialForm.count}
+                                                onChange={(e) => setTrialForm((f) => ({ ...f, count: Number(e.target.value) }))}
+                                                className="field-input w-full text-sm"
+                                              />
+                                            </div>
+                                            <div className="min-w-0 flex-1">
+                                              <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Note (optional)</div>
+                                              <input
+                                                type="text"
+                                                value={trialForm.notes}
+                                                onChange={(e) => setTrialForm((f) => ({ ...f, notes: e.target.value }))}
+                                                placeholder="Applies to every trial added"
+                                                className="field-input w-full text-sm"
+                                              />
+                                            </div>
+                                          </div>
+
+                                          <button
+                                            type="button"
+                                            disabled={savingTrials}
+                                            onClick={() => handleAddTrials(item.targetId)}
+                                            className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-[var(--accent-cyan)]/20 py-2 text-xs font-semibold text-[var(--accent-cyan)] hover:bg-[var(--accent-cyan)]/30 disabled:opacity-60 transition-colors"
+                                          >
+                                            <Check className="h-3.5 w-3.5" />
+                                            {savingTrials ? "Saving..." : `Add ${clampTrialCount(trialForm.count)} trial${clampTrialCount(trialForm.count) !== 1 ? "s" : ""}`}
+                                          </button>
+
+                                          <p className="text-[10px] text-zinc-500">
+                                            Trials are recorded on this session&apos;s service date, and roll into its accuracy and the session note.
+                                          </p>
+                                        </div>
+                                      </motion.div>
+                                    )}
+                                  </AnimatePresence>
                                 </div>
                               )}
                             </div>

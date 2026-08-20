@@ -308,6 +308,32 @@ client access, and reject a target that does not belong to the session's client.
 - The picker in the drawer loads `/api/clients/[clientId]/targets` lazily (only
   while it is open) and hides goals already on the session.
 
+**Trial data can be entered against any goal on a saved session** (added
+2026-08-20, same drawer). Every goal card in Goals Worked carries an "Add trial
+data" / "Add more trials" button, gated on `smartsteps.trials.create`; adding a
+goal through the picker drops straight into that panel for the goal just added.
+The panel posts a batch to the existing `POST /api/trials`
+(`{ sessionId, trials: [...] }`) — no new endpoint.
+
+- Result choices are `CORRECT | PROMPTED | INCORRECT | NR`, the values that
+  route accepts verbatim. Do NOT offer `NO_RESPONSE` here: `POST /api/trials`
+  validates against `TRIAL_RESULTS` and silently coerces anything unknown to
+  `NR`, while `PATCH /api/trials/[trialId]` does not validate — which is why
+  older rows carry `NO_RESPONSE` and `RESULT_STYLES` now labels both.
+- **Trials are stamped inside the session's own window**, not at `now`:
+  `startedAt + (existing trial count + i) seconds`, capped at `endedAt`. A
+  session backdated to last week must not collect trials timestamped today, or
+  the Trial History reads as though the work happened when it was typed.
+  (Graphs were already safe — trial reporting keys off `session.startedAt`.)
+- Logging the first data on a `NEW` goal promotes it to `ACQUISITION`, the same
+  fire-and-forget PATCH the live data-entry panel performs — a BT without
+  `targets.edit` still gets their trials saved.
+- Batches are clamped to 1-50 rows by `clampTrialCount()`. The optional note is
+  copied onto every trial in the batch; the note generator de-dupes it.
+- An existing session note does NOT update when trials are added afterwards —
+  notes are point-in-time. The drawer's button reads "Generate Again" and
+  confirms, since generating produces an ADDITIONAL note.
+
 ## Rule 5: Deploy (step 3 of the Rule 0 end-of-task sequence)
 
 ### Smart Steps ABA Tracker (git-based, re-wired 2026-08-13)
