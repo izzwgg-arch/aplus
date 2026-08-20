@@ -98,6 +98,37 @@ export async function GET(
         },
         behaviors: { orderBy: { createdAt: "asc" }, select: { id: true, type: true, behavior: true, antecedent: true, consequence: true, intensity: true, createdAt: true } },
         user: { select: { id: true, name: true, email: true } },
+        // Goals attached by hand (worked on without trial data). Merged into
+        // `sessionTargets` below alongside the trial-derived ones.
+        addedTargets: {
+          orderBy: { createdAt: "asc" },
+          include: {
+            addedBy: { select: { id: true, name: true } },
+            target: {
+              select: {
+                id: true,
+                definition: true,
+                targetType: true,
+                phase: true,
+                parentGoal: { select: { id: true, title: true, domain: true } },
+                subGoal: {
+                  select: {
+                    id: true,
+                    title: true,
+                    parentGoal: { select: { id: true, title: true, domain: true } },
+                  },
+                },
+                program: { select: { id: true, name: true, domain: true } },
+              },
+            },
+          },
+        },
+        // Notes written for this session — the snapshot shows whether a BT note
+        // has already been generated so nobody generates a duplicate blindly.
+        sessionNotes: {
+          orderBy: { createdAt: "desc" },
+          select: { id: true, title: true, type: true, isGenerated: true, createdAt: true },
+        },
       },
     });
 
@@ -127,6 +158,9 @@ export async function GET(
       notes: string[];
       firstTimestamp: string | null;
       lastTimestamp: string | null;
+      addedManually: boolean;
+      addedNote: string | null;
+      addedByName: string | null;
     }>();
 
     for (const trial of s.trials) {
@@ -156,6 +190,9 @@ export async function GET(
         notes: [],
         firstTimestamp: null,
         lastTimestamp: null,
+        addedManually: false,
+        addedNote: null,
+        addedByName: null,
       };
 
       existing.trialCount += 1;
@@ -172,6 +209,49 @@ export async function GET(
       existing.lastTimestamp = existing.lastTimestamp ? (existing.lastTimestamp > stamp ? existing.lastTimestamp : stamp) : stamp;
 
       grouped.set(key, existing);
+    }
+
+    /* Hand-attached goals. A goal that also has trials keeps its trial data and
+       is simply flagged; one with no trials joins the list with a zero count so
+       it still reads as "worked on" in the snapshot and in the note. */
+    for (const link of s.addedTargets) {
+      const t = link.target;
+      const parentGoal = t.parentGoal ?? t.subGoal?.parentGoal ?? null;
+      const existing = grouped.get(t.id);
+      if (existing) {
+        existing.addedManually = true;
+        existing.addedNote = link.note;
+        existing.addedByName = link.addedBy?.name ?? null;
+        continue;
+      }
+      grouped.set(t.id, {
+        targetId: t.id,
+        targetTitle: t.definition,
+        targetType: t.targetType,
+        phase: t.phase,
+        parentGoalId: parentGoal?.id ?? null,
+        parentGoalTitle: parentGoal?.title ?? null,
+        subGoalId: t.subGoal?.id ?? null,
+        subGoalTitle: t.subGoal?.title ?? null,
+        programId: t.program?.id ?? null,
+        programName: t.program?.name ?? null,
+        providerId: s.user?.id ?? null,
+        providerName: s.user?.name ?? null,
+        sessionKind: s.mode,
+        trialCount: 0,
+        correctCount: 0,
+        promptedCount: 0,
+        incorrectCount: 0,
+        noResponseCount: 0,
+        maintenanceCount: 0,
+        promptCodes: {},
+        notes: [],
+        firstTimestamp: null,
+        lastTimestamp: null,
+        addedManually: true,
+        addedNote: link.note,
+        addedByName: link.addedBy?.name ?? null,
+      });
     }
 
     const sessionTargets = Array.from(grouped.values()).map((item) => ({
@@ -227,6 +307,13 @@ export async function GET(
       })),
       sessionTargets,
       trialCount: s.trials.length,
+      notesGenerated: s.sessionNotes.map((n) => ({
+        id: n.id,
+        title: n.title,
+        type: n.type,
+        isGenerated: n.isGenerated,
+        createdAt: n.createdAt.toISOString(),
+      })),
     });
   } catch (e) {
     return NextResponse.json({ error: "Failed" }, { status: 500 });

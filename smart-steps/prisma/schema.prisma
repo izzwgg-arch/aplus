@@ -74,24 +74,24 @@ enum ResponseType {
 }
 
 model User {
-  id                   String             @id @default(cuid())
-  email                String             @unique
+  id                   String               @id @default(cuid())
+  email                String               @unique
   name                 String?
-  role                 Role               @default(RBT)
+  role                 Role                 @default(RBT)
   displayRole          String? // human-readable title (Supervisor, Clinical Director, etc.)
   // Legacy `role` enum kept for backward compatibility / display fallback.
   // `appRoleId` is the new granular-permission role, nullable until the
   // backfill script runs.
   appRoleId            String?
   passwordHash         String? // set when the account has a standalone SmartSteps login (not SSO-only)
-  isActive             Boolean            @default(true) // false = inactive; preserved on SSO sync
+  isActive             Boolean              @default(true) // false = inactive; preserved on SSO sync
   image                String?
   emailVerified        DateTime?
   phone                String?
   credentials          String?
   invitedAt            DateTime? // set when the account was created via email invite; cleared once accepted
-  createdAt            DateTime           @default(now())
-  updatedAt            DateTime           @updatedAt
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
   assignedClients      ClientAssignment[]
   sessions             Session[]
   notes                Note[]
@@ -99,7 +99,8 @@ model User {
   completedAssessments ClientAssessment[]
   targetAnnotations    TargetAnnotation[]
   passwordResetTokens  PasswordResetToken[]
-  appRole              AppRole?           @relation(fields: [appRoleId], references: [id], onDelete: SetNull)
+  addedSessionGoals    SessionTarget[]
+  appRole              AppRole?             @relation(fields: [appRoleId], references: [id], onDelete: SetNull)
 }
 
 enum TokenPurpose {
@@ -145,8 +146,8 @@ model AppRole {
 }
 
 model AppPermission {
-  id          String @id @default(cuid())
-  key         String @unique // e.g. "smartsteps.clients.view.assigned"
+  id          String  @id @default(cuid())
+  key         String  @unique // e.g. "smartsteps.clients.view.assigned"
   category    String
   label       String
   description String?
@@ -286,6 +287,7 @@ model Target {
   subGoal          SubGoal?           @relation(fields: [subGoalId], references: [id], onDelete: Cascade)
   trials           Trial[]
   annotations      TargetAnnotation[]
+  sessionLinks     SessionTarget[]
 
   @@index([programId])
   @@index([subGoalId])
@@ -310,9 +312,32 @@ model Session {
   behaviors          BehaviorEvent[]
   intervalRecordings IntervalRecording[]
   sessionNotes       Note[]
+  addedTargets       SessionTarget[]
 
   @@index([clientId, startedAt])
   @@index([deletedAt])
+}
+
+/// A goal that was worked on during a session but has no trial data of its own
+/// — a BT running a program off-data, a BCBA adding a goal to a session after
+/// the fact. Trial-backed goals are derived from `Trial`; these are the extra,
+/// explicitly-attached ones. Both feed the session snapshot and the generated
+/// BT session note.
+model SessionTarget {
+  id        String   @id @default(cuid())
+  sessionId String
+  targetId  String
+  note      String?
+  addedById String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  target    Target   @relation(fields: [targetId], references: [id], onDelete: Cascade)
+  addedBy   User?    @relation(fields: [addedById], references: [id], onDelete: SetNull)
+
+  @@unique([sessionId, targetId])
+  @@index([sessionId])
+  @@index([targetId])
 }
 
 model Trial {

@@ -23,6 +23,10 @@ type SessionTargetSummary = {
   promptCodes:     Record<string, number>;
   notes:           string[];
   percentage:      number;
+  /** True when the goal was attached to the session by hand rather than derived
+   *  from trials. Such a goal may legitimately have zero trials. */
+  addedManually:   boolean;
+  addedNote:       string | null;
 };
 
 type BehaviorRecord = {
@@ -59,18 +63,28 @@ function generateBTNoteContent(opts: {
   const shortDate = sessionDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   const modeLabel = mode === "DTT" ? "Discrete Trial Training (DTT)" : mode;
 
-  const totalTrials = sessionTargets.reduce((s, t) => s + t.trialCount, 0);
-  const overallPct  = sessionTargets.length > 0
-    ? Math.round(sessionTargets.reduce((s, t) => s + t.percentage, 0) / sessionTargets.length)
+  /* Only goals that actually have trials count toward the session's accuracy —
+     a goal attached by hand with no data would otherwise score 0% and drag the
+     whole session average down. */
+  const scoredTargets = sessionTargets.filter((t) => t.trialCount > 0);
+  const addedOnly     = sessionTargets.filter((t) => t.trialCount === 0);
+  const totalTrials = scoredTargets.reduce((s, t) => s + t.trialCount, 0);
+  const overallPct  = scoredTargets.length > 0
+    ? Math.round(scoredTargets.reduce((s, t) => s + t.percentage, 0) / scoredTargets.length)
     : 0;
 
   /* ── Session Summary ── */
   const summaryParts: string[] = [
     `${clientName} participated in a ${modeLabel} ABA therapy session on ${dateStr} with ${providerName}.`,
     totalTrials > 0
-      ? `A total of ${totalTrials} discrete trial${totalTrials !== 1 ? "s" : ""} were administered across ${sessionTargets.length} target${sessionTargets.length !== 1 ? "s" : ""}, with an overall session accuracy of ${overallPct}%.`
+      ? `A total of ${totalTrials} discrete trial${totalTrials !== 1 ? "s" : ""} were administered across ${scoredTargets.length} target${scoredTargets.length !== 1 ? "s" : ""}, with an overall session accuracy of ${overallPct}%.`
       : `No discrete trials were recorded during this session.`,
-    `The client demonstrated ${overallPct >= 80 ? "strong" : overallPct >= 60 ? "developing" : "emerging"} skills across targeted areas.`,
+    addedOnly.length > 0
+      ? `An additional ${addedOnly.length} goal${addedOnly.length !== 1 ? "s were" : " was"} addressed during the session without formal trial data.`
+      : "",
+    totalTrials > 0
+      ? `The client demonstrated ${overallPct >= 80 ? "strong" : overallPct >= 60 ? "developing" : "emerging"} skills across targeted areas.`
+      : "",
   ].filter(Boolean) as string[];
 
   /* ── Goals Addressed (grouped by parent goal) ── */
@@ -89,7 +103,7 @@ function generateBTNoteContent(opts: {
 
   /* ── Progress Per Target ── */
   const progressLines: string[] = [];
-  for (const t of sessionTargets) {
+  for (const t of scoredTargets) {
     const promptDesc = formatPromptCodes(t.promptCodes);
     const phaseNote  = t.phase === "MASTERED"
       ? " Target met mastery criteria."
@@ -101,12 +115,20 @@ function generateBTNoteContent(opts: {
     );
   }
 
-  const masteredTargets = sessionTargets.filter((t) => t.phase === "MASTERED");
+  /* Goals worked on without trial data still belong in the note — they were
+     part of the session, they are just reported qualitatively. */
+  for (const t of addedOnly) {
+    progressLines.push(
+      `  • ${t.targetTitle}: addressed this session; no trial data recorded.${t.addedNote ? ` ${t.addedNote}` : ""}`
+    );
+  }
+
+  const masteredTargets = scoredTargets.filter((t) => t.phase === "MASTERED");
   if (masteredTargets.length > 0) {
     progressLines.push(`\n  Mastery Achieved: ${masteredTargets.map((t) => t.targetTitle).join(", ")} met mastery criteria this session.`);
   }
 
-  const newTargets = sessionTargets.filter((t) => t.phase === "NEW" || t.phase === "BASELINE");
+  const newTargets = scoredTargets.filter((t) => t.phase === "NEW" || t.phase === "BASELINE");
   if (newTargets.length > 0) {
     progressLines.push(`\n  New Targets Introduced: ${newTargets.map((t) => t.targetTitle).join(", ")}.`);
   }
@@ -151,8 +173,8 @@ function generateBTNoteContent(opts: {
 
   /* ── Recommendations ── */
   const recLines: string[] = [];
-  const lowAcc  = sessionTargets.filter((t) => t.percentage < 60 && t.trialCount >= 3);
-  const highAcc = sessionTargets.filter((t) => t.percentage >= 80 && t.trialCount >= 3 && t.phase !== "MASTERED");
+  const lowAcc  = scoredTargets.filter((t) => t.percentage < 60 && t.trialCount >= 3);
+  const highAcc = scoredTargets.filter((t) => t.percentage >= 80 && t.trialCount >= 3 && t.phase !== "MASTERED");
 
   if (masteredTargets.length > 0) {
     recLines.push(`  • Continue maintenance probes for mastered targets: ${masteredTargets.map((t) => t.targetTitle).join(", ")}.`);
@@ -169,6 +191,9 @@ function generateBTNoteContent(opts: {
   /* ── Next Session Focus ── */
   const nextLines: string[] = [];
   const inProgress = sessionTargets.filter((t) => t.phase !== "MASTERED");
+  if (addedOnly.length > 0) {
+    nextLines.push(`  • Collect trial data for goals addressed without data this session: ${addedOnly.slice(0, 5).map((t) => t.targetTitle).join(", ")}.`);
+  }
   if (inProgress.length > 0) {
     nextLines.push(`  • Continue acquisition targets: ${inProgress.slice(0, 5).map((t) => t.targetTitle).join(", ")}.`);
   }
@@ -247,6 +272,29 @@ export async function POST(
             intensity:   true,
           },
         },
+        // Goals attached to the session by hand — worked on, but with no trial
+        // data of their own. They belong in the note just like the rest.
+        addedTargets: {
+          orderBy: { createdAt: "asc" },
+          include: {
+            target: {
+              select: {
+                id:         true,
+                definition: true,
+                targetType: true,
+                phase:      true,
+                parentGoal: { select: { id: true, title: true } },
+                subGoal:    {
+                  select: {
+                    id: true, title: true,
+                    parentGoal: { select: { id: true, title: true } },
+                  },
+                },
+                program: { select: { id: true, name: true } },
+              },
+            },
+          },
+        },
       },
     });
 
@@ -274,6 +322,8 @@ export async function POST(
         promptCodes:     {},
         notes:           [],
         percentage:      0,
+        addedManually:   false,
+        addedNote:       null,
       };
 
       existing.trialCount += 1;
@@ -287,6 +337,39 @@ export async function POST(
       if (trial.notes?.trim()) existing.notes.push(trial.notes.trim());
 
       grouped.set(key, existing);
+    }
+
+    /* Merge in the hand-attached goals. One that also has trials keeps its trial
+       data and is only flagged; one with no trials joins with a zero count. */
+    for (const link of s.addedTargets) {
+      const t  = link.target;
+      const pg = t.parentGoal ?? t.subGoal?.parentGoal ?? null;
+      const existing = grouped.get(t.id);
+      if (existing) {
+        existing.addedManually = true;
+        existing.addedNote = link.note;
+        if (link.note?.trim()) existing.notes.push(link.note.trim());
+        continue;
+      }
+      grouped.set(t.id, {
+        targetId:        t.id,
+        targetTitle:     t.definition,
+        targetType:      t.targetType,
+        phase:           t.phase,
+        parentGoalTitle: pg?.title ?? null,
+        subGoalTitle:    t.subGoal?.title ?? null,
+        programName:     t.program?.name ?? null,
+        trialCount:      0,
+        correctCount:    0,
+        promptedCount:   0,
+        incorrectCount:  0,
+        noResponseCount: 0,
+        promptCodes:     {},
+        notes:           [],
+        percentage:      0,
+        addedManually:   true,
+        addedNote:       link.note,
+      });
     }
 
     const sessionTargets: SessionTargetSummary[] = Array.from(grouped.values()).map((t) => ({

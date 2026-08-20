@@ -266,6 +266,48 @@ correctly stamped "now" — left alone. Trial-level reporting already keys off
 `session.startedAt`, not `trial.createdAt`, so backdated trials land on the
 right date in graphs.
 
+## Tracker sessions — note status + goals added without data (2026-08-20)
+
+Two things a session card could not tell you before: whether it had been written
+up, and which goals were worked on when no trials were taken.
+
+- **Note status is on the card.** `GET /api/sessions` returns `noteCount`,
+  `noteGeneratedAt`, `noteIsGenerated` (from the session's `Note[]` relation)
+  and `addedGoalCount`. `SessionsTab` renders a green "Note generated" /
+  "Note written" chip or an amber "No note yet" chip on every card. The chip
+  reflects REAL notes (`Note.sessionId`), not the session's own `notes`
+  free-text field — that is now labelled "field notes" so the two never read as
+  the same thing.
+- **Filter by note status.** `GET /api/sessions` accepts `hasNote=1|0`
+  (`sessionNotes: { some: {} }` / `{ none: {} }`), exposed in the Sessions tab
+  filter panel as "Session note: Any / Note written / Needs a note". Like every
+  other session filter it is server-side — the list is paginated.
+- **Generating twice is now explicit.** `POST .../generate-note` always creates
+  an ADDITIONAL note; the Session Snapshot drawer confirms first when one
+  already exists, and its button reads "Generate Again".
+
+**Goals attached without trial data** use a new `SessionTarget` join model
+(migration `20260820000000_session_added_goals`): `sessionId` + `targetId`
+unique, optional `note`, `addedById`. `POST /api/sessions/[sessionId]/targets`
+(accepts `targetId` or `targetIds`, upserts so re-adding just refreshes the
+note) and `DELETE ...?targetId=` are gated on `smartsteps.sessions.edit` plus
+client access, and reject a target that does not belong to the session's client.
+
+- `GET /api/sessions/[sessionId]` merges the links into `sessionTargets`: a goal
+  that also has trials keeps its trial data and is flagged `addedManually`; one
+  with no trials joins with `trialCount: 0`. The drawer shows it under Goals
+  Worked with a "No data" badge, an "Added to session by <name>" chip, its note,
+  and an X to detach (only hand-attached goals can be detached — a trial-backed
+  goal leaves by deleting its trials).
+- `POST /api/sessions/[sessionId]/generate-note` merges the same links, so the
+  goal lands in GOALS ADDRESSED, gets a PROGRESS line reading "addressed this
+  session; no trial data recorded" plus its note, and adds a next-step to
+  collect data on it. **Session accuracy is computed from `scoredTargets`
+  (`trialCount > 0`) only** — averaging a zero-trial goal in would drag the
+  session percentage toward 0.
+- The picker in the drawer loads `/api/clients/[clientId]/targets` lazily (only
+  while it is open) and hides goals already on the session.
+
 ## Rule 5: Deploy (step 3 of the Rule 0 end-of-task sequence)
 
 ### Smart Steps ABA Tracker (git-based, re-wired 2026-08-13)

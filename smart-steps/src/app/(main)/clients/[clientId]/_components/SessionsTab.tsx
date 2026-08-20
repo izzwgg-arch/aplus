@@ -4,7 +4,8 @@ import { useMemo, useState } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Activity, Calendar, Clock, Filter, Trash2, User, X, Zap, StickyNote,
+  Activity, Calendar, Clock, FileCheck2, FilePlus2, Filter, Target as TargetIcon,
+  Trash2, User, X, Zap, StickyNote,
 } from "lucide-react";
 import { toast } from "sonner";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -23,7 +24,15 @@ export type SessionListItem = {
   providerId?: string | null;
   therapistName?: string | null;
   therapistRole?: string | null;
+  /** The session's own free-text field notes (not a written-up session note). */
   hasNotes?: boolean;
+  /** Number of session notes written for this session (generated or typed). */
+  noteCount?: number;
+  noteGeneratedAt?: string | null;
+  /** True when the most recent note came from "Generate BT Note". */
+  noteIsGenerated?: boolean | null;
+  /** Goals attached to the session by hand, without trial data. */
+  addedGoalCount?: number;
 };
 
 type ProviderOption = { id: string; name: string | null; role: string; displayRole?: string | null };
@@ -34,9 +43,11 @@ type Filters = {
   providerId: string;
   mode: string;
   withData: boolean;
+  /** "" = any, "1" = note written, "0" = still needs a note. */
+  hasNote: string;
 };
 
-const EMPTY_FILTERS: Filters = { from: "", to: "", providerId: "", mode: "", withData: false };
+const EMPTY_FILTERS: Filters = { from: "", to: "", providerId: "", mode: "", withData: false, hasNote: "" };
 
 const MODE_LABELS: Record<string, string> = {
   DTT: "DTT",
@@ -87,7 +98,7 @@ export function SessionsTab({
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const filtersActive =
-    Boolean(filters.from || filters.to || filters.providerId || filters.mode || filters.withData);
+    Boolean(filters.from || filters.to || filters.providerId || filters.mode || filters.withData || filters.hasNote);
 
   /* Provider list for the filter dropdown (active staff, any role). */
   const { data: providers = [] } = useQuery<ProviderOption[]>({
@@ -112,7 +123,7 @@ export function SessionsTab({
     hasNextPage,
     isFetchingNextPage,
   } = useInfiniteQuery({
-    queryKey: ["sessions", clientId, filters.from, filters.to, filters.providerId, filters.mode, filters.withData],
+    queryKey: ["sessions", clientId, filters.from, filters.to, filters.providerId, filters.mode, filters.withData, filters.hasNote],
     initialPageParam: 0,
     queryFn: async ({ pageParam }) => {
       const params = new URLSearchParams({
@@ -125,6 +136,7 @@ export function SessionsTab({
       if (filters.providerId) params.set("providerId", filters.providerId);
       if (filters.mode) params.set("mode", filters.mode);
       if (filters.withData) params.set("withData", "1");
+      if (filters.hasNote) params.set("hasNote", filters.hasNote);
       const res = await fetch(`/smart-steps/api/sessions?${params}`);
       if (!res.ok) return [] as SessionListItem[];
       return (await res.json()) as SessionListItem[];
@@ -256,6 +268,19 @@ export function SessionsTab({
                 </select>
               </div>
 
+              <div>
+                <label className="mb-1 block text-xs text-zinc-500">Session note</label>
+                <select
+                  value={filters.hasNote}
+                  onChange={(e) => setFilters((f) => ({ ...f, hasNote: e.target.value }))}
+                  className="field-input w-full text-sm"
+                >
+                  <option value="">Any</option>
+                  <option value="1">Note written</option>
+                  <option value="0">Needs a note</option>
+                </select>
+              </div>
+
               <label className="col-span-full flex w-fit cursor-pointer items-center gap-2 text-xs text-zinc-400">
                 <input
                   type="checkbox"
@@ -335,9 +360,37 @@ export function SessionsTab({
                     <span className="rounded-full bg-[var(--glass-bg)] px-2 py-0.5 text-[11px] font-semibold text-zinc-400">
                       {MODE_LABELS[s.mode] ?? s.mode}
                     </span>
+                    {/* Whether the session has been written up — visible without
+                        opening the session, so it is obvious what still needs a note. */}
+                    {(s.noteCount ?? 0) > 0 ? (
+                      <span
+                        title={
+                          s.noteGeneratedAt
+                            ? `Note ${s.noteIsGenerated ? "generated" : "written"} ${formatServiceDate(s.noteGeneratedAt)}`
+                            : undefined
+                        }
+                        className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-400"
+                      >
+                        <FileCheck2 className="h-3 w-3" />
+                        {s.noteIsGenerated === false ? "Note written" : "Note generated"}
+                        {(s.noteCount ?? 0) > 1 ? ` ×${s.noteCount}` : ""}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-400">
+                        <FilePlus2 className="h-3 w-3" /> No note yet
+                      </span>
+                    )}
+                    {(s.addedGoalCount ?? 0) > 0 && (
+                      <span
+                        title="Goals added to this session without trial data"
+                        className="inline-flex items-center gap-1 text-[11px] text-zinc-500"
+                      >
+                        <TargetIcon className="h-3 w-3" /> +{s.addedGoalCount} goal{s.addedGoalCount !== 1 ? "s" : ""}
+                      </span>
+                    )}
                     {s.hasNotes && (
-                      <span className="inline-flex items-center gap-1 text-[11px] text-zinc-500">
-                        <StickyNote className="h-3 w-3" /> note
+                      <span title="Field notes were typed on this session" className="inline-flex items-center gap-1 text-[11px] text-zinc-500">
+                        <StickyNote className="h-3 w-3" /> field notes
                       </span>
                     )}
                   </div>

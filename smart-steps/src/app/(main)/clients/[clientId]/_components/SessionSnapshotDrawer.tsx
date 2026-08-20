@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   Activity, Clock, Target as TargetIcon, X, FileText, Sparkles,
   ChevronDown, ChevronUp, Pencil, Trash2, Check, AlertTriangle, CalendarClock,
+  Plus, Search, FileCheck2,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -36,6 +37,25 @@ type SessionTargetSummary = {
   promptCodes: Record<string, number>;
   notes: string[];
   percentage: number;
+  /** Attached to the session by hand rather than derived from trials. */
+  addedManually?: boolean;
+  addedNote?: string | null;
+  addedByName?: string | null;
+};
+
+type SessionNoteRef = {
+  id: string;
+  title: string | null;
+  type: string;
+  isGenerated: boolean;
+  createdAt: string;
+};
+
+type TargetGroup = {
+  groupId: string;
+  groupLabel: string;
+  groupType: "goal" | "program";
+  targets: Array<{ id: string; definition: string; phase: string; subGoalTitle?: string | null }>;
 };
 
 type TrialRecord = {
@@ -68,6 +88,7 @@ type SessionDetail = {
   trialCount: number;
   trials: TrialRecord[];
   sessionTargets: SessionTargetSummary[];
+  notesGenerated?: SessionNoteRef[];
 };
 
 /* ─── Result badge ─────────────────────────────────────────────────────────── */
@@ -248,6 +269,7 @@ export function SessionSnapshotDrawer({
   const qc = useQueryClient();
   const { can } = usePermissions();
   const canDeleteSession = can("smartsteps.sessions.delete");
+  const canEditSession   = can("smartsteps.sessions.edit");
   const [generating, setGenerating]   = useState(false);
   const [deletingSession, setDeletingSession] = useState(false);
   const [showTrials, setShowTrials]   = useState(false);
@@ -259,8 +281,27 @@ export function SessionSnapshotDrawer({
   const [savingSession, setSavingSession]   = useState(false);
   const [sessForm, setSessForm] = useState({ date: "", timeIn: "", timeOut: "", providerId: "" });
 
+  // Adding a goal that was worked on without trial data
+  const [addingGoal, setAddingGoal]   = useState(false);
+  const [goalSearch, setGoalSearch]   = useState("");
+  const [goalNote, setGoalNote]       = useState("");
+  const [savingGoalId, setSavingGoalId] = useState<string | null>(null);
+  const [removingGoalId, setRemovingGoalId] = useState<string | null>(null);
+
   async function handleGenerateNote() {
     if (!sessionId) return;
+    // Generating twice creates a SECOND note rather than replacing the first —
+    // make that explicit instead of silently duplicating the write-up.
+    const existing = data?.notesGenerated ?? [];
+    if (existing.length > 0) {
+      const ok = window.confirm(
+        `A session note already exists for this session (${existing.length} on file).
+
+` +
+        `Generating again creates an additional note; the existing one is not replaced. Continue?`
+      );
+      if (!ok) return;
+    }
     setGenerating(true);
     try {
       const res = await fetch(`/smart-steps/api/sessions/${sessionId}/generate-note`, {
@@ -370,9 +411,88 @@ export function SessionSnapshotDrawer({
     staleTime: 10 * 60 * 1000,
   });
 
+  /* The client's goals, for attaching one that was worked on without data.
+     Loaded only while the picker is open so opening the drawer stays cheap. */
+  const { data: targetData } = useQuery<{ groups: TargetGroup[] }>({
+    queryKey: ["client-targets-picker", data?.clientId],
+    queryFn: async () => {
+      const res = await fetch(`/smart-steps/api/clients/${data!.clientId}/targets`);
+      if (!res.ok) return { groups: [] };
+      return res.json();
+    },
+    enabled: addingGoal && !!data?.clientId,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  /* Goals already on the session — whether from trials or attached by hand —
+     are not offered again by the picker. */
+  const alreadyOnSession = new Set((data?.sessionTargets ?? []).map((t) => t.targetId));
+  const search = goalSearch.trim().toLowerCase();
+  const pickerGroups = (targetData?.groups ?? [])
+    .map((g) => ({
+      ...g,
+      targets: g.targets.filter(
+        (t) =>
+          !alreadyOnSession.has(t.id) &&
+          (search === "" ||
+            t.definition.toLowerCase().includes(search) ||
+            g.groupLabel.toLowerCase().includes(search))
+      ),
+    }))
+    .filter((g) => g.targets.length > 0);
+
+  async function handleAddGoal(targetId: string) {
+    if (!sessionId) return;
+    setSavingGoalId(targetId);
+    try {
+      const res = await fetch(`/smart-steps/api/sessions/${sessionId}/targets`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetId, note: goalNote.trim() || undefined }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(err.error ?? "Failed to add goal");
+      }
+      toast.success("Goal added to this session — it will appear on the session note.");
+      setGoalNote("");
+      qc.invalidateQueries({ queryKey: ["session-snapshot", sessionId] });
+      qc.invalidateQueries({ queryKey: ["sessions"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingGoalId(null);
+    }
+  }
+
+  async function handleRemoveGoal(targetId: string) {
+    if (!sessionId) return;
+    setRemovingGoalId(targetId);
+    try {
+      const res = await fetch(
+        `/smart-steps/api/sessions/${sessionId}/targets?targetId=${encodeURIComponent(targetId)}`,
+        { method: "DELETE" }
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(err.error ?? "Failed to remove goal");
+      }
+      toast.success("Goal removed from this session");
+      qc.invalidateQueries({ queryKey: ["session-snapshot", sessionId] });
+      qc.invalidateQueries({ queryKey: ["sessions"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRemovingGoalId(null);
+    }
+  }
+
   // Reset the edit panel whenever a different session is opened.
   useEffect(() => {
     setEditingSession(false);
+    setAddingGoal(false);
+    setGoalSearch("");
+    setGoalNote("");
   }, [sessionId]);
 
   function startEditSession() {
@@ -666,7 +786,90 @@ export function SessionSnapshotDrawer({
 
                   {/* ── Goals Worked ── */}
                   <div className="space-y-3">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Goals Worked</div>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Goals Worked</div>
+                      {canEditSession && (
+                        <button
+                          type="button"
+                          onClick={() => setAddingGoal((v) => !v)}
+                          className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--glass-border)] px-2.5 py-1.5 text-[11px] font-semibold text-zinc-400 hover:border-[var(--accent-cyan)]/40 hover:text-[var(--accent-cyan)] transition-colors"
+                        >
+                          {addingGoal ? <><X className="h-3.5 w-3.5" /> Done</> : <><Plus className="h-3.5 w-3.5" /> Add goal</>}
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Attach a goal that was worked on without trial data. It
+                        joins the snapshot and the generated session note. */}
+                    <AnimatePresence>
+                      {addingGoal && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: "auto" }}
+                          exit={{ opacity: 0, height: 0 }}
+                          className="overflow-hidden"
+                        >
+                          <div className="space-y-3 rounded-2xl border border-[var(--accent-cyan)]/30 bg-[var(--accent-cyan)]/5 p-4">
+                            <p className="text-xs text-zinc-400">
+                              Add a goal that was worked on during this session but has no trial data.
+                              It appears in the session note under <span className="text-zinc-300">Goals Addressed</span>.
+                            </p>
+
+                            <div className="relative">
+                              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500" />
+                              <input
+                                type="text"
+                                value={goalSearch}
+                                onChange={(e) => setGoalSearch(e.target.value)}
+                                placeholder="Search goals…"
+                                className="field-input w-full pl-9 text-sm"
+                              />
+                            </div>
+
+                            <input
+                              type="text"
+                              value={goalNote}
+                              onChange={(e) => setGoalNote(e.target.value)}
+                              placeholder="Optional note (e.g. “ran in natural environment, no data taken”)"
+                              className="field-input w-full text-sm"
+                            />
+
+                            <div className="max-h-64 space-y-3 overflow-y-auto pr-1">
+                              {pickerGroups.length === 0 ? (
+                                <p className="py-4 text-center text-xs text-zinc-500">
+                                  {targetData ? "No other goals available for this client." : "Loading goals…"}
+                                </p>
+                              ) : (
+                                pickerGroups.map((g) => (
+                                  <div key={g.groupId} className="space-y-1">
+                                    <div className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+                                      {g.groupLabel}
+                                    </div>
+                                    {g.targets.map((t) => (
+                                      <button
+                                        key={t.id}
+                                        type="button"
+                                        disabled={savingGoalId === t.id}
+                                        onClick={() => handleAddGoal(t.id)}
+                                        className="flex w-full items-center gap-2 rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)]/20 px-3 py-2 text-left text-xs text-zinc-300 hover:border-[var(--accent-cyan)]/40 hover:text-zinc-100 disabled:opacity-50 transition-colors"
+                                      >
+                                        <Plus className="h-3.5 w-3.5 shrink-0 text-[var(--accent-cyan)]" />
+                                        <span className="min-w-0 flex-1 truncate">
+                                          {t.definition}
+                                          {t.subGoalTitle ? <span className="text-zinc-500"> · {t.subGoalTitle}</span> : null}
+                                        </span>
+                                        <span className="shrink-0 text-[10px] text-zinc-500">{t.phase}</span>
+                                      </button>
+                                    ))}
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
                     {data.sessionTargets.length === 0 ? (
                       <div className="rounded-2xl border border-dashed border-[var(--glass-border)] p-6 text-sm text-zinc-500">
                         No target-level work was recorded for this session.
@@ -686,16 +889,48 @@ export function SessionSnapshotDrawer({
                                     {item.parentGoalTitle || item.programName || "Unassigned"}{item.subGoalTitle ? ` / ${item.subGoalTitle}` : ""}
                                   </div>
                                 </div>
-                                <div className={`text-sm font-bold ${item.percentage >= 80 ? "text-emerald-300" : item.percentage >= 60 ? "text-amber-300" : "text-rose-300"}`}>
-                                  {item.percentage}%
+                                <div className="flex shrink-0 items-center gap-2">
+                                  {item.trialCount === 0 ? (
+                                    <span className="rounded-full bg-[var(--glass-bg)] px-2 py-0.5 text-[10px] font-semibold text-zinc-400">
+                                      No data
+                                    </span>
+                                  ) : (
+                                    <span className={`text-sm font-bold ${item.percentage >= 80 ? "text-emerald-300" : item.percentage >= 60 ? "text-amber-300" : "text-rose-300"}`}>
+                                      {item.percentage}%
+                                    </span>
+                                  )}
+                                  {/* Only hand-attached goals can be detached here;
+                                      a trial-backed goal leaves by deleting its trials. */}
+                                  {canEditSession && item.addedManually && (
+                                    <button
+                                      type="button"
+                                      title="Remove this goal from the session"
+                                      disabled={removingGoalId === item.targetId}
+                                      onClick={() => handleRemoveGoal(item.targetId)}
+                                      className="rounded-lg p-1.5 text-zinc-500 hover:bg-rose-500/10 hover:text-rose-400 disabled:opacity-40 transition-colors"
+                                    >
+                                      <X className="h-3.5 w-3.5" />
+                                    </button>
+                                  )}
                                 </div>
                               </div>
+                              {item.addedManually && (
+                                <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-[var(--accent-cyan)]/10 px-2 py-0.5 text-[10px] font-semibold text-[var(--accent-cyan)]">
+                                  <Plus className="h-3 w-3" />
+                                  Added to session{item.addedByName ? ` by ${item.addedByName}` : ""}
+                                </div>
+                              )}
                               <div className="mt-3 grid gap-2 text-xs text-zinc-400 sm:grid-cols-4">
                                 <div><span className="text-zinc-500">Trials:</span> {item.trialCount}</div>
                                 <div><span className="text-zinc-500">Prompts:</span> {Object.keys(item.promptCodes).join(", ") || "Independent"}</div>
                                 <div><span className="text-zinc-500">Therapist:</span> {item.providerName || "—"}</div>
                                 <div><span className="text-zinc-500">Status:</span> {item.phase}</div>
                               </div>
+                              {item.addedNote && (
+                                <div className="mt-3 rounded-xl border border-[var(--glass-border)] bg-black/10 p-3 text-xs text-zinc-300">
+                                  {item.addedNote}
+                                </div>
+                              )}
                               {item.notes.length > 0 && (
                                 <div className="mt-3 rounded-xl border border-[var(--glass-border)] bg-black/10 p-3 text-xs text-zinc-300">
                                   {item.notes.join(" | ")}
@@ -790,9 +1025,20 @@ export function SessionSnapshotDrawer({
 
             {/* ── Footer ── */}
             <div className="flex items-center justify-between border-t border-[var(--glass-border)] px-5 py-3 gap-3">
-              <div className="flex items-center gap-2 text-xs text-zinc-500">
-                <Clock className="h-3.5 w-3.5" />
-                {data?.trials?.length ? "Edit the session details or individual trials above." : "Use “Edit” above to update the date, time, or provider."}
+              <div className="flex min-w-0 items-center gap-2 text-xs">
+                {(data?.notesGenerated?.length ?? 0) > 0 ? (
+                  <span className="inline-flex items-center gap-1.5 text-emerald-400">
+                    <FileCheck2 className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">
+                      Note {data!.notesGenerated![0].isGenerated ? "generated" : "written"}{" "}
+                      {new Date(data!.notesGenerated![0].createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 text-amber-400">
+                    <Clock className="h-3.5 w-3.5 shrink-0" /> No session note yet
+                  </span>
+                )}
               </div>
               {data && (
                 <button
@@ -803,7 +1049,7 @@ export function SessionSnapshotDrawer({
                 >
                   {generating
                     ? <><Sparkles className="h-3.5 w-3.5 animate-spin" /> Generating…</>
-                    : <><FileText className="h-3.5 w-3.5" /> Generate BT Note</>
+                    : <><FileText className="h-3.5 w-3.5" /> {(data.notesGenerated?.length ?? 0) > 0 ? "Generate Again" : "Generate BT Note"}</>
                   }
                 </button>
               )}
