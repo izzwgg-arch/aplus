@@ -319,8 +319,17 @@ to `main`:
 ssh -i "C:\Users\A Plus Server\.ssh\id_ed25519" root@91.229.245.143 "cd /var/www/aplus2 && git pull && cd smart-steps && npm ci --no-audit --no-fund && npx prisma generate && npm run build && pm2 restart smart-steps && sleep 5 && curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/smart-steps"
 ```
 
-Expect `200` at the end. If new prisma migrations were added, run
-`npx prisma migrate deploy` before the restart.
+Expect `200` at the end.
+
+**If new prisma migrations were added**, run `prisma migrate deploy` BEFORE the
+build/restart. The Prisma CLI does not read `.env.local` (which is where the
+server keeps `DATABASE_URL`), so it must be injected — a bare
+`npx prisma migrate deploy` fails with `P1012 Environment variable not found:
+DATABASE_URL`:
+
+```
+cd /var/www/aplus2/smart-steps && DATABASE_URL=$(node -e "require('dotenv').config({path:'.env.local'});process.stdout.write(process.env.DATABASE_URL)") npx prisma migrate deploy
+```
 
 **Rollback:** `pm2 delete smart-steps`, then `pm2 start npm --name smart-steps
 -- run start` from `/var/www/aplus/aplus-center-scheduling/smart-steps`
