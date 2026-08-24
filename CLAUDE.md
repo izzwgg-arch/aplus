@@ -365,6 +365,50 @@ session saved without an end time renders as "—" everywhere and has to be
 chased down and corrected later. Combined with the entered-timing fix above,
 every new session now stores a complete, verbatim service window.
 
+## Tracker notes — 12-hour clock, note-type + provider dropdowns (2026-08-24)
+
+Notes are written and read by clinical staff, who work in a 12-hour clock and
+pick a service type by NAME, not by billing code.
+
+- **Time is never shown or entered in 24-hour form.**
+  `smart-steps/src/lib/formatDuration.ts` gained `formatClockTime12h()`
+  ("13:30" -> "1:30 PM") and `formatClockRange12h()` ("1:30 PM – 3:00 PM"); both
+  return `""` for a missing/malformed value so the caller can drop the field.
+  Used by the note cards (SessionNotesTab) and the printed note PDF
+  (`printNotes.ts`). The DB still stores the 24-hour `"HH:MM"` string — only the
+  presentation changed, so `formatClockRangeHours()` keeps working unchanged.
+- **Entry uses `TimeInput12h`** (`src/components/common/TimeInput12h.tsx`), not
+  `<input type="time">`. A bare time input renders in the BROWSER's locale
+  format, so a workstation set to a 24-hour locale showed BCBA notes being
+  written at "14:30". The control is hour + minute dropdowns with an AM/PM
+  toggle, and its value in/out is still the stored `"HH:MM"` 24-hour string.
+  Picking an hour before touching AM/PM defaults to AM for 8–11 and PM
+  otherwise (an ABA day runs late morning to evening); the toggle always shows
+  what was chosen. An off-grid stored minute (e.g. `:07`) is kept as an option.
+- **`src/lib/noteTypes.ts` is the single source of truth for the note taxonomy**
+  — `NOTE_TYPES` (BT_SESSION / BCBA / GENERAL) and `BCBA_SERVICE_TYPES`
+  (DSU / TM / TP / PRT / ASSES with plain-English labels), plus
+  `bcbaServiceLabel()` and `bcbaServiceLabelWithCode()`. NoteEditorModal,
+  SessionNotesTab and printNotes all read from it; the ids must stay in sync
+  with `VALID_BCBA` in `src/app/api/notes/route.ts`.
+- **The note type is a dropdown next to the Title field.** The old grid of
+  DSU/TM/TP/PRT/ASSES buttons is gone; a BCBA now picks "Direct Supervision
+  (DSU)", "Treatment Planning (TP)", "Parent Training (PRT)"… from a select
+  beside the title. The top BT/BCBA/General selector is labelled **Note
+  Category** so the two do not both read as "Note Type".
+- **Auto-titling follows that dropdown** until the user types their own title:
+  `titleTouched` starts `true` for a note that already has a saved title, so an
+  existing title is never rewritten, and the generated title now uses the
+  descriptive label ("Parent Training Note – Aug 24, 2026"), not the code.
+  Switching service type re-seeds the narrative only while it is still one of
+  the generated templates — a BCBA who has started writing keeps their text.
+- **Provider is a dropdown** (`ProviderSelect` inside NoteEditorModal) fed by
+  `GET /api/users?forDropdown=1`, on BCBA, BT and General notes. `Note` stores
+  a NAME (`providerName`), not a user id, so the picker keeps a free-text
+  escape hatch ("Other — type a name…") and offers any unrecognised existing
+  value as its own option — editing an old note never silently blanks its
+  provider.
+
 ## Rule 5: Deploy (step 3 of the Rule 0 end-of-task sequence)
 
 ### Smart Steps ABA Tracker (git-based, re-wired 2026-08-13)
