@@ -75,7 +75,10 @@ enum ResponseType {
 
 model User {
   id                   String               @id @default(cuid())
-  email                String               @unique
+  // Nullable: a "record only" provider (no email, no login) exists purely so
+  // their name can be picked as the provider on a session or note. Postgres
+  // allows many NULLs under a unique index, so several can coexist.
+  email                String?              @unique
   name                 String?
   role                 Role                 @default(RBT)
   displayRole          String? // human-readable title (Supervisor, Clinical Director, etc.)

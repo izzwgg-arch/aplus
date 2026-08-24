@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   UserCheck, Mail, Phone, Award, Users,
   ChevronDown, ChevronRight, Pencil, UserX,
-  X, Loader2, UserPlus, Link2, RotateCcw, KeyRound, Globe,
+  X, Loader2, UserPlus, Link2, RotateCcw, KeyRound, Globe, IdCard,
 } from "lucide-react";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -20,7 +20,9 @@ type AssignedClient = {
 type StaffMember = {
   id:            string;
   name:          string | null;
-  email:         string;
+  /** null for a record-only provider — someone who exists to be picked as a
+   *  provider on sessions and notes, with no email and no login. */
+  email:         string | null;
   role:          string;
   displayRole:   string | null;
   phone:         string | null;
@@ -87,8 +89,10 @@ function StaffEditorModal({ member, onClose, onSaved }: EditorProps) {
   // "invite" = email the user a link to set their own password (new users only, recommended).
   // "sso"    = sign in via A+ Center SSO (no password stored here).
   // "local"  = standalone SmartSteps-only account with an admin-set password.
-  const [loginMethod, setLoginMethod] = useState<"invite" | "sso" | "local">(
-    isEdit ? (member?.hasLocalLogin ? "local" : "sso") : "invite"
+  // "none"   = record-only provider: no email, no login. The name is still
+  //            pickable as the provider on sessions and notes.
+  const [loginMethod, setLoginMethod] = useState<"invite" | "sso" | "local" | "none">(
+    isEdit ? (member?.hasLocalLogin ? "local" : member?.email ? "sso" : "none") : "invite"
   );
   const [password,        setPassword]        = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -96,6 +100,16 @@ function StaffEditorModal({ member, onClose, onSaved }: EditorProps) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+
+    if (!name.trim()) {
+      setError("Name is required");
+      return;
+    }
+
+    if (loginMethod !== "none" && !email.trim()) {
+      setError("Email is required for this login method. Choose “No Login” to add a provider without one.");
+      return;
+    }
 
     if (loginMethod === "local") {
       // For a brand-new local account, or when converting an existing account
@@ -117,17 +131,21 @@ function StaffEditorModal({ member, onClose, onSaved }: EditorProps) {
 
     setSaving(true);
     try {
+      const isRecordOnly = loginMethod === "none";
       const isInvite = !isEdit && loginMethod === "invite";
       const wantsNewPassword = loginMethod === "local" && password.length > 0;
       const body = {
         name,
-        email,
+        // An empty email is what tells PATCH to turn the row into a
+        // record-only provider (and revoke any login it still had).
+        email:       isRecordOnly ? "" : email,
         role,
         displayRole: displayRole || null,
         phone:       phone       || null,
         credentials: credentials || null,
         ...(isEdit ? { isActive } : {}),
         ...(isInvite ? { loginMethod: "invite" } : {}),
+        ...(!isEdit && isRecordOnly ? { loginMethod: "none" } : {}),
         ...(wantsNewPassword ? { password } : {}),
         ...(isEdit && loginMethod === "sso" && member?.hasLocalLogin ? { removeLocalLogin: true } : {}),
       };
@@ -185,7 +203,7 @@ function StaffEditorModal({ member, onClose, onSaved }: EditorProps) {
           {/* Login method */}
           <div>
             <label className="mb-1.5 block text-xs font-medium text-zinc-400">Login Method</label>
-            <div className={`grid gap-2 ${isEdit ? "grid-cols-2" : "grid-cols-3"}`}>
+            <div className={`grid gap-2 ${isEdit ? "grid-cols-3" : "grid-cols-2"}`}>
               {!isEdit && (
                 <button
                   type="button"
@@ -233,6 +251,21 @@ function StaffEditorModal({ member, onClose, onSaved }: EditorProps) {
                   <span className="block text-[10px] opacity-75">Admin sets password</span>
                 </span>
               </button>
+              <button
+                type="button"
+                onClick={() => setLoginMethod("none")}
+                className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left text-sm transition-colors ${
+                  loginMethod === "none"
+                    ? "border-[var(--accent-cyan)]/50 bg-[var(--accent-cyan)]/10 text-[var(--accent-cyan)]"
+                    : "border-[var(--glass-border)] text-zinc-400 hover:bg-white/5"
+                }`}
+              >
+                <IdCard className="h-4 w-4 shrink-0" />
+                <span>
+                  <span className="block font-semibold">No Login</span>
+                  <span className="block text-[10px] opacity-75">Name on record only</span>
+                </span>
+              </button>
             </div>
             {loginMethod === "invite" ? (
               <p className="mt-1.5 text-[10px] leading-relaxed text-zinc-600">
@@ -244,10 +277,18 @@ function StaffEditorModal({ member, onClose, onSaved }: EditorProps) {
                 No password is stored here. The user must sign in through A+ Center SSO using this
                 same email address to activate their account.
               </p>
-            ) : (
+            ) : loginMethod === "local" ? (
               <p className="mt-1.5 text-[10px] leading-relaxed text-zinc-600">
                 Independent SmartSteps login — no A+ Center account required.
                 {isEdit && member?.hasLocalLogin && " Leave the password fields blank to keep the current password."}
+              </p>
+            ) : (
+              <p className="mt-1.5 text-[10px] leading-relaxed text-zinc-600">
+                No email and no sign-in. The person is added to the directory so their name can be
+                picked as the provider on sessions and notes, and they can be assigned clients.
+                {isEdit && (member?.hasLocalLogin || member?.email)
+                  ? " Saving this removes their email and revokes their login."
+                  : " Add an email later to turn this into a real account."}
               </p>
             )}
           </div>
@@ -295,14 +336,17 @@ function StaffEditorModal({ member, onClose, onSaved }: EditorProps) {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-zinc-400">Email *</label>
+              <label className="mb-1 block text-xs font-medium text-zinc-400">
+                {loginMethod === "none" ? "Email" : "Email *"}
+              </label>
               <input
                 type="email"
-                value={email}
+                value={loginMethod === "none" ? "" : email}
                 onChange={(e) => setEmail(e.target.value)}
-                required
-                className="w-full rounded-xl border border-[var(--glass-border)] bg-white/5 px-3 py-2 text-sm text-[var(--foreground)] placeholder-zinc-600 focus:border-[var(--accent-cyan)]/50 focus:outline-none"
-                placeholder="email@example.com"
+                required={loginMethod !== "none"}
+                disabled={loginMethod === "none"}
+                className="w-full rounded-xl border border-[var(--glass-border)] bg-white/5 px-3 py-2 text-sm text-[var(--foreground)] placeholder-zinc-600 focus:border-[var(--accent-cyan)]/50 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                placeholder={loginMethod === "none" ? "Not needed — no login" : "email@example.com"}
               />
             </div>
           </div>
@@ -535,7 +579,7 @@ function AssignClientsModal({ member, onClose }: AssignProps) {
           <div>
             <h2 className="text-lg font-bold text-[var(--foreground)]">Assign Clients</h2>
             <p className="text-xs text-zinc-500">
-              {member.name ?? member.email}
+              {member.name ?? member.email ?? "(no name)"}
               {member.displayRole && (
                 <span className="ml-1.5 text-zinc-600">· {member.displayRole}</span>
               )}
@@ -683,10 +727,12 @@ function StaffCard({
   const archivedClients = member.assignedClients.filter((a) =>  a.client.isArchived);
   const isAdmin         = userRole === "ADMIN";
   const isAdminOrBcba   = userRole === "ADMIN" || userRole === "BCBA";
-  const isPendingInvite = !!member.invitedAt && !member.hasLocalLogin;
+  const isPendingInvite = !!member.invitedAt && !member.hasLocalLogin && !!member.email;
+  // Record-only provider: no email at all, so no sign-in path exists.
+  const isRecordOnly    = !member.email;
   // A user can be (re)sent an invite link as long as they haven't set a local
   // password yet. This includes SSO stubs that were never emailed an invite.
-  const canInvite       = isAdmin && !member.hasLocalLogin;
+  const canInvite       = isAdmin && !member.hasLocalLogin && !isRecordOnly;
 
   return (
     <motion.div
@@ -707,7 +753,7 @@ function StaffCard({
           }`}
         >
           <span className="text-sm font-bold text-[var(--foreground)]">
-            {(member.name ?? member.email).charAt(0).toUpperCase()}
+            {(member.name ?? member.email ?? "?").charAt(0).toUpperCase()}
           </span>
         </div>
 
@@ -736,7 +782,15 @@ function StaffCard({
             )}
 
             {/* Login method / invite badge */}
-            {isPendingInvite ? (
+            {isRecordOnly ? (
+              <span
+                title="Record only — no email and no sign-in. Selectable as a provider on sessions and notes."
+                className="flex items-center gap-1 rounded-full border border-zinc-700 px-2 py-0.5 text-[10px] font-medium text-zinc-500"
+              >
+                <IdCard className="h-2.5 w-2.5" />
+                No login
+              </span>
+            ) : isPendingInvite ? (
               <span
                 title="Invited by email — waiting for the user to set their password"
                 className="flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-400"
@@ -763,10 +817,17 @@ function StaffCard({
           </div>
 
           <div className="mt-0.5 flex flex-wrap items-center gap-3 text-xs text-zinc-500">
-            <span className="flex items-center gap-1">
-              <Mail className="h-3 w-3" />
-              {member.email}
-            </span>
+            {member.email ? (
+              <span className="flex items-center gap-1">
+                <Mail className="h-3 w-3" />
+                {member.email}
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-zinc-600">
+                <IdCard className="h-3 w-3" />
+                No email — record only
+              </span>
+            )}
             {member.phone && (
               <span className="flex items-center gap-1">
                 <Phone className="h-3 w-3" />
@@ -969,7 +1030,7 @@ export default function StaffPage() {
           const data = (await r.json().catch(() => ({}))) as { error?: string };
           throw new Error(data.error ?? "Failed to resend invite");
         }
-        setToast(`Invitation email sent to ${member.email}.`);
+        setToast(`Invitation email sent to ${member.email ?? member.name ?? "staff member"}.`);
       } catch (err) {
         setToast(err instanceof Error ? err.message : "Failed to resend invite");
       } finally {
@@ -1046,7 +1107,8 @@ export default function StaffPage() {
           )}
         </div>
         <p className="mt-1 text-sm text-zinc-500">
-          Manage staff members, roles, and client assignments.
+          Manage staff members, roles, and client assignments. A provider who never signs in can be
+          added with a name only — pick &ldquo;No Login&rdquo; and leave the email blank.
         </p>
       </motion.div>
 

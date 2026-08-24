@@ -52,6 +52,9 @@ async function main() {
 
   const groups = new Map();
   for (const u of users) {
+    // Record-only providers have no email. They are distinct people who all
+    // share the same (null) key, so they must never be grouped or merged.
+    if (!u.email) continue;
     const key = u.email.trim().toLowerCase();
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(u);
@@ -60,7 +63,9 @@ async function main() {
   const dupGroups = [...groups.entries()].filter(([, list]) => list.length > 1);
   console.log(`Total users: ${users.length}; emails with duplicates: ${dupGroups.length}`);
 
-  const placeholders = users.filter((u) => u.email.startsWith("sso-") && u.email.endsWith("@smart-steps.local"));
+  const placeholders = users.filter(
+    (u) => u.email && u.email.startsWith("sso-") && u.email.endsWith("@smart-steps.local"),
+  );
   if (placeholders.length > 0) {
     console.log(`\nNOTE: ${placeholders.length} placeholder account(s) (sso-*@smart-steps.local) cannot be`);
     console.log("matched by email automatically — review these manually:");
@@ -158,7 +163,7 @@ async function main() {
   // Normalize email casing on all surviving rows (safe post-merge: any two
   // rows differing only by case were a duplicate group and are now one row).
   const survivors = await prisma.user.findMany({ select: { id: true, email: true } });
-  const toLower = survivors.filter((u) => u.email !== u.email.trim().toLowerCase());
+  const toLower = survivors.filter((u) => u.email && u.email !== u.email.trim().toLowerCase());
   console.log(`\nEmails needing lowercase normalization: ${toLower.length}`);
   for (const u of toLower) {
     console.log(`  ${u.email} -> ${u.email.trim().toLowerCase()}`);

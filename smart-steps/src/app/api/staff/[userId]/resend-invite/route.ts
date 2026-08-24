@@ -26,6 +26,12 @@ export async function POST(_req: Request, { params }: Params) {
     select: { id: true, email: true, name: true, passwordHash: true },
   });
   if (!target) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!target.email) {
+    return NextResponse.json(
+      { error: "This provider has no email address. Add one before sending an invitation." },
+      { status: 400 }
+    );
+  }
   if (target.passwordHash) {
     return NextResponse.json(
       { error: "This user has already set a password and activated their account." },

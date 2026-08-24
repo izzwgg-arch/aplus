@@ -83,8 +83,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           await auditLog(localUser.id, "MANUAL_LOGIN", "User", localUser.id, { method: "local_password" });
           return {
             id: localUser.id,
-            email: localUser.email,
-            name: localUser.name ?? localUser.email.split("@")[0],
+            // Matched BY email above, so it is non-null here — a record-only
+            // provider (email null) has no passwordHash and never gets here.
+            email: localUser.email ?? normalizedEmail,
+            name: localUser.name ?? normalizedEmail.split("@")[0],
             role: localUser.role,
           };
         }

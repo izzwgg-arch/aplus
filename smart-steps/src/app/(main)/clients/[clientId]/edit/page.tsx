@@ -18,8 +18,9 @@ export default function EditClientPage() {
   const [diagnosisInput, setDiagnosisInput] = useState("");
 
   // Staff assignments
-  const [assignments, setAssignments] = useState<Array<{ id: string; userId: string; role: string; name: string | null; email: string }>>([]);
-  const [allUsers, setAllUsers] = useState<Array<{ id: string; name: string | null; email: string; role: string }>>([]);
+  // email is null for record-only providers (added with a name and no login).
+  const [assignments, setAssignments] = useState<Array<{ id: string; userId: string; role: string; name: string | null; email: string | null }>>([]);
+  const [allUsers, setAllUsers] = useState<Array<{ id: string; name: string | null; email: string | null; role: string }>>([]);
   const [assignUserId, setAssignUserId] = useState("");
   const [assignRole, setAssignRole] = useState("RBT");
   const [assignSaving, setAssignSaving] = useState(false);
@@ -252,7 +253,7 @@ export default function EditClientPage() {
                 {assignments.map((a) => (
                   <div key={a.id} className="flex items-center gap-3 rounded-xl bg-[var(--glass-bg)] border border-[var(--glass-border)] px-3 py-2.5">
                     <div className="flex-1 min-w-0">
-                      <span className="text-sm font-medium text-[var(--foreground)]">{a.name ?? a.email}</span>
+                      <span className="text-sm font-medium text-[var(--foreground)]">{a.name ?? a.email ?? "(no name)"}</span>
                       <span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${
                         a.role === "BCBA" ? "bg-[var(--accent-cyan)]/20 text-[var(--accent-cyan)]"
                         : "bg-[var(--accent-purple)]/20 text-[var(--accent-purple)]"
@@ -288,7 +289,7 @@ export default function EditClientPage() {
                 {allUsers
                   .filter((u) => !assignments.find((a) => a.userId === u.id))
                   .map((u) => (
-                    <option key={u.id} value={u.id}>{u.name ?? u.email} ({u.role})</option>
+                    <option key={u.id} value={u.id}>{u.name ?? u.email ?? "(no name)"} ({u.role})</option>
                   ))}
               </select>
               <select
@@ -319,7 +320,7 @@ export default function EditClientPage() {
                       userId: assignUserId,
                       role: assignRole,
                       name: user?.name ?? null,
-                      email: user?.email ?? "",
+                      email: user?.email ?? null,
                     }]);
                     setAssignUserId("");
                     toast.success("Staff assigned");

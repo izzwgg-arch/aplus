@@ -79,6 +79,9 @@ export async function GET(req: Request) {
  * - "local" (with `password`): standalone account with an admin-set password.
  * - "invite": creates the account with no password, emails the user a
  *   one-time link to set their own password and activate the account.
+ * - "none": record-only provider — no email, no password, no way to sign in.
+ *   Exists so the person's name can be picked as the provider on a session or
+ *   note; an email can be added later to turn it into a real login.
  */
 export async function POST(req: Request) {
   const user = await requireSession();
@@ -91,16 +94,23 @@ export async function POST(req: Request) {
     const body = await req.json();
     const { name, email, role, displayRole, phone, credentials, password, loginMethod } = body;
 
-    if (!email?.trim()) return NextResponse.json({ error: "Email is required" }, { status: 400 });
     if (!name?.trim()) return NextResponse.json({ error: "Name is required" }, { status: 400 });
     if (!VALID_ROLES.includes(role)) {
       return NextResponse.json({ error: "Invalid role. Must be RBT, BCBA, or ADMIN" }, { status: 400 });
     }
 
-    const isInvite = loginMethod === "invite";
+    // Record-only provider: a name to pick as the provider on a session or
+    // note, with no login. Every other method signs the person in BY email, so
+    // the address stays mandatory for those.
+    const isRecordOnly = loginMethod === "none";
+    if (!isRecordOnly && !email?.trim()) {
+      return NextResponse.json({ error: "Email is required" }, { status: 400 });
+    }
+
+    const isInvite = !isRecordOnly && loginMethod === "invite";
 
     let passwordHash: string | null = null;
-    if (!isInvite && password !== undefined && password !== "") {
+    if (!isRecordOnly && !isInvite && password !== undefined && password !== "") {
       if (!isValidPassword(password)) {
         return NextResponse.json(
           { error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` },
@@ -110,10 +120,12 @@ export async function POST(req: Request) {
       passwordHash = await hashPassword(password);
     }
 
-    const normalized = email.trim().toLowerCase();
-    const existing = await prisma.user.findUnique({ where: { email: normalized } });
-    if (existing) {
-      return NextResponse.json({ error: "A user with this email already exists" }, { status: 409 });
+    const normalized: string | null = isRecordOnly ? null : email.trim().toLowerCase();
+    if (normalized) {
+      const existing = await prisma.user.findUnique({ where: { email: normalized } });
+      if (existing) {
+        return NextResponse.json({ error: "A user with this email already exists" }, { status: 409 });
+      }
     }
 
     // Assign the default AppRole matching the legacy role (keys align: RBT/BCBA/
@@ -143,10 +155,10 @@ export async function POST(req: Request) {
     await auditLog(user.id, isInvite ? "USER_INVITED" : "USER_CREATED", "User", created.id, {
       email: normalized,
       role,
-      loginMethod: isInvite ? "invite" : passwordHash ? "local" : "sso",
+      loginMethod: isRecordOnly ? "none" : isInvite ? "invite" : passwordHash ? "local" : "sso",
     });
 
-    if (isInvite) {
+    if (isInvite && created.email) {
       try {
         await sendInvite({ id: created.id, email: created.email, name: created.name });
       } catch (err) {

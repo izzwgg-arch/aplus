@@ -409,6 +409,36 @@ pick a service type by NAME, not by billing code.
   value as its own option — editing an old note never silently blanks its
   provider.
 
+## Tracker staff — providers without an email or login (2026-08-24)
+
+Not every provider whose name has to appear on a session or note is a Tracker
+user. Settings → Staff therefore has a fourth login method, **"No Login — name
+on record only"**: name + role, no email, no password, no invite.
+
+- `User.email` is now **nullable** (migration `20260824000000_optional_staff_email`
+  — `ALTER TABLE "User" ALTER COLUMN "email" DROP NOT NULL`). The `@unique`
+  index is unchanged: Postgres treats NULLs as distinct, so any number of
+  login-less records coexist.
+- `POST /api/staff` accepts `loginMethod: "none"` — email optional, password and
+  invite ignored, `invitedAt` null. Email stays **mandatory** for the sso /
+  local / invite methods, because every sign-in path identifies the person BY
+  email.
+- `PATCH /api/staff/[userId]` with an **empty** `email` converts an existing
+  account to record-only: it clears the address and revokes the login with it
+  (`passwordHash` and `invitedAt` are nulled) rather than leaving credentials
+  nothing can authenticate against. Clearing your OWN email is refused — it
+  would lock you out. Adding an email back later restores a real account, and
+  `ensureUser()` links the SSO login to that row by email as usual.
+- `POST /api/staff/[userId]/resend-invite` 400s on a provider with no email.
+- The staff card shows a grey **"No login"** chip and "No email — record only"
+  in place of the SSO/local chip, and hides the invite button.
+- Record-only providers are ordinary `User` rows, so they already appear in the
+  provider dropdowns (`GET /api/users?forDropdown=1`) on sessions and notes, and
+  can be assigned clients.
+- `scripts/mergeDuplicateUsers.mjs` **skips rows with no email**. They are
+  distinct people sharing one null key — grouping them would merge unrelated
+  providers into one.
+
 ## Rule 5: Deploy (step 3 of the Rule 0 end-of-task sequence)
 
 ### Smart Steps ABA Tracker (git-based, re-wired 2026-08-13)

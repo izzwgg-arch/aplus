@@ -68,6 +68,11 @@ export async function GET(_req: Request, { params }: Params) {
  * Updates a staff member's profile fields.
  * ADMIN only. Supports partial updates.
  * Allowed fields: name, email, role, displayRole, phone, credentials, isActive
+ *
+ * Sending an empty `email` turns the account into a record-only provider: the
+ * address is cleared and every login is revoked with it (password + pending
+ * invite), because every sign-in path here identifies the person BY email.
+ * Clearing your own email is refused — it would lock you out.
  */
 export async function PATCH(req: Request, { params }: Params) {
   const user = await requireSession();
@@ -86,14 +91,25 @@ export async function PATCH(req: Request, { params }: Params) {
 
     if (name !== undefined) data.name = name?.trim() || null;
 
+    let clearingEmail = false;
     if (email !== undefined) {
       const normalized = email?.trim().toLowerCase();
-      if (!normalized) return NextResponse.json({ error: "Email cannot be empty" }, { status: 400 });
-      const conflict = await prisma.user.findFirst({
-        where: { email: normalized, NOT: { id: userId } },
-      });
-      if (conflict) return NextResponse.json({ error: "Email already in use" }, { status: 409 });
-      data.email = normalized;
+      if (!normalized) {
+        if (userId === user.id) {
+          return NextResponse.json(
+            { error: "You cannot remove the email address from your own account" },
+            { status: 400 }
+          );
+        }
+        clearingEmail = true;
+        data.email = null;
+      } else {
+        const conflict = await prisma.user.findFirst({
+          where: { email: normalized, NOT: { id: userId } },
+        });
+        if (conflict) return NextResponse.json({ error: "Email already in use" }, { status: 409 });
+        data.email = normalized;
+      }
     }
 
     if (role !== undefined) {
@@ -122,6 +138,14 @@ export async function PATCH(req: Request, { params }: Params) {
       passwordChanged = true;
     } else if (removeLocalLogin === true) {
       data.passwordHash = null;
+      passwordChanged = true;
+    }
+
+    // No email means no way to sign in — drop the password and any pending
+    // invite rather than leaving credentials nothing can authenticate against.
+    if (clearingEmail) {
+      data.passwordHash = null;
+      data.invitedAt = null;
       passwordChanged = true;
     }
 
@@ -161,7 +185,7 @@ export async function PATCH(req: Request, { params }: Params) {
 
     if (passwordChanged) {
       await auditLog(user.id, "USER_PASSWORD_SET", "User", userId, {
-        loginMethod: updated.passwordHash ? "local" : "sso",
+        loginMethod: updated.passwordHash ? "local" : updated.email ? "sso" : "none",
       });
     }
 
