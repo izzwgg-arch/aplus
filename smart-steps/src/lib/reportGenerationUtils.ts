@@ -140,6 +140,15 @@ const FIXED_CATEGORIES: FixedCategory[] = [
   },
 ];
 
+/**
+ * The five fixed clinical categories, in document order, as the report's own
+ * table headings spell them. Exported so the assessment editor's goal picker
+ * offers exactly the categories the generated tables group rows under — a
+ * free-typed category would land in an "extra" group at the bottom instead.
+ */
+export const REPORT_CATEGORY_OPTIONS: { label: string; tableLabel: string }[] =
+  FIXED_CATEGORIES.map((c) => ({ label: c.label, tableLabel: c.tableLabel }));
+
 /** Resolves a goal's raw domain string (program name → domain → "General"). */
 function goalDomainString(g: ReportParentGoal, programMap: Map<string, string>): string {
   return (

@@ -3,9 +3,12 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Save, Plus, Trash2, GripVertical, Pencil, Printer } from "lucide-react";
+import { ArrowLeft, Save, Plus, Trash2, GripVertical, Pencil, Printer, BookOpen } from "lucide-react";
 import { toast } from "sonner";
 import RichTextEditor from "@/components/RichTextEditor";
+import AddGoalFromLibraryModal from "@/components/assessments/AddGoalFromLibraryModal";
+import { usePermissions } from "@/hooks/usePermissions";
+import { goalTableKind, insertGoalRow, type GoalRow, type GoalTableKind } from "@/lib/reportGoalTables";
 import { printAssessmentReport } from "./printAssessment";
 
 type Section = { id: string; title: string; order: number; content: string };
@@ -41,6 +44,9 @@ export default function ClientReportEditorPage() {
   const [status,    setStatus]    = useState("DRAFT");
   const [showAddSection, setShowAddSection] = useState(false);
   const [newTitle,  setNewTitle]  = useState("");
+  const [goalPicker, setGoalPicker] = useState<{ sectionId: string; title: string; kind: GoalTableKind } | null>(null);
+  const { canAny } = usePermissions();
+  const canUseLibrary = canAny(["smartsteps.goal_library.view", "smartsteps.parent_goal_library.view"]);
   const dragIdx  = useRef<number | null>(null);
   const dragOver = useRef<number | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -108,6 +114,14 @@ export default function ClientReportEditorPage() {
 
   function updateSection(sectionId: string, field: "title" | "content", value: string) {
     setSections((p) => p.map((s) => s.id === sectionId ? { ...s, [field]: value } : s));
+    setDirty(true);
+  }
+
+  /** Drops a library-picked goal into the section's goal table, in place. */
+  function addGoalRow(sectionId: string, kind: GoalTableKind, row: GoalRow) {
+    setSections((p) =>
+      p.map((s) => (s.id === sectionId ? { ...s, content: insertGoalRow(s.content || "", kind, row) } : s)),
+    );
     setDirty(true);
   }
 
@@ -252,7 +266,10 @@ export default function ClientReportEditorPage() {
 
           {/* Sections */}
           <div className="space-y-4">
-            {sections.map((sec, idx) => (
+            {sections.map((sec, idx) => {
+              // Goal-table sections get a library picker; prose sections do not.
+              const tableKind = goalTableKind(sec.title);
+              return (
               <div
                 key={idx}
                 draggable
@@ -271,6 +288,16 @@ export default function ClientReportEditorPage() {
                     onChange={(e) => updateSection(sec.id, "title", e.target.value)}
                     placeholder="Section title"
                   />
+                  {tableKind && canUseLibrary && report.client && (
+                    <button
+                      type="button"
+                      onClick={() => setGoalPicker({ sectionId: sec.id, title: sec.title, kind: tableKind })}
+                      className="flex shrink-0 items-center gap-1.5 rounded-lg border border-[var(--accent-cyan)]/30 bg-[var(--accent-cyan)]/10 px-2.5 py-1 text-[11px] font-semibold text-[var(--accent-cyan)] hover:bg-[var(--accent-cyan)]/20 transition-colors"
+                      title="Pick a goal from the Goal Library"
+                    >
+                      <BookOpen className="h-3 w-3" /> Add goal
+                    </button>
+                  )}
                   <div className="flex shrink-0 items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <span className="text-[10px] text-zinc-600">§{idx + 1}</span>
                     <button type="button" onClick={() => deleteSection(sec.id)}
@@ -291,7 +318,8 @@ export default function ClientReportEditorPage() {
                   />
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* Add section */}
@@ -339,6 +367,20 @@ export default function ClientReportEditorPage() {
           )}
         </div>
       </div>
+
+      <AnimatePresence>
+        {goalPicker && report.client && (
+          <AddGoalFromLibraryModal
+            key={goalPicker.sectionId}
+            clientId={report.client.id}
+            clientName={report.client.name}
+            kind={goalPicker.kind}
+            sectionTitle={goalPicker.title}
+            onClose={() => setGoalPicker(null)}
+            onAdded={(row) => addGoalRow(goalPicker.sectionId, goalPicker.kind, row)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

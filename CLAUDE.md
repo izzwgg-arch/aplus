@@ -439,6 +439,68 @@ on record only"**: name + role, no email, no password, no invite.
   distinct people sharing one null key — grouping them would merge unrelated
   providers into one.
 
+## Tracker assessments — add goals from the Goal Library (2026-08-24)
+
+An assessment report's goal tables used to be filled in by typing into the
+table. Every goal-table section in the report editor
+(`/assessments/reports/[id]`) now carries an **"Add goal"** button that opens
+the Goal Library in a dropdown, and a goal picked there becomes a REAL goal for
+the child — not just a row of table text — so a BT can start taking data on it
+the same day and the report never drifts from the treatment program.
+
+- **Which sections get the button** is decided by `goalTableKind()` in
+  `smart-steps/src/lib/reportGoalTables.ts`, which delegates to
+  `detectSectionType()` — the four kinds whose generated content is a TABLE:
+  `mastered_goals`, `current_goals`, `new_goals`, `parent_goals`. Prose
+  sections (the per-domain `category_goals` paragraphs, biopsychosocial, …) do
+  not get one. Renaming a template section changes both generation and this
+  button together, because there is still only the one detector.
+- **The dropdown is the whole library**, not a top-N search: it reads
+  `GET /api/goal-library` / `GET /api/parent-goal-library` (neither takes a
+  limit) and groups items into `<optgroup>`s by their own category/domain, with
+  a filter box above it and an "Not in the library — type it below" escape
+  hatch. `(Client)` / `{{client}}` placeholders resolve to the child's name.
+  The button is hidden unless the user holds `smartsteps.goal_library.view` or
+  `smartsteps.parent_goal_library.view`.
+- **Both item types are offered**: a **Goal** (DB `Target`) or a **Skill area /
+  parent goal** (DB `ParentGoal`), matching the two libraries in the sidebar.
+- **`POST /api/clients/[clientId]/goal-library-import`** does the writing. It
+  resolves Category (DB `Program`) and Skill Area (DB `ParentGoal`) **by name,
+  case-insensitively**, and creates them when they do not exist — "if it is a
+  new skill area then a new skill area should open". It then creates the
+  `Target` under that skill area with `phase: "NEW"`, mapping
+  `operationalDefinition` onto `Target.baseline` exactly as `POST /api/targets`
+  does, so an imported goal is indistinguishable from one added in the
+  Goals & Targets tab. The chosen Start Date is stored as
+  `masteryRule.openedDate`, which is what `getTargetStartDate()` reads back
+  when the report is regenerated.
+  - Requires client access plus `smartsteps.targets.create` (goal) /
+    `smartsteps.goals.create` (skill area). Creating the **category** is a side
+    effect, so it is skipped (goal lands uncategorised) rather than failing the
+    import when the user lacks `smartsteps.programs.create`.
+  - **Idempotent on the goal**: re-importing the same definition under the same
+    skill area returns the existing `Target` with `duplicate: true`. Report
+    tables get edited repeatedly — stacking copies would corrupt the program.
+  - An existing skill area with no `programId` adopts the resolved category;
+    an unlinked skill area is invisible in the Goals & Targets drill-down.
+  - Library usage/`usageCount` is recorded here, mirroring
+    `POST /api/goal-library/recently-used`.
+- **Where the row lands** is decided by `insertGoalRow()` in the same lib file.
+  It reads the table's own `<thead>` and maps cells **by column NAME**, never by
+  position, so a template that renames or reorders a column still fills
+  correctly (the objective/definition test runs before the catch-all that reads
+  "goal" as a label column — "Behavior / Goal" is a label, "Goal/Operational
+  Definition" is not). The row is filed at the END of the matching category
+  group rather than the bottom of the table, `&` and `AND` heading spellings
+  both match, and `NEW GOALS – …` banners count as part of the group above
+  them. With no table in the section, one is built with that kind's standard
+  columns.
+- **Parent-training rows are the exception to auto-creating a goal.** The
+  "Also add to <name>'s Goals & Targets" switch defaults ON everywhere except a
+  `parent_goals` section, where the objectives belong to the caregivers and a
+  `Target` on the child's program would be wrong. The user can flip it either
+  way.
+
 ## Rule 5: Deploy (step 3 of the Rule 0 end-of-task sequence)
 
 ### Smart Steps ABA Tracker (git-based, re-wired 2026-08-13)
