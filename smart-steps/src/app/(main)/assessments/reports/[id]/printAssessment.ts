@@ -455,6 +455,93 @@ export function printAssessmentReport(
         }
       }
 
+      /**
+       * Breaks `el` into the smallest pieces it can be split between: element
+       * children stay whole (so a list gives up whole `<li>`s and inline markup
+       * is never torn), while a text child becomes one atom per word — each
+       * keeping its own surrounding whitespace, so re-joining the atoms
+       * reproduces the original text exactly. `el` is left empty.
+       */
+      function atomize(el: Element): Node[] {
+        const atoms: Node[] = [];
+        for (const node of Array.from(el.childNodes)) {
+          if (node.nodeType === Node.TEXT_NODE) {
+            const parts = (node.nodeValue ?? "").match(/\s*\S+\s*/g);
+            if (parts) parts.forEach((p) => atoms.push(doc.createTextNode(p)));
+            else atoms.push(node);
+          } else {
+            atoms.push(node);
+          }
+        }
+        el.textContent = "";
+        return atoms;
+      }
+
+      function fillAtoms(el: Element, atoms: Node[], count: number) {
+        el.textContent = "";
+        for (let i = 0; i < count; i++) el.appendChild(atoms[i]);
+      }
+
+      /**
+       * Moves trailing content out of `el` into a continuation clone until the
+       * page stops overflowing, and returns that clone (null when the block
+       * cannot be split any further).
+       *
+       * How much fits is found by BINARY SEARCH, not by shedding one word at a
+       * time: height grows monotonically with the number of atoms kept, so ~12
+       * layout measurements settle a 4000-word paragraph where peeling words
+       * off the end needed 4000 and took eleven seconds.
+       */
+      function splitOverflowingBlock(el: Element): Element | null {
+        const atoms = atomize(el);
+        if (atoms.length === 0) return null;
+
+        let lo = 0;
+        let hi = atoms.length;
+        let best = 0;
+        while (lo <= hi) {
+          const mid = (lo + hi) >> 1;
+          fillAtoms(el, atoms, mid);
+          if (pageOverflows()) hi = mid - 1;
+          else { best = mid; lo = mid + 1; }
+        }
+
+        // Not even one atom fits: keep one anyway so the split makes progress
+        // and the remainder still flows, rather than stalling on this block.
+        if (best === 0) best = atoms.length > 1 ? 1 : atoms.length;
+        fillAtoms(el, atoms, best);
+        if (best >= atoms.length) return null;
+
+        const cont = el.cloneNode(false) as Element;
+        atoms.slice(best).forEach((n) => cont.appendChild(n));
+        return cont;
+      }
+
+      /**
+       * Appends `block` to the current shell and spills whatever still
+       * overflows onto continuation pages, splitting the block itself when it
+       * is taller than a whole page. This is what keeps the document reflowing
+       * as content is added: everything below simply moves down, and nothing
+       * is clipped at a page edge.
+       */
+      function spillBlockAcrossPages(block: Node) {
+        current.contentEl.appendChild(block);
+        placedInCurrent++;
+        if (!pageOverflows() || block.nodeType !== Node.ELEMENT_NODE) return;
+
+        let working = block as Element;
+        for (let guard = 0; pageOverflows() && guard < 500; guard++) {
+          const rest = splitOverflowingBlock(working);
+          // Nothing could be moved, or the split emptied the block entirely —
+          // no progress is possible, so stop rather than loop.
+          if (!rest || working.childNodes.length === 0) return;
+          startContinuationShell();
+          current.contentEl.appendChild(rest);
+          placedInCurrent++;
+          working = rest;
+        }
+      }
+
       for (const block of blocks) {
         if (block.nodeType === Node.ELEMENT_NODE && (block as Element).tagName === "TABLE") {
           appendTableAcrossPages(block as HTMLTableElement);
@@ -480,15 +567,13 @@ export function printAssessmentReport(
             current.contentEl.removeChild(block);
             placedInCurrent--;
           }
-          // single block taller than an empty page — keep it and let it clip
-          current.contentEl.appendChild(block);
-          placedInCurrent++;
+          // Taller than an empty page — split it across pages, never clip it.
+          spillBlockAcrossPages(block);
           continue;
         }
 
         startContinuationShell();
-        current.contentEl.appendChild(block);
-        placedInCurrent++;
+        spillBlockAcrossPages(block);
       }
     }
 

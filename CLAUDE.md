@@ -511,6 +511,36 @@ the same day and the report never drifts from the treatment program.
   `Target` on the child's program would be wrong. The user can flip it either
   way.
 
+## Tracker assessment print — nothing is ever clipped (2026-08-24)
+
+`printAssessment.ts`'s paginator measures real overflow and pushes content onto
+continuation pages, so adding text to a section moves everything below it down.
+Two paths used to give up and clip instead, which in a clinical PDF is silent
+data loss:
+
+- a **non-table block taller than an empty page** (one long narrative
+  paragraph, or a long list) was appended and left to clip;
+- after `startContinuationShell()` the block was appended **without
+  re-checking overflow**, so a block too tall for the fresh page clipped there.
+
+Both now go through `spillBlockAcrossPages()`, which keeps splitting the block
+onto further pages until it fits. `splitOverflowingBlock()` does the splitting
+via `atomize()`: element children stay whole (a list sheds whole `<li>`s,
+inline markup is never torn) and a text child becomes one atom per word, each
+carrying its own surrounding whitespace so re-joining reproduces the original
+text exactly.
+
+**How much fits is found by BINARY SEARCH, not by shedding one word at a
+time.** Height grows monotonically with the atom count, so ~12 layout
+measurements settle what took 4000 before: a 4000-word paragraph plus a
+400-item list paginated in **354 ms instead of 11.2 s** (23 pages, zero words
+or items lost, zero pages clipping). Do not "simplify" this back to a
+peel-one-word-off-the-end loop.
+
+If not even one atom fits, one is kept anyway so the split still makes
+progress; a single unsplittable atom taller than a page is kept and allowed to
+clip rather than looping forever.
+
 ## Rule 5: Deploy (step 3 of the Rule 0 end-of-task sequence)
 
 ### Smart Steps ABA Tracker (git-based, re-wired 2026-08-13)
