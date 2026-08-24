@@ -1,5 +1,6 @@
 import { escapeHtml } from "@/lib/sanitizeHtml";
-import { formatClockRangeHours } from "@/lib/formatDuration";
+import { formatClockRangeHours, formatClockRange12h } from "@/lib/formatDuration";
+import { NOTE_TYPE_LABEL, bcbaServiceLabelWithCode } from "@/lib/noteTypes";
 
 /**
  * Client-side session-note → PDF export.
@@ -33,20 +34,6 @@ export type PrintableNote = {
   user?: { name?: string | null; credentials?: string | null } | null;
 };
 
-const TYPE_LABEL: Record<string, string> = {
-  BT_SESSION: "BT Session Note",
-  BCBA: "BCBA Note",
-  GENERAL: "General Note",
-};
-
-const BCBA_SERVICE_LABEL: Record<string, string> = {
-  DSU: "Direct Supervision (DSU)",
-  TM: "Team Meeting (TM)",
-  TP: "Treatment Planning (TP)",
-  PRT: "Parent Training (PRT)",
-  ASSES: "Assessment (ASSES)",
-};
-
 function fmtDate(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -70,13 +57,13 @@ function contentBlock(heading: string, text: string | null | undefined): string 
 }
 
 function noteHtml(note: PrintableNote, index: number): string {
-  const typeLabel = TYPE_LABEL[note.type] ?? "Note";
+  const typeLabel = NOTE_TYPE_LABEL[note.type] ?? "Note";
   const provider = note.providerName ?? note.user?.name ?? "—";
   const credentials = note.user?.credentials ? `, ${note.user.credentials}` : "";
   const noteHours = formatClockRangeHours(note.timeIn, note.timeOut);
-  const timeRange = note.timeIn
-    ? `${note.timeIn}${note.timeOut ? ` – ${note.timeOut}` : ""}${noteHours ? ` (${noteHours})` : ""}`
-    : "";
+  // Printed notes read in 12-hour clock time, never the stored 24-hour strings.
+  const clockRange = formatClockRange12h(note.timeIn, note.timeOut);
+  const timeRange = clockRange ? `${clockRange}${noteHours ? ` (${noteHours})` : ""}` : "";
 
   return `
   <article class="note-page" ${index > 0 ? 'style="page-break-before: always;"' : ""}>
@@ -91,7 +78,7 @@ function noteHtml(note: PrintableNote, index: number): string {
     <div class="meta-grid">
       ${metaRow("Service Date", fmtDate(note.serviceDate ?? note.createdAt))}
       ${metaRow("Provider", provider + credentials)}
-      ${note.type === "BCBA" && note.bcbaServiceType ? metaRow("Service Type", BCBA_SERVICE_LABEL[note.bcbaServiceType] ?? note.bcbaServiceType) : ""}
+      ${note.type === "BCBA" && note.bcbaServiceType ? metaRow("Service Type", bcbaServiceLabelWithCode(note.bcbaServiceType)) : ""}
       ${metaRow("Time", timeRange)}
       ${metaRow("Attendance", note.attendance)}
     </div>

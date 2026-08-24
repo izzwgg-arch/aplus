@@ -1033,22 +1033,27 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
   /* ━━━━ VIEW: SETUP — pre-session form ━━━━ */
   if (view === "setup") {
     const isBackdated = setupForm.sessionDate !== new Date().toISOString().slice(0, 10);
+    // Session Date, Time In and Time Out are all REQUIRED — the service window is
+    // what reports, graphs and billing read, and a session saved without one has
+    // to be chased down and corrected later. They are stored exactly as entered.
+    const timingComplete = Boolean(setupForm.sessionDate && setupForm.timeIn && setupForm.timeOut);
+
     const handleStartFromSetup = async () => {
-      const startedAt = setupForm.timeIn
-        ? `${setupForm.sessionDate}T${setupForm.timeIn}:00`
-        : `${setupForm.sessionDate}T00:00:00`;
-      const endedAt = setupForm.timeOut
-        ? `${setupForm.sessionDate}T${setupForm.timeOut}:00`
-        : undefined;
-      // These times are saved verbatim, so reject a range that would store a
-      // negative duration rather than persisting it and showing "—" later.
-      if (endedAt && new Date(endedAt).getTime() <= new Date(startedAt).getTime()) {
+      if (!setupForm.sessionDate) { toast.error("Session Date is required."); return; }
+      if (!setupForm.timeIn)      { toast.error("Time In is required.");      return; }
+      if (!setupForm.timeOut)     { toast.error("Time Out is required.");     return; }
+
+      const startedAt = `${setupForm.sessionDate}T${setupForm.timeIn}:00`;
+      const endedAt   = `${setupForm.sessionDate}T${setupForm.timeOut}:00`;
+      // Saved verbatim, so reject a range that would store a negative duration
+      // rather than persisting it and rendering "—" later.
+      if (new Date(endedAt).getTime() <= new Date(startedAt).getTime()) {
         toast.error("Time Out must be after Time In.");
         return;
       }
       await startSession({
         startedAt: new Date(startedAt).toISOString(),
-        endedAt: endedAt ? new Date(endedAt).toISOString() : undefined,
+        endedAt:   new Date(endedAt).toISOString(),
         providerId: setupForm.providerId || undefined,
         mode: setupForm.mode,
       });
@@ -1122,24 +1127,34 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
           {/* Time In / Time Out */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 mb-1.5">Time In</label>
+              <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 mb-1.5">
+                Time In <span className="text-[var(--accent-pink)]">*</span>
+              </label>
               <input
                 type="time"
+                required
                 value={setupForm.timeIn}
                 onChange={(e) => setSetupForm((f) => ({ ...f, timeIn: e.target.value }))}
-                className="w-full rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] px-3 py-2.5 text-sm text-[var(--foreground)]"
+                className={`w-full rounded-xl border bg-[var(--glass-bg)] px-3 py-2.5 text-sm text-[var(--foreground)] ${setupForm.timeIn ? "border-[var(--glass-border)]" : "border-[var(--accent-pink)]/50"}`}
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 mb-1.5">Time Out <span className="font-normal">(optional)</span></label>
+              <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-500 mb-1.5">
+                Time Out <span className="text-[var(--accent-pink)]">*</span>
+              </label>
               <input
                 type="time"
+                required
                 value={setupForm.timeOut}
                 onChange={(e) => setSetupForm((f) => ({ ...f, timeOut: e.target.value }))}
-                className="w-full rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] px-3 py-2.5 text-sm text-[var(--foreground)]"
+                className={`w-full rounded-xl border bg-[var(--glass-bg)] px-3 py-2.5 text-sm text-[var(--foreground)] ${setupForm.timeOut ? "border-[var(--glass-border)]" : "border-[var(--accent-pink)]/50"}`}
               />
             </div>
           </div>
+          <p className="text-[11px] text-zinc-500">
+            Time In and Time Out are required and are saved exactly as entered — they set the service window
+            used by reports, graphs and session notes.
+          </p>
 
           {/* Session Type */}
           <div>
@@ -1186,10 +1201,13 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
           whileTap={{ scale: 0.98 }}
           type="button"
           onClick={handleStartFromSetup}
-          className="w-full flex items-center justify-center gap-2 btn-primary rounded-2xl py-4 font-bold text-base"
+          disabled={!timingComplete}
+          className="w-full flex items-center justify-center gap-2 btn-primary rounded-2xl py-4 font-bold text-base disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Play className="h-5 w-5" />
-          {isBackdated ? "Create Backdated Session" : "Start Session"}
+          {!timingComplete
+            ? "Enter date, time in and time out"
+            : isBackdated ? "Create Backdated Session" : "Start Session"}
         </motion.button>
       </motion.div>
       {conflictDialog}

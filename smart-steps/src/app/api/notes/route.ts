@@ -65,6 +65,18 @@ export async function GET(req: Request) {
         recommendations: true,
         nextSteps:       true,
         user:            { select: { id: true, name: true, role: true } },
+        // A BT session note generated from a session carries no timeIn/timeOut of
+        // its own — the times live on the session. Return them so the note can
+        // still show when the service happened and who delivered it.
+        session:         {
+          select: {
+            id:        true,
+            startedAt: true,
+            endedAt:   true,
+            mode:      true,
+            user:      { select: { id: true, name: true } },
+          },
+        },
       },
     });
 

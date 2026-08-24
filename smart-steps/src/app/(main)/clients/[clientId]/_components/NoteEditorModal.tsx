@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X, Save, FileText, User, Calendar, Clock, CheckCircle,
@@ -8,6 +9,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { printSessionNotes, type PrintableNote } from "@/lib/printNotes";
+import { NOTE_TYPES, BCBA_SERVICE_TYPES, bcbaServiceLabel } from "@/lib/noteTypes";
+import { TimeInput12h } from "@/components/common/TimeInput12h";
 
 /* ── Types ─────────────────────────────────────────────────────────────────── */
 
@@ -31,6 +34,14 @@ export type NoteRecord = {
   createdAt:       string;
   updatedAt:       string;
   user?:           { id: string; name: string | null; role: string; credentials?: string | null } | null;
+  /** The session this note was written for, when it came from one. */
+  session?:        {
+    id:        string;
+    startedAt: string;
+    endedAt:   string | null;
+    mode:      string;
+    user?:     { id: string; name: string | null } | null;
+  } | null;
 };
 
 type Props = {
@@ -46,20 +57,6 @@ type Props = {
 };
 
 /* ── Constants ──────────────────────────────────────────────────────────────── */
-
-const NOTE_TYPES = [
-  { id: "BT_SESSION", label: "BT Session Note" },
-  { id: "BCBA",       label: "BCBA Note"        },
-  { id: "GENERAL",    label: "General Note"     },
-] as const;
-
-const BCBA_SERVICE_TYPES = [
-  { id: "DSU",   label: "DSU",   desc: "Direct Supervision" },
-  { id: "TM",    label: "TM",    desc: "Team Meeting"        },
-  { id: "TP",    label: "TP",    desc: "Treatment Planning"  },
-  { id: "PRT",   label: "PRT",   desc: "Parent Training"     },
-  { id: "ASSES", label: "ASSES", desc: "Assessment"          },
-] as const;
 
 const ATTENDANCE_OPTIONS = [
   "Present",
@@ -91,6 +88,98 @@ function bcbaDefaultContent(serviceType: string, clientName: string, providerNam
   return map[serviceType] ?? `${p} provided clinical services for ${c}.`;
 }
 
+/* ── Provider picker ─────────────────────────────────────────────────────────── */
+
+type ProviderOption = {
+  id:          string;
+  name:        string | null;
+  role:        string;
+  displayRole: string | null;
+};
+
+const CUSTOM_PROVIDER = "__custom__";
+
+/**
+ * Provider / BCBA selector.
+ *
+ * A note stores the provider as a NAME (`Note.providerName`), not a user id, so
+ * this picks from the active staff list but keeps a free-text escape hatch:
+ * a supervisor from outside the agency, or a name on an older note whose
+ * profile has since been deactivated, still has to be selectable and saveable.
+ * An unrecognised value is offered as its own option so editing an old note
+ * never silently blanks its provider.
+ */
+function ProviderSelect({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value:       string;
+  onChange:    (value: string) => void;
+  placeholder: string;
+}) {
+  const [customEntry, setCustomEntry] = useState(false);
+
+  const { data: providers = [] } = useQuery<ProviderOption[]>({
+    queryKey: ["providers-dropdown"],
+    queryFn: async () => {
+      const res = await fetch("/smart-steps/api/users?forDropdown=1");
+      if (!res.ok) return [];
+      return res.json();
+    },
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const named = providers.filter((p) => !!p.name);
+  const isKnown = named.some((p) => p.name === value);
+
+  if (customEntry) {
+    return (
+      <div className="space-y-1">
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          className="field-input w-full text-sm"
+          autoFocus
+        />
+        <button
+          type="button"
+          onClick={() => setCustomEntry(false)}
+          className="text-[11px] text-zinc-500 hover:text-zinc-300"
+        >
+          Choose from staff instead
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative">
+      <select
+        value={value}
+        onChange={(e) => {
+          if (e.target.value === CUSTOM_PROVIDER) { setCustomEntry(true); onChange(""); return; }
+          onChange(e.target.value);
+        }}
+        className="field-input w-full text-sm appearance-none pr-8"
+      >
+        <option value="">{placeholder}</option>
+        {value && !isKnown && <option value={value}>{value}</option>}
+        {named.map((p) => (
+          <option key={p.id} value={p.name as string}>
+            {p.name}
+            {p.displayRole ? ` — ${p.displayRole}` : p.role !== "RBT" ? ` — ${p.role}` : ""}
+          </option>
+        ))}
+        <option value={CUSTOM_PROVIDER}>Other — type a name…</option>
+      </select>
+      <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500" />
+    </div>
+  );
+}
+
 /* ── Component ───────────────────────────────────────────────────────────────── */
 
 export function NoteEditorModal({
@@ -117,6 +206,9 @@ export function NoteEditorModal({
   const [content,         setContent]         = useState(note?.content         ?? "");
   const [recommendations, setRecommendations] = useState(note?.recommendations ?? "");
   const [nextSteps,       setNextSteps]       = useState(note?.nextSteps       ?? "");
+  /* An existing saved title counts as hand-written — auto-titling only ever
+     fills a title the user has not authored. */
+  const [titleTouched,    setTitleTouched]    = useState(!!note?.title);
   const [saving,          setSaving]          = useState(false);
   const [deleting,        setDeleting]        = useState(false);
   const [confirmDelete,   setConfirmDelete]   = useState(false);
@@ -129,16 +221,18 @@ export function NoteEditorModal({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bcbaServiceType]);
 
-  /* Auto-title */
+  /* Auto-title — tracks the note-type dropdown until the user types their own */
   useEffect(() => {
-    if (title) return;
+    if (titleTouched) return;
     const dateStr = serviceDate
       ? new Date(serviceDate + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
       : "";
-    if (type === "BT_SESSION") setTitle(`BT Session Note${dateStr ? " – " + dateStr : ""}`);
-    else if (type === "BCBA")   setTitle(`${bcbaServiceType} Note${dateStr ? " – " + dateStr : ""}`);
+    const suffix = dateStr ? " – " + dateStr : "";
+    if (type === "BT_SESSION")  setTitle(`BT Session Note${suffix}`);
+    else if (type === "BCBA")   setTitle(`${bcbaServiceLabel(bcbaServiceType)} Note${suffix}`);
+    else                        setTitle("");
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [type, bcbaServiceType, serviceDate]);
+  }, [type, bcbaServiceType, serviceDate, titleTouched]);
 
   async function handleSave() {
     if (!content.trim()) { toast.error("Note content is required."); return; }
@@ -231,6 +325,23 @@ export function NoteEditorModal({
   const isBcba = type === "BCBA";
   const isBt   = type === "BT_SESSION";
 
+  /** True while the narrative is still one of the generated service templates. */
+  function isTemplateContent(text: string): boolean {
+    if (!text.trim()) return true;
+    return BCBA_SERVICE_TYPES.some((st) => bcbaDefaultContent(st.id, clientName, provider) === text);
+  }
+
+  /**
+   * Switching service type re-seeds the narrative, but only while it is still
+   * boilerplate — a BCBA who has started writing never loses their text.
+   */
+  function handleServiceTypeChange(next: string) {
+    setBcbaServiceType(next);
+    if (!isEdit && isTemplateContent(content)) {
+      setContent(bcbaDefaultContent(next, clientName, provider));
+    }
+  }
+
   return (
     <AnimatePresence>
       <motion.div
@@ -274,7 +385,7 @@ export function NoteEditorModal({
 
             {/* Note type selector */}
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-400 mb-2">Note Type</label>
+              <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-400 mb-2">Note Category</label>
               <div className="flex gap-2 flex-wrap">
                 {NOTE_TYPES.map((nt) => (
                   <button
@@ -293,38 +404,11 @@ export function NoteEditorModal({
               </div>
             </div>
 
-            {/* BCBA service type picker */}
-            {isBcba && (
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-400 mb-2">Service Type</label>
-                <div className="flex gap-2 flex-wrap">
-                  {BCBA_SERVICE_TYPES.map((st) => (
-                    <button
-                      key={st.id}
-                      type="button"
-                      onClick={() => {
-                        setBcbaServiceType(st.id);
-                        if (!isEdit) setContent(bcbaDefaultContent(st.id, clientName, provider));
-                      }}
-                      className={`rounded-xl px-3.5 py-2 text-sm font-medium border transition-all flex flex-col items-center gap-0.5 ${
-                        bcbaServiceType === st.id
-                          ? "border-[var(--accent-purple)] bg-[var(--accent-purple)]/10 text-[var(--accent-purple)]"
-                          : "border-[var(--glass-border)] text-zinc-400 hover:text-zinc-200"
-                      }`}
-                    >
-                      <span className="font-bold">{st.label}</span>
-                      <span className="text-[10px] opacity-70">{st.desc}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
             {/* BCBA service info table */}
             {isBcba && (
               <div className="glass-card rounded-2xl p-4">
                 <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400 mb-3">Service Information</p>
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="grid gap-3 sm:grid-cols-2">
 
                   <div>
                     <label className="block text-xs text-zinc-500 mb-1 flex items-center gap-1">
@@ -340,26 +424,23 @@ export function NoteEditorModal({
 
                   <div>
                     <label className="block text-xs text-zinc-500 mb-1 flex items-center gap-1">
+                      <User className="h-3 w-3" /> Provider / BCBA
+                    </label>
+                    <ProviderSelect value={provider} onChange={setProvider} placeholder="Select provider..." />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-zinc-500 mb-1 flex items-center gap-1">
                       <Clock className="h-3 w-3" /> Time In
                     </label>
-                    <input
-                      type="time"
-                      value={timeIn}
-                      onChange={(e) => setTimeIn(e.target.value)}
-                      className="field-input w-full text-sm"
-                    />
+                    <TimeInput12h value={timeIn} onChange={setTimeIn} ariaLabel="Time in" />
                   </div>
 
                   <div>
                     <label className="block text-xs text-zinc-500 mb-1 flex items-center gap-1">
                       <Clock className="h-3 w-3" /> Time Out
                     </label>
-                    <input
-                      type="time"
-                      value={timeOut}
-                      onChange={(e) => setTimeOut(e.target.value)}
-                      className="field-input w-full text-sm"
-                    />
+                    <TimeInput12h value={timeOut} onChange={setTimeOut} ariaLabel="Time out" />
                   </div>
 
                   <div>
@@ -380,19 +461,6 @@ export function NoteEditorModal({
                     </div>
                   </div>
                 </div>
-
-                <div className="mt-3">
-                  <label className="block text-xs text-zinc-500 mb-1 flex items-center gap-1">
-                    <User className="h-3 w-3" /> Provider / BCBA
-                  </label>
-                  <input
-                    type="text"
-                    value={provider}
-                    onChange={(e) => setProvider(e.target.value)}
-                    placeholder="Provider name"
-                    className="field-input w-full text-sm"
-                  />
-                </div>
               </div>
             )}
 
@@ -412,13 +480,7 @@ export function NoteEditorModal({
                   </div>
                   <div>
                     <label className="block text-xs text-zinc-500 mb-1">Provider / Therapist</label>
-                    <input
-                      type="text"
-                      value={provider}
-                      onChange={(e) => setProvider(e.target.value)}
-                      placeholder="Therapist name"
-                      className="field-input w-full text-sm"
-                    />
+                    <ProviderSelect value={provider} onChange={setProvider} placeholder="Select therapist..." />
                   </div>
                   <div>
                     <label className="block text-xs text-zinc-500 mb-1">Attendance</label>
@@ -453,27 +515,45 @@ export function NoteEditorModal({
                 </div>
                 <div>
                   <label className="block text-xs text-zinc-500 mb-1">Author / Provider</label>
-                  <input
-                    type="text"
-                    value={provider}
-                    onChange={(e) => setProvider(e.target.value)}
-                    placeholder="Provider name"
-                    className="field-input w-full text-sm"
-                  />
+                  <ProviderSelect value={provider} onChange={setProvider} placeholder="Select provider..." />
                 </div>
               </div>
             )}
 
-            {/* Title */}
-            <div>
-              <label className="block text-xs text-zinc-500 mb-1">Title</label>
-              <input
-                type="text"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder={isBcba ? `${bcbaServiceType} Note – Date` : isBt ? "BT Session Note – Date" : "Note title"}
-                className="field-input w-full text-sm"
-              />
+            {/* Title + (for BCBA notes) the service-type dropdown that names it */}
+            <div className={`grid gap-3 ${isBcba ? "sm:grid-cols-[minmax(0,1fr)_15rem]" : ""}`}>
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">Title</label>
+                <input
+                  type="text"
+                  value={title}
+                  onChange={(e) => { setTitle(e.target.value); setTitleTouched(true); }}
+                  placeholder={
+                    isBcba ? `${bcbaServiceLabel(bcbaServiceType)} Note – Date`
+                    : isBt ? "BT Session Note – Date"
+                    : "Note title"
+                  }
+                  className="field-input w-full text-sm"
+                />
+              </div>
+
+              {isBcba && (
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Note Type</label>
+                  <div className="relative">
+                    <select
+                      value={bcbaServiceType}
+                      onChange={(e) => handleServiceTypeChange(e.target.value)}
+                      className="field-input w-full text-sm appearance-none pr-8"
+                    >
+                      {BCBA_SERVICE_TYPES.map((st) => (
+                        <option key={st.id} value={st.id}>{st.label} ({st.code})</option>
+                      ))}
+                    </select>
+                    <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500" />
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Main narrative / content */}

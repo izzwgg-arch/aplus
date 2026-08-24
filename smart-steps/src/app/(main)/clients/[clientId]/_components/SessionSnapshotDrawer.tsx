@@ -611,8 +611,8 @@ export function SessionSnapshotDrawer({
   async function handleSaveSession() {
     if (!sessionId || !data) return;
 
-    if (!sessForm.date || !sessForm.timeIn) {
-      toast.error("Session date and time in are required.");
+    if (!sessForm.date || !sessForm.timeIn || !sessForm.timeOut) {
+      toast.error("Session date, time in and time out are all required.");
       return;
     }
     const startedAt = combineToIso(sessForm.date, sessForm.timeIn);
@@ -620,17 +620,13 @@ export function SessionSnapshotDrawer({
       toast.error("Invalid session date or time in.");
       return;
     }
-    // Time out is optional (session may still be in progress); when provided it
-    // must be after time in on the same service date.
-    let endedAt: string | undefined;
-    if (sessForm.timeOut) {
-      const iso = combineToIso(sessForm.date, sessForm.timeOut);
-      if (!iso) { toast.error("Invalid time out."); return; }
-      if (new Date(iso).getTime() <= new Date(startedAt).getTime()) {
-        toast.error("Time out must be after time in.");
-        return;
-      }
-      endedAt = iso;
+    // Time out must be after time in on the same service date. It is required:
+    // the service window is what reports, graphs and billing read.
+    const endedAt = combineToIso(sessForm.date, sessForm.timeOut);
+    if (!endedAt) { toast.error("Invalid time out."); return; }
+    if (new Date(endedAt).getTime() <= new Date(startedAt).getTime()) {
+      toast.error("Time out must be after time in.");
+      return;
     }
 
     setSavingSession(true);
@@ -640,7 +636,7 @@ export function SessionSnapshotDrawer({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           startedAt,
-          ...(endedAt ? { endedAt } : {}),
+          endedAt,
           ...(sessForm.providerId ? { providerId: sessForm.providerId } : {}),
         }),
       });
@@ -791,7 +787,7 @@ export function SessionSnapshotDrawer({
                               />
                             </div>
                             <div>
-                              <label className="mb-1 block text-[11px] text-zinc-400">Time Out</label>
+                              <label className="mb-1 block text-[11px] text-zinc-400">Time Out <span className="text-[var(--accent-pink)]">*</span></label>
                               <input
                                 type="time"
                                 value={sessForm.timeOut}

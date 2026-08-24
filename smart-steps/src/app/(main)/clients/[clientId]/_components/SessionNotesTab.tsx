@@ -5,13 +5,14 @@ import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   StickyNote, Plus, FileText, Edit3, Filter,
-  Calendar, User, ChevronRight, Search, X,
+  Calendar, Clock, User, ChevronRight, Search, X,
   Printer, CheckSquare, Square, CheckCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 import { NoteEditorModal, type NoteRecord } from "./NoteEditorModal";
 import { printSessionNotes, type PrintableNote } from "@/lib/printNotes";
-import { formatClockRangeHours } from "@/lib/formatDuration";
+import { formatClockRange12h, formatClockRangeHours } from "@/lib/formatDuration";
+import { bcbaServiceLabel } from "@/lib/noteTypes";
 
 /* ── Types ───────────────────────────────────────────────────────────────── */
 
@@ -49,9 +50,32 @@ function formatDate(iso: string | null | undefined): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-/** Note length in hours from its time in / time out, or null when not derivable. */
-function noteHours(note: NoteRecord): string | null {
-  return formatClockRangeHours(note.timeIn, note.timeOut);
+/** Local "HH:MM" for a timestamp, matching how a typed note stores its times. */
+function toClockString(iso: string): string {
+  const d = new Date(iso);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+/**
+ * The date, timing and provider a note should show.
+ *
+ * A note typed by hand carries its own serviceDate / timeIn / timeOut /
+ * providerName. One generated from a session carries only the service date, so
+ * everything else falls back to the session it was written for — otherwise a
+ * generated BT note shows no timing at all.
+ */
+function noteMeta(note: NoteRecord) {
+  const timeIn  = note.timeIn  || (note.session?.startedAt ? toClockString(note.session.startedAt) : null);
+  const timeOut = note.timeOut || (note.session?.endedAt   ? toClockString(note.session.endedAt)   : null);
+  return {
+    date:      note.serviceDate ?? note.session?.startedAt ?? note.createdAt,
+    timeIn,
+    timeOut,
+    /** "1:30 PM – 3:00 PM" — never the raw 24-hour strings. */
+    timeRange: formatClockRange12h(timeIn, timeOut),
+    hours:     formatClockRangeHours(timeIn, timeOut),
+    provider:  note.providerName || note.user?.name || note.session?.user?.name || null,
+  };
 }
 
 function contentPreview(content: string, maxLen = 120): string {
@@ -108,7 +132,7 @@ export function SessionNotesTab({ clientId, clientName = "Client", userName = ""
   /* ── Filtered (client-side provider search) ── */
   const displayed = filters.providerSearch
     ? notes.filter((n) =>
-        (n.providerName ?? n.user?.name ?? "").toLowerCase().includes(filters.providerSearch.toLowerCase())
+        (noteMeta(n).provider ?? "").toLowerCase().includes(filters.providerSearch.toLowerCase())
       )
     : notes;
 
@@ -137,22 +161,27 @@ export function SessionNotesTab({ clientId, clientName = "Client", userName = ""
 
   /* ── PDF export ── */
   function toPrintable(list: NoteRecord[]): PrintableNote[] {
-    return list.map((n) => ({
-      id: n.id,
-      title: n.title,
-      type: n.type,
-      bcbaServiceType: n.bcbaServiceType,
-      serviceDate: n.serviceDate,
-      timeIn: n.timeIn,
-      timeOut: n.timeOut,
-      attendance: n.attendance,
-      content: n.content,
-      recommendations: n.recommendations,
-      nextSteps: n.nextSteps,
-      providerName: n.providerName,
-      createdAt: n.createdAt,
-      user: n.user ? { name: n.user.name, credentials: n.user.credentials ?? null } : null,
-    }));
+    return list.map((n) => {
+      // Resolve the same way the card does, so the printed note never drops the
+      // timing/provider just because they live on the session rather than the note.
+      const m = noteMeta(n);
+      return {
+        id: n.id,
+        title: n.title,
+        type: n.type,
+        bcbaServiceType: n.bcbaServiceType,
+        serviceDate: m.date,
+        timeIn: m.timeIn,
+        timeOut: m.timeOut,
+        attendance: n.attendance,
+        content: n.content,
+        recommendations: n.recommendations,
+        nextSteps: n.nextSteps,
+        providerName: m.provider,
+        createdAt: n.createdAt,
+        user: n.user ? { name: n.user.name, credentials: n.user.credentials ?? null } : null,
+      };
+    });
   }
 
   function exportNotes(list: NoteRecord[]) {
@@ -370,6 +399,7 @@ export function SessionNotesTab({ clientId, clientName = "Client", userName = ""
           {displayed.map((note) => {
             const typeBadge = TYPE_BADGE[note.type] ?? TYPE_BADGE.GENERAL;
             const selected = selectMode && selectedIds.has(note.id);
+            const meta = noteMeta(note);
             return (
               <motion.button
                 key={note.id}
@@ -399,8 +429,11 @@ export function SessionNotesTab({ clientId, clientName = "Client", userName = ""
 
                     {/* BCBA subtype badge */}
                     {note.type === "BCBA" && note.bcbaServiceType && (
-                      <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${BCBA_BADGE[note.bcbaServiceType] ?? "text-zinc-400 bg-zinc-700/50"}`}>
-                        {note.bcbaServiceType}
+                      <span
+                        title={note.bcbaServiceType}
+                        className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${BCBA_BADGE[note.bcbaServiceType] ?? "text-zinc-400 bg-zinc-700/50"}`}
+                      >
+                        {bcbaServiceLabel(note.bcbaServiceType)}
                       </span>
                     )}
 
@@ -417,22 +450,23 @@ export function SessionNotesTab({ clientId, clientName = "Client", userName = ""
                     </p>
                   </div>
 
-                  {/* Meta row */}
-                  <div className="flex items-center gap-3 text-xs text-zinc-500 mb-1.5">
-                    <span className="flex items-center gap-1">
+                  {/* Meta row — date, timing and provider, without opening the note */}
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500 mb-1.5">
+                    <span className="flex items-center gap-1 text-zinc-400">
                       <Calendar className="h-3 w-3" />
-                      {formatDate(note.serviceDate ?? note.createdAt)}
+                      {formatDate(meta.date)}
                     </span>
-                    {(note.providerName || note.user?.name) && (
+                    {meta.timeRange && (
                       <span className="flex items-center gap-1">
-                        <User className="h-3 w-3" />
-                        {note.providerName ?? note.user?.name}
+                        <Clock className="h-3 w-3" />
+                        {meta.timeRange}
+                        {meta.hours && ` · ${meta.hours}`}
                       </span>
                     )}
-                    {note.timeIn && (
-                      <span>
-                        {note.timeIn}{note.timeOut ? ` – ${note.timeOut}` : ""}
-                        {noteHours(note) && ` · ${noteHours(note)}`}
+                    {meta.provider && (
+                      <span className="flex items-center gap-1">
+                        <User className="h-3 w-3" />
+                        {meta.provider}
                       </span>
                     )}
                     {note.attendance && (

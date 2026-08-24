@@ -334,6 +334,37 @@ The panel posts a batch to the existing `POST /api/trials`
   notes are point-in-time. The drawer's button reads "Generate Again" and
   confirms, since generating produces an ADDITIONAL note.
 
+## Tracker session notes show date, timing and provider (2026-08-19)
+
+A note typed by hand carries its own `serviceDate` / `timeIn` / `timeOut` /
+`providerName`. A note produced by `POST /api/sessions/[sessionId]/generate-note`
+carries only the service date and provider name — the times live on the
+**session**, so generated BT notes used to show no timing at all, and the time
+range was additionally hidden for every non-BCBA note.
+
+`GET /api/notes` now returns the linked `session` (`startedAt`, `endedAt`,
+`mode`, provider) alongside each note, and `noteMeta()` in `SessionNotesTab`
+resolves what to display: note field first, session fallback second. Session
+timestamps are converted to the note's stored `"HH:MM"` shape **client-side**
+(`toClockString`) — never on the server, whose timezone is not the clinic's.
+The same resolver feeds `toPrintable()`, so the printed PDF and the provider
+search box see the same values as the card.
+
+## Tracker session timing is REQUIRED (2026-08-19)
+
+Session Date, Time In and Time Out are all mandatory on both session setup
+forms (`DataEntryTab` setup view and `clients/[clientId]/session/new`) and in
+the Session Snapshot drawer's edit panel. The Start button is disabled until all
+three are filled and reads "Enter date, time in and time out"; each field is
+individually validated on submit, and a Time Out at or before Time In is
+rejected. `PATCH /api/sessions/[sessionId]` now always receives an `endedAt`
+from the drawer.
+
+Rationale: the service window is what reports, graphs and billing read. A
+session saved without an end time renders as "—" everywhere and has to be
+chased down and corrected later. Combined with the entered-timing fix above,
+every new session now stores a complete, verbatim service window.
+
 ## Rule 5: Deploy (step 3 of the Rule 0 end-of-task sequence)
 
 ### Smart Steps ABA Tracker (git-based, re-wired 2026-08-13)

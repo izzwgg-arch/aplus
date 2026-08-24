@@ -47,6 +47,49 @@ export function formatSessionHours(
 }
 
 /**
+ * Splits a stored "HH:MM" clock string into its parts, or null when the value
+ * is missing or malformed. Notes store time in 24-hour form; everything the
+ * user reads is rendered in 12-hour form from it.
+ */
+function parseClock(value: string | null | undefined): { hours: number; minutes: number } | null {
+  const match = /^(\d{1,2}):(\d{2})/.exec((value ?? "").trim());
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) return null;
+  return { hours, minutes };
+}
+
+/**
+ * A stored "HH:MM" rendered the way clinical staff write it: "13:30" → "1:30 PM",
+ * "09:05" → "9:05 AM", "00:15" → "12:15 AM". Returns "" for a missing or
+ * malformed value so callers can drop the field entirely.
+ *
+ * Times are NEVER shown in 24-hour form in the Tracker — always go through this.
+ */
+export function formatClockTime12h(value: string | null | undefined): string {
+  const parsed = parseClock(value);
+  if (!parsed) return "";
+  const suffix = parsed.hours < 12 ? "AM" : "PM";
+  const hour12 = parsed.hours % 12 === 0 ? 12 : parsed.hours % 12;
+  return `${hour12}:${String(parsed.minutes).padStart(2, "0")} ${suffix}`;
+}
+
+/**
+ * "1:30 PM – 3:00 PM" from the two stored strings, or just the start when there
+ * is no end time. Returns "" when there is no usable start time.
+ */
+export function formatClockRange12h(
+  timeIn: string | null | undefined,
+  timeOut: string | null | undefined,
+): string {
+  const start = formatClockTime12h(timeIn);
+  if (!start) return "";
+  const end = formatClockTime12h(timeOut);
+  return end ? `${start} – ${end}` : start;
+}
+
+/**
  * Note length in hours from the "HH:MM" strings a note stores for time in /
  * time out. Returns null for a missing, malformed, or non-positive range.
  * A time-out before time-in is treated as crossing midnight.
@@ -56,12 +99,8 @@ export function formatClockRangeHours(
   timeOut: string | null | undefined,
 ): string | null {
   const toMinutes = (value: string | null | undefined): number | null => {
-    const match = /^(\d{1,2}):(\d{2})/.exec((value ?? "").trim());
-    if (!match) return null;
-    const h = Number(match[1]);
-    const m = Number(match[2]);
-    if (h > 23 || m > 59) return null;
-    return h * 60 + m;
+    const parsed = parseClock(value);
+    return parsed === null ? null : parsed.hours * 60 + parsed.minutes;
   };
 
   const start = toMinutes(timeIn);
