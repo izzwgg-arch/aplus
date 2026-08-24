@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import RichTextEditor from "@/components/RichTextEditor";
 import AddGoalFromLibraryModal from "@/components/assessments/AddGoalFromLibraryModal";
 import { usePermissions } from "@/hooks/usePermissions";
-import { goalTableKind, insertGoalRow, type GoalRow, type GoalTableKind } from "@/lib/reportGoalTables";
+import { goalTableKind, inferGoalTableKind, insertGoalRow, type GoalRow, type GoalTableKind } from "@/lib/reportGoalTables";
 import { printAssessmentReport } from "./printAssessment";
 
 type Section = { id: string; title: string; order: number; content: string };
@@ -267,8 +267,13 @@ export default function ClientReportEditorPage() {
           {/* Sections */}
           <div className="space-y-4">
             {sections.map((sec, idx) => {
-              // Goal-table sections get a library picker; prose sections do not.
-              const tableKind = goalTableKind(sec.title);
+              // A section earns a prominent "Add goal" button when its title maps
+              // to a goal table, or when it already holds one — templates written
+              // before this existed carry titles like "New Section" that map to
+              // nothing. Every other section keeps the button on hover, so a goal
+              // can still be filed into a section named anything at all.
+              const tableKind = goalTableKind(sec.title) ?? inferGoalTableKind(sec.content || "");
+              const isGoalSection = tableKind !== null;
               return (
               <div
                 key={idx}
@@ -288,11 +293,15 @@ export default function ClientReportEditorPage() {
                     onChange={(e) => updateSection(sec.id, "title", e.target.value)}
                     placeholder="Section title"
                   />
-                  {tableKind && canUseLibrary && report.client && (
+                  {canUseLibrary && report.client && (
                     <button
                       type="button"
-                      onClick={() => setGoalPicker({ sectionId: sec.id, title: sec.title, kind: tableKind })}
-                      className="flex shrink-0 items-center gap-1.5 rounded-lg border border-[var(--accent-cyan)]/30 bg-[var(--accent-cyan)]/10 px-2.5 py-1 text-[11px] font-semibold text-[var(--accent-cyan)] hover:bg-[var(--accent-cyan)]/20 transition-colors"
+                      onClick={() =>
+                        setGoalPicker({ sectionId: sec.id, title: sec.title, kind: tableKind ?? "current_goals" })
+                      }
+                      className={`flex shrink-0 items-center gap-1.5 rounded-lg border border-[var(--accent-cyan)]/30 bg-[var(--accent-cyan)]/10 px-2.5 py-1 text-[11px] font-semibold text-[var(--accent-cyan)] hover:bg-[var(--accent-cyan)]/20 transition-all ${
+                        isGoalSection ? "" : "opacity-0 group-hover:opacity-100"
+                      }`}
                       title="Pick a goal from the Goal Library"
                     >
                       <BookOpen className="h-3 w-3" /> Add goal

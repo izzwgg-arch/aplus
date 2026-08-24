@@ -448,13 +448,23 @@ the Goal Library in a dropdown, and a goal picked there becomes a REAL goal for
 the child — not just a row of table text — so a BT can start taking data on it
 the same day and the report never drifts from the treatment program.
 
-- **Which sections get the button** is decided by `goalTableKind()` in
-  `smart-steps/src/lib/reportGoalTables.ts`, which delegates to
-  `detectSectionType()` — the four kinds whose generated content is a TABLE:
-  `mastered_goals`, `current_goals`, `new_goals`, `parent_goals`. Prose
-  sections (the per-domain `category_goals` paragraphs, biopsychosocial, …) do
-  not get one. Renaming a template section changes both generation and this
-  button together, because there is still only the one detector.
+- **Which sections get the button.** `goalTableKind()` in
+  `smart-steps/src/lib/reportGoalTables.ts` delegates to `detectSectionType()`
+  for the four kinds whose generated content is a TABLE: `mastered_goals`,
+  `current_goals`, `new_goals`, `parent_goals`. Renaming a template section
+  changes both generation and this button together — there is still only the
+  one detector.
+  **A title test alone is not enough.** Templates in the wild do not keep the
+  generated names: the live "Initial ABA Assessment Template" carries
+  `"7. Parent / Guardian Involvement"`, `"Language & Communication -Summary"`
+  and three bare `"New Section"` headings, so real goal tables sat in sections
+  that mapped to nothing. `inferGoalTableKind(content)` therefore also reads the
+  section's own `<th>` headings (regex, not DOM, so it is safe during render):
+  "Date Mastered" -> mastered, "Carrying Over" -> parent, an
+  objective/operational-definition column -> current. A section matching either
+  test shows the button always; **every other section still shows it on hover**,
+  defaulting to the current-goals columns, so a goal can be filed into a section
+  named anything at all.
 - **The dropdown is the whole library**, not a top-N search: it reads
   `GET /api/goal-library` / `GET /api/parent-goal-library` (neither takes a
   limit) and groups items into `<optgroup>`s by their own category/domain, with

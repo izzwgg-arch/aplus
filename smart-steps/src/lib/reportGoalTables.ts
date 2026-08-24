@@ -37,6 +37,26 @@ export function goalTableKind(title: string): GoalTableKind | null {
   return GOAL_TABLE_KINDS.has(kind) ? (kind as GoalTableKind) : null;
 }
 
+/**
+ * Which goal table a section's CONTENT already holds, judged from the column
+ * headings alone.
+ *
+ * Templates in the wild do not keep the generated section names — a live
+ * template carries "7. Parent / Guardian Involvement", "Language &
+ * Communication -Summary" and bare "New Section" headings — so a title-only
+ * test would leave a real goal table with no way to add a goal to it. Regex,
+ * not DOM, so this is safe to call while rendering on either side.
+ */
+export function inferGoalTableKind(html: string): GoalTableKind | null {
+  const headings = Array.from((html ?? "").matchAll(/<th\b[^>]*>([\s\S]*?)<\/th>/gi))
+    .map((m) => m[1].replace(/<[^>]*>/g, " ").toLowerCase());
+  if (headings.length === 0) return null;
+  if (headings.some((h) => /date\s*mastered|mastery\s*date/.test(h))) return "mastered_goals";
+  if (headings.some((h) => /carrying\s*over/.test(h))) return "parent_goals";
+  if (headings.some((h) => /operational\s*definition|objective/.test(h))) return "current_goals";
+  return null;
+}
+
 /** Columns used when a goal-table section has no table yet. */
 const DEFAULT_COLUMNS: Record<GoalTableKind, string[]> = {
   mastered_goals: ["Category", "Goal/Operational Definition", "Date Mastered"],
