@@ -574,8 +574,7 @@ now just delegates) and all three call sites in `AppointmentsPage.jsx` — week
 header, month grid, appointment modal — go through it, so a future change to
 the display rule lands in one place.
 
-Note this is a `client/` change, so it does NOT deploy via git pull; `/opt/aba`
-is a manual deploy (Rule 5).
+Deployed to `/opt/aba` on 2026-08-26 (see the A+ deploy recipe in Rule 5).
 
 ## A+ Scheduling Jewish holidays are the DIASPORA set (fixed 2026-08-26)
 
@@ -646,9 +645,45 @@ cd /var/www/aplus2/smart-steps && DATABASE_URL=$(node -e "require('dotenv').conf
 -- run start` from `/var/www/aplus/aplus-center-scheduling/smart-steps`
 (the frozen pre-split live state), then `pm2 save`.
 
-### A+ Center Scheduling
+### A+ Center Scheduling (manual — recipe verified 2026-08-26)
 
-Still manual: `/opt/aba` is not git-managed. Changes to `client/` or
-`server/` do NOT reach production via git pull — coordinate with the user
-before touching `/opt/aba`. Never run destructive git commands on
-`/var/www/aplus` (frozen rollback state).
+`/opt/aba` is NOT git-managed, so `client/`/`server/` changes never reach
+production via `git pull`. **Always confirm with the user before touching
+`/opt/aba`.** Never run destructive git commands on `/var/www/aplus` (frozen
+rollback state).
+
+Layout: npm workspaces (`server` + `client`) with deps hoisted to
+`/opt/aba/node_modules` — there is no `client/node_modules`, and `vite` lives in
+the root `.bin`. The app runs under PM2 as process **`aba-app`, user `aba`**
+(systemd unit `pm2-aba.service`, `PM2_HOME=/home/aba/.pm2`) — NOT under the root
+PM2 that owns `smart-steps`. `/opt/aba/deploy.sh` is the full-rebuild script.
+
+**Copy only the files you changed, then build on the server.** Do not upload a
+locally-built `dist`: a few files under `/opt/aba` legitimately differ from this
+repo (the pre-split audit lists dev quick-login and the invoice edit modal as
+"repo is newer"), so a wholesale `dist` push ships unrelated changes into
+production. Diff the specific files against your pre-change baseline first —
+if they match, a surgical copy plus rebuild changes exactly what you intend.
+
+```
+# 1. back up the live bundle
+ssh ... "cd /opt/aba/client && tar czf /root/aba-dist-backup-$(date +%Y%m%d-%H%M%S).tar.gz dist"
+# 2. copy the changed source files, restore ownership
+scp ... client/src/<changed files> root@91.229.245.143:/opt/aba/client/src/<dir>/
+ssh ... "chown aba:aba /opt/aba/client/src/<dir>/<file>"
+# 3. build (writes /opt/aba/client/dist), then hand dist back to aba
+ssh ... "cd /opt/aba && npm run build"
+ssh ... "chown -R aba:aba /opt/aba/client/dist"
+```
+
+A **client-only** change needs **no PM2 restart** — the server serves `dist`
+straight off disk, so `aba-app` should still show 0 restarts afterwards. A
+`server/` change does need `sudo -u aba bash -lc 'export PM2_HOME=/home/aba/.pm2;
+cd /opt/aba && pm2 startOrReload ecosystem.config.js --update-env && pm2 save'`.
+
+Verify by hashing the server's copy of each file against yours, confirming the
+new chunk is fetchable and the OLD chunk hash is gone, and checking
+`https://app.apluscenterinc.org/aplus` returns 200. Note a stale asset URL still
+answers 200 — it hits the SPA fallback and returns `index.html`, so check the
+BODY, not the status code. **Rollback:** untar the backup over
+`/opt/aba/client/dist`.
