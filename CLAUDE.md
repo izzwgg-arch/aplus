@@ -577,6 +577,48 @@ the display rule lands in one place.
 Note this is a `client/` change, so it does NOT deploy via git pull; `/opt/aba`
 is a manual deploy (Rule 5).
 
+## A+ Scheduling Jewish holidays are the DIASPORA set (fixed 2026-08-26)
+
+Follow-up to the Hebrew-date fix above. The clinic is in **New York**, so the
+holiday table in `client/src/lib/holidayService.js` must keep diaspora practice,
+and three separate defects made it read as an Israeli calendar:
+
+- **Pesach was 7 days (15-21 Nisan).** The diaspora keeps **8** (15-22 Nisan).
+  The 8th day is now `[1, 22, "Passover"]` -- for 5786 that restores
+  Thu 9 Apr 2026. (Shavuot's 2 days and the split Shemini Atzeret / Simchat
+  Torah were already diaspora-correct, so only Pesach was short.)
+- **Hanukkah was a fixed list of 25-29 Kislev + 1-3 Tevet**, which silently
+  assumes a 29-day Kislev. Kislev has **30 days in some years**, and in those the
+  list punched a HOLE in the middle of the festival and added a bogus 9th day --
+  5787 lost Thu 10 Dec 2026 (30 Kislev) and gained 13 Dec. It is now computed by
+  `isHanukkah()` from `hebrewMonthLength(y, 9)` (newly exported from
+  `hebrewDate.js`), which yields 8 consecutive days in every year.
+- **Adar was keyed on the RAW month number.** In a leap year the raw months are
+  12 = Adar I and 13 = Adar II, and Purim belongs to **Adar II**. The old table
+  carried rows for both, so 2027 showed **Purim twice** (21 Feb on Adar I and
+  23 Mar on Adar II) and put Ta'anit Esther in the wrong month entirely.
+  `hebrewLookupMonth()` now remaps before lookup: `ADAR` (12) always means the
+  Adar that carries Purim, `ADAR_I` (14) is the extra month and holds
+  Purim Katan / Shushan Purim Katan. **Write new Adar rows with those constants,
+  never with a raw 12 or 13.**
+
+**Fast days never fall on Shabbat.** Four minor fasts move when the nominal date
+is a Saturday: Tzom Gedaliah, Shiva Asar B'Tammuz and Tisha B'Av are postponed
+to the Sunday after, and Ta'anit Esther is pulled BACK to the Thursday before
+(the day before Purim would otherwise be a Friday). They now live in
+`SHIFTED_FASTS` rather than `HEB_HOLIDAYS`, matched by
+`shiftedFastsOn(month, day, weekday)`. Testing the weekday alone is sufficient
+because each alternate day falls on its listed weekday exactly when the nominal
+day was Shabbat (11 Adar is a Thursday iff 13 Adar is a Shabbat, 4 Tishrei is a
+Sunday iff 3 Tishrei is a Shabbat, and so on). Asara B'Tevet is deliberately
+left in the static table -- it is the one fast that is never moved, and 10 Tevet
+can never land on Shabbat. Before this, 17 of the years 2024-2036 showed a fast
+scheduled on a Saturday.
+
+Verified 2024-2036: no fast on Shabbat, each fast exactly once a year, Purim
+exactly once a year and always in the last Adar, Hanukkah always 8 consecutive
+days, Pesach always 8 days. Re-run those checks if the table is edited.
+
 ## Rule 5: Deploy (step 3 of the Rule 0 end-of-task sequence)
 
 ### Smart Steps ABA Tracker (git-based, re-wired 2026-08-13)

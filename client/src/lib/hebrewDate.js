@@ -37,6 +37,13 @@ export function toHebrewNumeral(n) {
 
 function isHLeap(y)   { return (7 * y + 1) % 19 < 7; }
 
+/**
+ * Does Hebrew year `y` have a leap month? A leap year runs Adar I (month 12)
+ * then Adar II (month 13); Purim and Ta'anit Esther belong to Adar II.
+ * @param {number} y Hebrew year
+ */
+export function isHebrewLeapYear(y) { return isHLeap(y); }
+
 function hElapsed(y) {
   const m = Math.floor((235 * y - 234) / 19);
   const p = 12084 + 13753 * m;
@@ -70,6 +77,16 @@ const H_EPOCH = 347998;
 
 function hNewYear(y)  { return H_EPOCH + hElapsed(y) + hDelay(y); }
 function hYearLen(y)  { return hNewYear(y + 1) - hNewYear(y); }
+
+/**
+ * Length in days of Hebrew month `m` in year `y`.
+ * Exported because Chanukah's length in Kislev depends on it: Kislev has 30 days
+ * in some years and 29 in others, which moves where the 8 days land in Tevet.
+ * @param {number} y Hebrew year
+ * @param {number} m 1 = Nisan .. 7 = Tishrei .. 12 = Adar (13 = Adar II)
+ * @returns {number} 29 or 30
+ */
+export function hebrewMonthLength(y, m) { return hMonthLen(y, m); }
 
 function hMonthLen(y, m) {
   if ([1, 3, 5, 7, 11].includes(m)) return 30;
