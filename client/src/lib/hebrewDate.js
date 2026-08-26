@@ -52,7 +52,21 @@ function hDelay(y) {
   return 0;
 }
 
-const H_EPOCH = 347997;
+/**
+ * Julian Day Number of 1 Tishrei AM 1 (the Hebrew epoch).
+ *
+ * Do NOT change this without re-checking the anchors below — it was 347997,
+ * one day low, which pushed EVERY Hebrew date one day forward. That is what
+ * made the calendar read as though it were on Israeli time: 12 Sep 2026 showed
+ * as 2 Tishrei instead of 1 Tishrei, and Pesach/Yom Kippur were flagged on the
+ * Gregorian day before the one American calendars print.
+ *
+ * Anchors (daytime of the Gregorian date -> Hebrew date):
+ *   2026-09-12 -> 1 Tishrei 5787   2026-09-21 -> 10 Tishrei 5787
+ *   2026-04-02 -> 15 Nisan 5786    2026-12-05 -> 25 Kislev 5787
+ *   2027-03-23 -> 14 Adar II 5787  2027-04-22 -> 15 Nisan 5787
+ */
+const H_EPOCH = 347998;
 
 function hNewYear(y)  { return H_EPOCH + hElapsed(y) + hDelay(y); }
 function hYearLen(y)  { return hNewYear(y + 1) - hNewYear(y); }
@@ -93,13 +107,6 @@ function jdnToHeb(jdn) {
 }
 
 /**
- * Sunset hour (local) used to roll Hebrew date: before this time, "today" shows
- * the previous day's Hebrew date (Jewish day starts at sunset).
- */
-const SUNSET_HOUR_LOCAL = 18;
-const SUNSET_MINUTE_LOCAL = 0;
-
-/**
  * Convert Gregorian (year, month1, day) to Hebrew date.
  * Use this when you have a calendar date in the user's local timezone so the result
  * is not affected by Date timezone/UTC parsing. month1 = 1..12.
@@ -125,31 +132,26 @@ export function gregorianToHebrewFromYMD(year, month1, day) {
 }
 
 /**
- * Hebrew date for display: uses local (y,m,d). For the local "today", if current
- * time is before sunset (6 PM local), returns the previous day's Hebrew date so
- * the calendar matches the traditional "day starts at sunset" rule.
+ * Hebrew date to print for a Gregorian calendar day.
+ *
+ * This is the AMERICAN-calendar convention: the label on a Gregorian square is
+ * that day's DAYTIME Hebrew date, exactly as a printed US Jewish calendar shows
+ * it, and it does not change as the evening wears on.
+ *
+ * The Hebrew day really does begin at sunset, and this used to roll the label
+ * over at 6 PM local. Two problems: it rolled the WRONG way (it returned the
+ * PREVIOUS day's Hebrew date before sunset), and even done correctly it puts
+ * one cell a day ahead of its own neighbours and a day ahead of the holiday
+ * chip drawn beside it -- holidayService.js keys holidays off the daytime date.
+ * A grid where "today" disagrees with the cell next to it is what reads as a
+ * calendar running on Israeli time, so the label now stays on the civil day.
+ *
  * @param {number} year
  * @param {number} month1 1 = January, 12 = December
  * @param {number} day
- * @param {Date} [now] optional current time (default new Date())
  * @returns {{ year, month, day, monthNameHe, monthNameEn, numeral, short, full }}
  */
-export function gregorianToHebrewForDisplay(year, month1, day, now = new Date()) {
-  const isToday =
-    now.getFullYear() === year &&
-    now.getMonth() + 1 === month1 &&
-    now.getDate() === day;
-  const beforeSunset =
-    now.getHours() < SUNSET_HOUR_LOCAL ||
-    (now.getHours() === SUNSET_HOUR_LOCAL && now.getMinutes() < SUNSET_MINUTE_LOCAL);
-  if (isToday && beforeSunset) {
-    const prev = new Date(year, month1 - 1, day - 1);
-    return gregorianToHebrewFromYMD(
-      prev.getFullYear(),
-      prev.getMonth() + 1,
-      prev.getDate(),
-    );
-  }
+export function gregorianToHebrewForDisplay(year, month1, day) {
   return gregorianToHebrewFromYMD(year, month1, day);
 }
 

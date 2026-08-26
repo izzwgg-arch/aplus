@@ -541,6 +541,42 @@ If not even one atom fits, one is kept anyway so the split still makes
 progress; a single unsplittable atom taller than a page is kept and allowed to
 clip rather than looping forever.
 
+## A+ Scheduling Hebrew calendar is on the AMERICAN day (fixed 2026-08-26)
+
+The calendar's Hebrew date read one day ahead of every US Jewish calendar, and
+the Jewish holiday chips landed on the Gregorian day before the real one. Two
+separate causes, both in `client/src/lib/`:
+
+- **`hebrewDate.js` had `H_EPOCH = 347997`** — the Julian Day Number of
+  1 Tishrei AM 1 is **347998**. One day low means `doy = jdn - hNewYear(y)`
+  came out one too high, so EVERY converted date was pushed a day forward:
+  12 Sep 2026 rendered as 2 Tishrei 5787 instead of 1 Tishrei, 2 Apr 2026 as
+  16 Nisan instead of 15. `gToJDN()` was verified correct (JDN 2451545 for
+  2000-01-01); the epoch constant was the only defect. The fix is checked
+  against 20 anchors (Rosh Hashanah 5784-5789, Yom Kippur, Pesach, Purim in
+  both a plain and a leap year, Chanukah, Shavuot) — the anchor list is in the
+  comment above the constant. **Do not change that constant without re-running
+  them.**
+- **`gregorianToHebrewForDisplay()` rolled the date the wrong way.** The Jewish
+  day starts at sunset, so a rollover should move to the NEXT Hebrew day after
+  sunset; it returned the PREVIOUS day's date BEFORE sunset. The two bugs
+  cancelled for "today" only, which is why today's cell looked right while
+  every other cell was a day ahead.
+
+The rollover is now gone entirely rather than corrected: a calendar square is
+labelled with its **daytime** Hebrew date, the way a printed US Jewish calendar
+prints it. Shifting one cell in the evening would put it a day ahead of its own
+neighbours and a day ahead of the holiday chip beside it, since
+`holidayService.js` keys `HEB_HOLIDAYS` off the daytime date — that
+disagreement is what reads as "the calendar is on Israeli time".
+`gregorianToHebrewForDisplay()` is kept as the single display entry point (it
+now just delegates) and all three call sites in `AppointmentsPage.jsx` — week
+header, month grid, appointment modal — go through it, so a future change to
+the display rule lands in one place.
+
+Note this is a `client/` change, so it does NOT deploy via git pull; `/opt/aba`
+is a manual deploy (Rule 5).
+
 ## Rule 5: Deploy (step 3 of the Rule 0 end-of-task sequence)
 
 ### Smart Steps ABA Tracker (git-based, re-wired 2026-08-13)

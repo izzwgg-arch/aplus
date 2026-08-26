@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef, memo } from "react";
 import api from "../../lib/api";
 import { useToast } from "../../context/ToastContext";
-import { gregorianToHebrewForDisplay, gregorianToHebrewFromYMD } from "../../lib/hebrewDate";
+import { gregorianToHebrewForDisplay } from "../../lib/hebrewDate";
 import { getAllHolidays, dateKey } from "../../lib/holidayService";
 import AppointmentDetailsModal, { STATUS_CONFIG } from "./AppointmentDetailsDrawer";
 
@@ -753,7 +753,7 @@ function MonthGrid({ viewDate, appts, onDayClick, onApptClick, dayHolidays }) {
         {monthDates.map((date, i) => {
           const inMonth  = date.getMonth() === viewDate.getMonth();
           const isToday  = isSameDay(date, today);
-          const heb      = gregorianToHebrewFromYMD(date.getFullYear(), date.getMonth() + 1, date.getDate());
+          const heb      = gregorianToHebrewForDisplay(date.getFullYear(), date.getMonth() + 1, date.getDate());
           const hols     = dayHolidays?.[dateKey(date)] ?? { all: [], us: [], hebrew: [] };
           const dayAppts = appts.filter((a) => isSameDay(new Date(a.startsAt), date));
 
