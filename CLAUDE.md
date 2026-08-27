@@ -618,6 +618,71 @@ Verified 2024-2036: no fast on Shabbat, each fast exactly once a year, Purim
 exactly once a year and always in the last Adar, Hanukkah always 8 consecutive
 days, Pesach always 8 days. Re-run those checks if the table is edited.
 
+## Tracker BCBA notes generate FROM THE SERVICE DELIVERED (2026-08-27)
+
+A BCBA note documents a service, so the narrative has to describe the service
+that was actually delivered. Before this, `bcbaDefaultContent()` seeded one
+fixed paragraph per service type with only the names swapped in — a supervision
+note for Tuesday and one for Thursday, for two different children, read
+identically and had to be rewritten by hand.
+
+- **`src/lib/sessionNoteData.ts` is the one session → note data layer.** The
+  prisma include and the per-goal aggregation (trials + hand-attached
+  `SessionTarget`s, prompt codes, percentages) moved out of the BT note route
+  into it, and BOTH generators now call `summarizeSessionTargets()`. If the BT
+  note says 42 trials at 78% and the supervision note written about that same
+  session says something else, one of them is wrong in a clinical record — one
+  aggregation is what prevents that.
+- **`src/lib/bcbaNoteGenerators.ts` holds one generator per service type**, and
+  `generateBcbaNote()` dispatches on it, so switching the note-type dropdown
+  produces genuinely different documentation rather than the same paragraph
+  relabelled:
+  - **DSU** — supervision OF the selected BT's session that day: therapist and
+    role, the service window, mode, trials/targets/accuracy, every goal observed
+    with its own numbers, behavior events, then the feedback paragraph, with the
+    below-60% / at-or-above-80% / mastered goals named from the data.
+  - **TP** — the program reviewed against the last N days (default 30): active
+    goals by phase, domains, what mastered, what is ready to advance, what is
+    below criteria, newly opened goals awaiting baseline.
+  - **PRT** — caregiver training anchored to that day's session, listing the
+    goals reviewed with the caregiver and the ones needing home practice.
+  - **TM** / **ASSES** — the team and program picture, and observation data.
+  All deterministic — every number comes from a row in the database. A clinical
+  record must never contain an invented figure, and regenerating from unchanged
+  data must reproduce the same text.
+- **`POST /api/clients/[clientId]/generate-bcba-note`** does the work and
+  **returns the narrative WITHOUT saving it** (`smartsteps.notes.create` + client
+  access). The BCBA reviews and edits in the modal and saves through the ordinary
+  note routes, so generating never writes to the record.
+  - Body: `serviceType`, `serviceDate` ("YYYY-MM-DD"), `tzOffsetMinutes`,
+    optional `btUserId` / `sessionId` / `windowDays`.
+  - **The service date is the CLINIC's day.** The browser sends its offset FOR
+    that date (DST-correct) and the server builds the midnight-to-midnight
+    window from it — the server's timezone is not the clinic's, and every date
+    and time inside the narrative is rendered through the same offset.
+  - The program snapshot uses `prisma.trial.groupBy` for per-goal counts rather
+    than reading every trial row in the window.
+- **The BCBA selects the BT.** The service card has a "BT / Therapist for this
+  service" dropdown (user IDs, from `/api/users?forDropdown=1`); it filters the
+  day's sessions to that therapist, and "Any therapist on this date" folds in
+  all of them. When exactly one session matches, the note is LINKED to it
+  (`Note.sessionId`) and its Time In / Time Out are filled from the session
+  window when empty.
+- **An untouched note is kept in step with the data.** A note whose narrative is
+  still the boilerplate template (or empty) has not been written by anyone, so it
+  regenerates whenever the service type, date or selected BT changes — including
+  on open, which is what brings OLDER boilerplate notes in line with what was
+  actually entered. `isTemplateContent()` tests the template against the
+  plausible provider names (the note's saved provider, the logged-in user, and
+  the "the BCBA" fallback), because an old note was seeded with whichever name
+  was in the field at the time. The moment a BCBA edits the text it matches no
+  template and this never touches it again; the explicit "Generate from session
+  data" button confirms first in that case, and only a forced generation
+  replaces recommendations / next steps that already have text.
+- With no session on the date, the note is still generated — from the program
+  data — and the modal says so rather than silently producing a supervision
+  narrative about a session that does not exist.
+
 ## Rule 5: Deploy (step 3 of the Rule 0 end-of-task sequence)
 
 ### Smart Steps ABA Tracker (git-based, re-wired 2026-08-13)

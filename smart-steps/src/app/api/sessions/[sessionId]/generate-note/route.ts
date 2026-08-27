@@ -2,40 +2,19 @@ import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
 import { requirePermissionResponse } from "@/lib/permissions";
 import { prisma } from "@/lib/db";
+import {
+  loadSessionForNote,
+  summarizeSessionTargets,
+  type SessionTargetSummary,
+  type BehaviorRecord,
+} from "@/lib/sessionNoteData";
 
 type Params = { params: Promise<{ sessionId: string }> };
 
-/* ─── Deterministic BT Session Note Generator ───────────────────────────── */
-
-type SessionTargetSummary = {
-  targetId:        string;
-  targetTitle:     string;
-  targetType:      string;
-  phase:           string;
-  parentGoalTitle: string | null;
-  subGoalTitle:    string | null;
-  programName:     string | null;
-  trialCount:      number;
-  correctCount:    number;
-  promptedCount:   number;
-  incorrectCount:  number;
-  noResponseCount: number;
-  promptCodes:     Record<string, number>;
-  notes:           string[];
-  percentage:      number;
-  /** True when the goal was attached to the session by hand rather than derived
-   *  from trials. Such a goal may legitimately have zero trials. */
-  addedManually:   boolean;
-  addedNote:       string | null;
-};
-
-type BehaviorRecord = {
-  type:        string;
-  behavior:    string | null;
-  antecedent:  string | null;
-  consequence: string | null;
-  intensity:   string | null;
-};
+/* ─── Deterministic BT Session Note Generator ───────────────────────────────
+   The session query and the per-goal aggregation live in @/lib/sessionNoteData
+   so this note and the BCBA service note written ABOUT the same session can
+   never report different numbers. ─────────────────────────────────────────── */
 
 function formatPromptCodes(codes: Record<string, number>): string {
   const entries = Object.entries(codes).filter(([k]) => k !== "INDEPENDENT");
@@ -233,150 +212,12 @@ export async function POST(
 
   try {
     /* 1. Load session + related data (read-only) */
-    const s = await prisma.session.findUnique({
-      where: { id: sessionId },
-      include: {
-        client: { select: { id: true, name: true } },
-        user:   { select: { id: true, name: true } },
-        trials: {
-          where: { deletedAt: null },
-          include: {
-            target: {
-              select: {
-                id:          true,
-                definition:  true,
-                targetType:  true,
-                phase:       true,
-                dateMastered: true,
-                inMaintenance: true,
-                parentGoal:  { select: { id: true, title: true } },
-                subGoal:     {
-                  select: {
-                    id: true, title: true,
-                    parentGoal: { select: { id: true, title: true } },
-                  },
-                },
-                program: { select: { id: true, name: true } },
-              },
-            },
-          },
-          orderBy: { createdAt: "asc" },
-        },
-        behaviors: {
-          orderBy: { createdAt: "asc" },
-          select: {
-            type:        true,
-            behavior:    true,
-            antecedent:  true,
-            consequence: true,
-            intensity:   true,
-          },
-        },
-        // Goals attached to the session by hand — worked on, but with no trial
-        // data of their own. They belong in the note just like the rest.
-        addedTargets: {
-          orderBy: { createdAt: "asc" },
-          include: {
-            target: {
-              select: {
-                id:         true,
-                definition: true,
-                targetType: true,
-                phase:      true,
-                parentGoal: { select: { id: true, title: true } },
-                subGoal:    {
-                  select: {
-                    id: true, title: true,
-                    parentGoal: { select: { id: true, title: true } },
-                  },
-                },
-                program: { select: { id: true, name: true } },
-              },
-            },
-          },
-        },
-      },
-    });
+    const s = await loadSessionForNote(sessionId);
 
     if (!s || s.deletedAt) return NextResponse.json({ error: "Session not found" }, { status: 404 });
 
-    /* 2. Aggregate trials by target */
-    const grouped = new Map<string, SessionTargetSummary>();
-
-    for (const trial of s.trials) {
-      const pg = trial.target.parentGoal ?? trial.target.subGoal?.parentGoal ?? null;
-      const key = trial.target.id;
-      const existing = grouped.get(key) ?? {
-        targetId:        trial.target.id,
-        targetTitle:     trial.target.definition,
-        targetType:      trial.target.targetType,
-        phase:           trial.target.phase,
-        parentGoalTitle: pg?.title ?? null,
-        subGoalTitle:    trial.target.subGoal?.title ?? null,
-        programName:     trial.target.program?.name ?? null,
-        trialCount:      0,
-        correctCount:    0,
-        promptedCount:   0,
-        incorrectCount:  0,
-        noResponseCount: 0,
-        promptCodes:     {},
-        notes:           [],
-        percentage:      0,
-        addedManually:   false,
-        addedNote:       null,
-      };
-
-      existing.trialCount += 1;
-      if (trial.result === "CORRECT" || trial.result === "INDEPENDENT") existing.correctCount += 1;
-      else if (trial.result === "PROMPTED") existing.promptedCount += 1;
-      else if (trial.result === "INCORRECT") existing.incorrectCount += 1;
-      else existing.noResponseCount += 1;
-
-      const code = trial.promptLevel ?? "INDEPENDENT";
-      existing.promptCodes[code] = (existing.promptCodes[code] ?? 0) + 1;
-      if (trial.notes?.trim()) existing.notes.push(trial.notes.trim());
-
-      grouped.set(key, existing);
-    }
-
-    /* Merge in the hand-attached goals. One that also has trials keeps its trial
-       data and is only flagged; one with no trials joins with a zero count. */
-    for (const link of s.addedTargets) {
-      const t  = link.target;
-      const pg = t.parentGoal ?? t.subGoal?.parentGoal ?? null;
-      const existing = grouped.get(t.id);
-      if (existing) {
-        existing.addedManually = true;
-        existing.addedNote = link.note;
-        if (link.note?.trim()) existing.notes.push(link.note.trim());
-        continue;
-      }
-      grouped.set(t.id, {
-        targetId:        t.id,
-        targetTitle:     t.definition,
-        targetType:      t.targetType,
-        phase:           t.phase,
-        parentGoalTitle: pg?.title ?? null,
-        subGoalTitle:    t.subGoal?.title ?? null,
-        programName:     t.program?.name ?? null,
-        trialCount:      0,
-        correctCount:    0,
-        promptedCount:   0,
-        incorrectCount:  0,
-        noResponseCount: 0,
-        promptCodes:     {},
-        notes:           [],
-        percentage:      0,
-        addedManually:   true,
-        addedNote:       link.note,
-      });
-    }
-
-    const sessionTargets: SessionTargetSummary[] = Array.from(grouped.values()).map((t) => ({
-      ...t,
-      percentage: t.trialCount > 0 ? Math.round((t.correctCount / t.trialCount) * 100) : 0,
-      notes:      Array.from(new Set(t.notes)),
-    }));
+    /* 2. Aggregate trials by target, merging in hand-attached goals */
+    const sessionTargets: SessionTargetSummary[] = summarizeSessionTargets(s);
 
     /* 3. Generate note text — session times are stored on the session record,
        so duration is intentionally omitted from the narrative. */

@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X, Save, FileText, User, Calendar, Clock, CheckCircle,
-  ChevronDown, Sparkles, Trash2, Printer,
+  ChevronDown, Sparkles, Trash2, Printer, Wand2, AlertCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { printSessionNotes, type PrintableNote } from "@/lib/printNotes";
@@ -69,6 +69,32 @@ const ATTENDANCE_OPTIONS = [
 ];
 
 /* ── Helper ─────────────────────────────────────────────────────────────────── */
+
+/** What `POST /api/clients/[clientId]/generate-bcba-note` returns. */
+type GeneratedNoteResponse = {
+  title:           string;
+  content:         string;
+  recommendations: string;
+  nextSteps:       string;
+  sessionId:       string | null;
+  matchedSessions: number;
+  sessions: Array<{
+    id:           string;
+    startedAt:    string;
+    endedAt:      string | null;
+    mode:         string;
+    providerName: string;
+    trialCount:   number;
+    targetCount:  number;
+  }>;
+};
+
+/** Local "HH:MM" for a timestamp — converted in the BROWSER, which sits in the
+ *  clinic's timezone; the server's does not. */
+function toClockString(iso: string): string {
+  const d = new Date(iso);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
 
 function toDateInputValue(iso: string | null | undefined): string {
   if (!iso) return new Date().toISOString().slice(0, 10);
@@ -180,6 +206,44 @@ function ProviderSelect({
   );
 }
 
+/**
+ * The BT / therapist whose session this BCBA service was delivered around.
+ *
+ * Unlike the provider picker this returns a user ID, not a name: the id is what
+ * finds that therapist's session on the service date, which is what the note is
+ * generated from. "Any therapist" folds in every session on the date.
+ */
+function BtSelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const { data: providers = [] } = useQuery<ProviderOption[]>({
+    queryKey: ["providers-dropdown"],
+    queryFn: async () => {
+      const res = await fetch("/smart-steps/api/users?forDropdown=1");
+      if (!res.ok) return [];
+      return res.json();
+    },
+    staleTime: 10 * 60 * 1000,
+  });
+
+  return (
+    <div className="relative">
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="field-input w-full text-sm appearance-none pr-8"
+      >
+        <option value="">Any therapist on this date</option>
+        {providers.filter((p) => !!p.name).map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name}
+            {p.displayRole ? ` — ${p.displayRole}` : p.role !== "RBT" ? ` — ${p.role}` : ""}
+          </option>
+        ))}
+      </select>
+      <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500" />
+    </div>
+  );
+}
+
 /* ── Component ───────────────────────────────────────────────────────────────── */
 
 export function NoteEditorModal({
@@ -209,6 +273,13 @@ export function NoteEditorModal({
   /* An existing saved title counts as hand-written — auto-titling only ever
      fills a title the user has not authored. */
   const [titleTouched,    setTitleTouched]    = useState(!!note?.title);
+  /* The BT whose session this service was delivered around. A supervision note
+     is ABOUT that therapist's session, so it drives what gets generated. */
+  const [btUserId,        setBtUserId]        = useState(note?.session?.user?.id ?? "");
+  const [linkedSessionId, setLinkedSessionId] = useState<string | null>(note?.sessionId ?? null);
+  const [generating,      setGenerating]      = useState(false);
+  const [genInfo,         setGenInfo]         = useState<string | null>(null);
+  const [genWarning,      setGenWarning]      = useState<string | null>(null);
   const [saving,          setSaving]          = useState(false);
   const [deleting,        setDeleting]        = useState(false);
   const [confirmDelete,   setConfirmDelete]   = useState(false);
@@ -231,8 +302,91 @@ export function NoteEditorModal({
     if (type === "BT_SESSION")  setTitle(`BT Session Note${suffix}`);
     else if (type === "BCBA")   setTitle(`${bcbaServiceLabel(bcbaServiceType)} Note${suffix}`);
     else                        setTitle("");
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [type, bcbaServiceType, serviceDate, titleTouched]);
+
+  /**
+   * Builds the narrative from the DATA behind this service: the selected BT's
+   * session on the service date for supervision, the program picture for
+   * planning / meeting / assessment. Nothing is saved — the BCBA reviews and
+   * edits, then saves through the ordinary note routes.
+   *
+   * `force` replaces recommendations / next steps that already have text; the
+   * automatic pass never does, so a BCBA's own words survive a regeneration.
+   */
+  async function generateFromData(opts: { force?: boolean } = {}) {
+    if (type !== "BCBA" || !serviceDate) return;
+    setGenerating(true);
+    try {
+      const res = await fetch(`/smart-steps/api/clients/${clientId}/generate-bcba-note`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          serviceType: bcbaServiceType,
+          serviceDate,
+          // The service date means the CLINIC's day. Send this browser's offset
+          // for that date so the server's timezone never shifts the window.
+          tzOffsetMinutes: new Date(serviceDate + "T12:00:00").getTimezoneOffset(),
+          btUserId: btUserId || undefined,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(err.error ?? "Failed to generate");
+      }
+      const data = await res.json() as GeneratedNoteResponse;
+
+      setContent(data.content);
+      if (opts.force || !recommendations.trim()) setRecommendations(data.recommendations ?? "");
+      if (opts.force || !nextSteps.trim())       setNextSteps(data.nextSteps ?? "");
+      if (!titleTouched && data.title)           setTitle(data.title);
+      setLinkedSessionId(data.sessionId ?? null);
+
+      /* A supervision note covers the session's own window — fill the service
+         times from it when the BCBA has not entered their own. */
+      const only = data.sessions?.length === 1 ? data.sessions[0] : null;
+      if (only) {
+        if (!timeIn  && only.startedAt) setTimeIn(toClockString(only.startedAt));
+        if (!timeOut && only.endedAt)   setTimeOut(toClockString(only.endedAt));
+      }
+
+      if (!data.sessions || data.sessions.length === 0) {
+        setGenInfo(null);
+        setGenWarning(
+          btUserId
+            ? "No session was found for that therapist on this date — the note was written from the program data instead."
+            : "No session data was found on this date — the note was written from the program data instead."
+        );
+      } else {
+        setGenWarning(null);
+        setGenInfo(
+          data.sessions.length === 1
+            ? `Generated from ${only!.providerName}'s session on ${new Date(only!.startedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })} (${only!.trialCount} trial${only!.trialCount !== 1 ? "s" : ""}).`
+            : `Generated from ${data.sessions.length} sessions on this date.`
+        );
+      }
+    } catch (e) {
+      setGenWarning(String(e));
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  /**
+   * Keeps an UNTOUCHED note in step with the data.
+   *
+   * A note whose narrative is still the boilerplate template (or empty) has not
+   * been written by anyone, so it is regenerated whenever the service type, the
+   * date or the selected BT changes — including on open, which is what brings
+   * older boilerplate notes in line with what was actually entered. The moment
+   * a BCBA edits the text it stops matching a template and is never touched
+   * again by this effect.
+   */
+  useEffect(() => {
+    if (type !== "BCBA") return;
+    if (!isTemplateContent(content)) return;
+    void generateFromData();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [type, bcbaServiceType, serviceDate, btUserId]);
 
   async function handleSave() {
     if (!content.trim()) { toast.error("Note content is required."); return; }
@@ -242,6 +396,9 @@ export function NoteEditorModal({
         clientId,
         type,
         bcbaServiceType: type === "BCBA" ? bcbaServiceType : undefined,
+        // Links a supervision note to the session it documents, so the note
+        // carries that session's timing and shows against it.
+        sessionId:       linkedSessionId ?? undefined,
         title:           title   || undefined,
         serviceDate:     serviceDate ? new Date(serviceDate + "T12:00:00").toISOString() : undefined,
         timeIn:          timeIn  || undefined,
@@ -328,7 +485,15 @@ export function NoteEditorModal({
   /** True while the narrative is still one of the generated service templates. */
   function isTemplateContent(text: string): boolean {
     if (!text.trim()) return true;
-    return BCBA_SERVICE_TYPES.some((st) => bcbaDefaultContent(st.id, clientName, provider) === text);
+    /* An older note was seeded with whatever provider name was in the field at
+       the time, which is not always the one it was finally saved with. Testing
+       the plausible names is what lets an untouched legacy note be recognised
+       as boilerplate and brought in line with the data; anything that matches
+       none of them is treated as hand-written and is never overwritten. */
+    const candidates = Array.from(new Set([provider, providerName, note?.user?.name ?? "", ""]));
+    return BCBA_SERVICE_TYPES.some((st) =>
+      candidates.some((p) => bcbaDefaultContent(st.id, clientName, p) === text)
+    );
   }
 
   /**
@@ -445,6 +610,13 @@ export function NoteEditorModal({
 
                   <div>
                     <label className="block text-xs text-zinc-500 mb-1 flex items-center gap-1">
+                      <User className="h-3 w-3" /> BT / Therapist for this service
+                    </label>
+                    <BtSelect value={btUserId} onChange={setBtUserId} />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-zinc-500 mb-1 flex items-center gap-1">
                       <CheckCircle className="h-3 w-3" /> Attendance
                     </label>
                     <div className="relative">
@@ -461,6 +633,38 @@ export function NoteEditorModal({
                     </div>
                   </div>
                 </div>
+
+                {/* Generate from the data behind this service */}
+                <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[var(--glass-border)] pt-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!isTemplateContent(content) &&
+                          !confirm("This will replace the note text with a fresh one generated from the session data. Continue?")) return;
+                      void generateFromData({ force: true });
+                    }}
+                    disabled={generating}
+                    className="tap-target inline-flex items-center gap-2 rounded-xl border border-[var(--accent-purple)]/50 bg-[var(--accent-purple)]/10 px-3 py-2 text-xs font-semibold text-[var(--accent-purple)] disabled:opacity-60"
+                  >
+                    <Wand2 className="h-3.5 w-3.5" />
+                    {generating ? "Generating…" : "Generate from session data"}
+                  </button>
+                  <p className="text-[11px] text-zinc-500 flex-1 min-w-[12rem]">
+                    Writes a {bcbaServiceLabel(bcbaServiceType).toLowerCase()} note from what was actually
+                    entered for this date.
+                  </p>
+                </div>
+
+                {genInfo && (
+                  <p className="mt-2 text-[11px] text-[var(--accent-cyan)] flex items-center gap-1">
+                    <Sparkles className="h-3 w-3 shrink-0" /> {genInfo}
+                  </p>
+                )}
+                {genWarning && (
+                  <p className="mt-2 text-[11px] text-amber-400 flex items-start gap-1">
+                    <AlertCircle className="h-3 w-3 shrink-0 mt-0.5" /> {genWarning}
+                  </p>
+                )}
               </div>
             )}
 
