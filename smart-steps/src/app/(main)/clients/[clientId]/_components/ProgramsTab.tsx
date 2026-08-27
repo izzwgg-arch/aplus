@@ -1009,8 +1009,13 @@ export function ProgramsTab({
             createdAt: sg.createdAt ?? now,
             synced: true,
           });
-        } else if (categoryId && localSkill.categoryId !== categoryId) {
-          updateProgram(localSkill.id, { categoryId });
+        } else {
+          const skillPatch: Partial<LocalProgram> = {};
+          if (categoryId && localSkill.categoryId !== categoryId) skillPatch.categoryId = categoryId;
+          // `skills` filters on clientId, so a skill area carrying the wrong one is
+          // invisible -- and takes every goal under it out of the drill-down too.
+          if (localSkill.clientId !== clientId) skillPatch.clientId = clientId;
+          if (Object.keys(skillPatch).length > 0) updateProgram(localSkill.id, skillPatch);
         }
         // The local skill-area id targets must reference (falls back to sg.id when
         // the skill area was just added above with id === sg.id).
@@ -1021,13 +1026,20 @@ export function ProgramsTab({
           if (!t.isActive) continue;
           const localTarget = storeTargets.find((lt) => lt.serverId === t.id || lt.id === t.id);
           if (localTarget) {
-            // Reconcile the parent links. A goal whose programId matches no skill
-            // area -- empty OR stale -- never renders in the drill-down, and the
-            // persisted store means a bad value survives every reload until it is
-            // rewritten here.
+            // Reconcile everything the drill-down filters on. A goal whose
+            // programId matches no skill area -- empty OR stale -- never renders,
+            // and the persisted store means a bad value survives every reload
+            // until it is rewritten here.
             const patch: Partial<LocalTarget> = {};
             if (localTarget.programId !== skillLocalId) patch.programId = skillLocalId;
             if (categoryId && localTarget.categoryId !== categoryId) patch.categoryId = categoryId;
+            // The goals endpoint only returns ACTIVE targets, so the server saying
+            // this goal exists means it is active. A local `isActive: false` that
+            // never reached the server -- a delete that was refused, failed, or was
+            // sent while offline -- would otherwise hide the goal in THIS browser
+            // forever while every other user still sees it.
+            if (localTarget.isActive === false) patch.isActive = true;
+            if (localTarget.clientId !== clientId) patch.clientId = clientId;
             if (Object.keys(patch).length > 0) updateTarget(localTarget.id, patch);
             continue;
           }
@@ -1220,11 +1232,27 @@ export function ProgramsTab({
     else toast.error("Unable to save goal to library.");
   }
 
+  /**
+   * Delete a goal (DB: Target). The server archives it (`isActive: false`) so
+   * trial history survives.
+   *
+   * The local hide is rolled back when the server refuses or the request fails.
+   * This used to hide the goal locally, fire the DELETE without ever reading the
+   * response, and report success either way — so a refused or failed delete left
+   * the goal active on the server but hidden in THIS browser permanently, which
+   * reads as "some of the goals are missing" for one user only. The sibling
+   * handlers (deleteSkillArea / deleteCategory) already check `res?.ok`.
+   */
   async function deleteGoal(goal: LocalTarget) {
     if (!confirm(`Delete ${goal.title}? This keeps history but hides the goal.`)) return;
     updateTarget(goal.id, { isActive: false });
     if (goal.serverId) {
-      await fetch(`/smart-steps/api/targets/${goal.serverId}`, { method: "DELETE" }).catch(() => {});
+      const res = await fetch(`/smart-steps/api/targets/${goal.serverId}`, { method: "DELETE" }).catch(() => null);
+      if (!res?.ok) {
+        updateTarget(goal.id, { isActive: true });
+        toast.error("Unable to delete goal.");
+        return;
+      }
     }
     toast.success("Goal deleted.");
   }

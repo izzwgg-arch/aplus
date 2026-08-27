@@ -718,6 +718,36 @@ Three defects let a bad parent link hide server data permanently:
 The effect also carries a `cancelled` flag so a client switch mid-fetch cannot
 write one client's hierarchy into another's.
 
+**Follow-up (same day): a goal hidden by a FAILED delete stayed hidden.** Leah
+Fulop (ADMIN, `.all` on every scope, so never phase-filtered) still could not see
+*some* of Shlomo Schiff's goals. Two more local-cache divergences, both of which
+hide a goal in ONE browser while every other user keeps seeing it:
+
+- **`deleteGoal()` in ProgramsTab never read the DELETE response.** It set
+  `isActive: false` locally, fired
+  `DELETE /api/targets/[targetId]` with `.catch(() => {})`, and toasted
+  "Goal deleted." unconditionally. A refused (403), failed or offline delete
+  therefore left the goal ACTIVE on the server and hidden forever in that
+  browser — the store is persisted and hydration only filled BLANK fields. It
+  now checks `res?.ok`, rolls the local hide back on failure, and reports the
+  error, matching `deleteSkillArea()` / `deleteCategory()`, which already did.
+- **`handleRemoveTarget()` on the goals page archived nothing.** It called
+  `removeTarget(targetId)` and only *then* looked the row up with
+  `useABAStore.getState().targets.find(...)` to read its `serverId`. Zustand's
+  `set` is synchronous, so that lookup always returned `undefined` and the
+  `PATCH { isActive: false }` was dead code 100% of the time — the target
+  disappeared locally and stayed active on the server. The row is now captured
+  before the removal.
+
+**Hydration therefore reconciles every field the drill-down FILTERS on**, not
+just the parent links: `isActive` and `clientId` on targets, and `clientId` on
+skill areas. The goals endpoint only ever returns active targets, so the server
+returning a goal proves it is active — restoring `isActive: true` cannot
+resurrect a real delete (a successful delete stops the server returning it, and
+local deletes are hard `filter()` removals, not soft flags). This is what heals
+browsers already carrying a bad value. Content fields (title, phase) are left
+alone so unsynced local edits are not clobbered.
+
 **Access is a separate axis and was working correctly.** `smartsteps.goals.view`
 is scoped: `.all` (ADMIN / BCBA / SUPERVISOR / READ_ONLY) sees every client;
 `.assigned` (RBT, PARENT_VIEWER) requires a `ClientAssignment` row. An RBT with

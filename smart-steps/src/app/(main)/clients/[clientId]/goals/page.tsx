@@ -1633,10 +1633,14 @@ function ProgramRow({
 
   function handleRemoveTarget(targetId: string) {
     if (!confirm("Remove this target?")) return;
+    // Read the row BEFORE removing it. `removeTarget` filters it out of the store
+    // synchronously, so looking it up afterwards always returned undefined and the
+    // archive PATCH below never fired — the target vanished from this browser while
+    // staying active on the server for everyone else.
+    const t = useABAStore.getState().targets.find((tt) => tt.id === targetId);
     removeTarget(targetId);
     toast.success("Target removed");
     // Sync archive to server
-    const t = useABAStore.getState().targets.find((tt) => tt.id === targetId);
     if (t?.serverId) {
       fetch(`/smart-steps/api/targets/${t.serverId}`, {
         method: "PATCH",
