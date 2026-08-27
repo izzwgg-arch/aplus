@@ -35,6 +35,7 @@ import {
   type LocalTarget,
 } from "@/store/abaStore";
 import { formatSessionHours } from "@/lib/formatDuration";
+import { isOpenForDataEntry } from "@/lib/targetVisibility";
 import { SessionSnapshotDrawer } from "./SessionSnapshotDrawer";
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
@@ -513,7 +514,11 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
   const allSkills          = useABAStore((s) => s.programs);
   const rawTargets         = useABAStore((s) => s.targets);
   const categories         = useMemo(() => (rawCategories ?? []).filter((c) => c.clientId === clientId), [rawCategories, clientId]);
-  const allGoals           = useMemo(() => (rawTargets ?? []).filter((t) => t.clientId === clientId && (t.isActive ?? true)), [rawTargets, clientId]);
+  // Mastered goals are finished work — nobody records trials against them, so
+  // they are left out of every data-entry list (isOpenForDataEntry). Filtering
+  // here rather than at the render keeps the category/skill pill counts and the
+  // "no active goals" notice in step with the cards actually shown.
+  const allGoals           = useMemo(() => (rawTargets ?? []).filter((t) => t.clientId === clientId && (t.isActive ?? true) && isOpenForDataEntry(t)), [rawTargets, clientId]);
 
   /* ── Past sessions (paginated — reaches the COMPLETE history via "Load more") ── */
   const SESSIONS_PAGE_SIZE = 50;

@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
 import { requireClientAccessResponse, hasAllScope } from "@/lib/permissions";
-import { restrictedPhaseWhere } from "@/lib/targetVisibility";
+import { targetPhaseWhere } from "@/lib/targetVisibility";
 import { prisma } from "@/lib/db";
 
 // Returns ALL active targets for a client, grouped by goal/program
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ clientId: string }> }
 ) {
   const user = await requireSession();
@@ -16,9 +16,16 @@ export async function GET(
   if (denied) return denied;
 
   // BT visibility: assigned-only viewers see every active phase except
-  // MASTERED. BCBAs/Admins (holding the `.all` scope) see every phase.
+  // MASTERED. BCBAs/Admins (holding the `.all` scope) see every phase, unless
+  // the caller is a session data-entry picker (`excludeMastered=1`) — a
+  // finished goal is not something anyone records trials against, so it is
+  // kept out of those lists for every role. Callers that need the full
+  // hierarchy (e.g. the Goals & Targets hydration in ProgramsTab) omit the
+  // flag and still receive mastered goals.
   const restricted = !(await hasAllScope(user.id, "smartsteps.targets.view"));
-  const phaseWhere = restrictedPhaseWhere(restricted);
+  const excludeMastered =
+    new URL(req.url).searchParams.get("excludeMastered") === "1";
+  const phaseWhere = targetPhaseWhere({ restricted, excludeMastered });
 
   try {
     // Targets via goal hierarchy

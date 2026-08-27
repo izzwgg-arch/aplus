@@ -9,6 +9,7 @@ import { db, queueTrial, queueBehavior, queueSession } from "@/lib/dexie";
 import { toast } from "sonner";
 import { ArrowLeft, Pause, Play, Timer, Plus, Minus, RefreshCcw, Save, CloudOff, ChevronDown, AlertTriangle } from "lucide-react";
 import { useABAStore, resolveSessionStart, type ActiveSession } from "@/store/abaStore";
+import { isOpenForDataEntry } from "@/lib/targetVisibility";
 import { useSession as useAuthSession } from "next-auth/react";
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
@@ -99,8 +100,11 @@ export default function SessionNewPage() {
   const storeClear = useABAStore((s) => s.clearActiveSession);
   const storeActiveSession = useABAStore((s) => s.activeSession);
   const rawStoreTargets = useABAStore((s) => s.targets);
+  // Mastered goals are finished work and are not offered for data entry — the
+  // server list is filtered by `excludeMastered=1` below and the local store is
+  // filtered here, so the merged picker only ever shows open goals.
   const storeTargets = useMemo(
-    () => rawStoreTargets.filter((t) => t.clientId === clientId && t.isActive),
+    () => rawStoreTargets.filter((t) => t.clientId === clientId && t.isActive && isOpenForDataEntry(t)),
     [rawStoreTargets, clientId],
   );
   const [storeLocalSessionId, setStoreLocalSessionId] = useState<string | null>(null);
@@ -197,7 +201,7 @@ export default function SessionNewPage() {
   }>({
     queryKey: ["client-targets", clientId],
     queryFn: async () => {
-      const res = await fetch(`/smart-steps/api/clients/${clientId}/targets`);
+      const res = await fetch(`/smart-steps/api/clients/${clientId}/targets?excludeMastered=1`);
       if (!res.ok) return { groups: [], totalTargets: 0 };
       return res.json();
     },

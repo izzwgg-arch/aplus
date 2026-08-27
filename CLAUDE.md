@@ -757,6 +757,48 @@ that by assigning the client in Settings → Staff, not by widening the role:
 PARENT_VIEWER shares the same scope machinery, so granting `.all` broadly would
 let a parent open every other child's clinical record.
 
+## Tracker data entry offers OPEN goals only (2026-08-27)
+
+A mastered goal is finished clinical work — nobody runs trials on it any more —
+so it is no longer listed anywhere a session's data is entered. Only unmastered,
+open goals are offered.
+
+`smart-steps/src/lib/targetVisibility.ts` remains the single source of truth and
+gained the data-entry side of the rule:
+
+- `isOpenForDataEntry(target)` — the client-side test. False for
+  `phase === "MASTERED"` **and** for a local store row carrying
+  `status: "mastered"` (a locally-created goal can hold a stale phase until it
+  is re-hydrated from the server).
+- `targetPhaseWhere({ restricted, excludeMastered })` — the prisma fragment for
+  `GET /api/clients/[clientId]/targets`. A restricted viewer keeps their phase
+  allow-list (`RESTRICTED_VISIBLE_PHASES`, which already excludes MASTERED);
+  an unrestricted viewer passing `excludeMastered=1` gets `phase: { not:
+  "MASTERED" }`. The two must be built together — spreading both would collide
+  on the same `phase` key.
+
+Applied at the three data-entry surfaces:
+
+- **DataEntryTab** renders from the persisted Zustand store, not from the fetch,
+  so the filter goes on the `allGoals` memo. Filtering there rather than at the
+  render keeps the category/skill pill counts and the "no active goals" notice
+  in step with the cards actually shown. Its `/targets` fetch is deliberately
+  left UNFILTERED — it is a serverId sync into the shared store, not a picker,
+  and dropping mastered rows from it would leave those goals unlinked for
+  analytics.
+- **`clients/[clientId]/session/new`** merges store targets with server targets,
+  so both halves are filtered: `excludeMastered=1` on the fetch and
+  `isOpenForDataEntry` on the store memo.
+- **Session Snapshot drawer's "add goal" picker** passes `excludeMastered=1`.
+
+Everything else still shows mastered goals: Goals & Targets, analytics, reports,
+and a session's own recorded Goals Worked (a goal already on a session keeps
+showing there even after it masters). `ProgramsTab`'s hydration calls the same
+endpoint WITHOUT the flag and still receives mastered goals — do not add the
+flag there, or mastered goals created on another device stop hydrating into the
+hierarchy. `TargetDetailPanel`'s ad-hoc single-trial log is reached by opening
+one specific goal, so it is untouched.
+
 ## Rule 5: Deploy (step 3 of the Rule 0 end-of-task sequence)
 
 ### Smart Steps ABA Tracker (git-based, re-wired 2026-08-13)

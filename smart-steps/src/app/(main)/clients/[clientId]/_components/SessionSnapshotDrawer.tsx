@@ -444,11 +444,14 @@ export function SessionSnapshotDrawer({
   });
 
   /* The client's goals, for attaching one that was worked on without data.
-     Loaded only while the picker is open so opening the drawer stays cheap. */
+     Loaded only while the picker is open so opening the drawer stays cheap.
+     `excludeMastered=1`: a finished goal is not something a session is run on,
+     so it is never offered here. Goals ALREADY on the session keep showing in
+     Goals Worked below even if they have since been mastered. */
   const { data: targetData } = useQuery<{ groups: TargetGroup[] }>({
     queryKey: ["client-targets-picker", data?.clientId],
     queryFn: async () => {
-      const res = await fetch(`/smart-steps/api/clients/${data!.clientId}/targets`);
+      const res = await fetch(`/smart-steps/api/clients/${data!.clientId}/targets?excludeMastered=1`);
       if (!res.ok) return { groups: [] };
       return res.json();
     },

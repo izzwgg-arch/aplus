@@ -37,3 +37,47 @@ export function isPhaseVisibleToRestrictedViewer(phase: string): boolean {
 export function restrictedPhaseWhere(restricted: boolean) {
   return restricted ? { phase: { in: [...RESTRICTED_VISIBLE_PHASES] } } : {};
 }
+
+/** The phase a goal reaches when it is finished. */
+export const MASTERED_PHASE = "MASTERED";
+
+export function isMasteredPhase(phase?: string | null): boolean {
+  return phase === MASTERED_PHASE;
+}
+
+/**
+ * True when a goal may be offered in a SESSION DATA-ENTRY list (the DTT goal
+ * cards, the new-session target picker, the Session Snapshot "add goal"
+ * picker).
+ *
+ * A mastered goal is finished clinical work — nobody is running trials on it
+ * any more, so putting it in front of the person entering the session only
+ * makes the real, open goals harder to find. Restricted viewers were already
+ * never shown mastered goals (see RESTRICTED_VISIBLE_PHASES); this is the same
+ * rule applied to BCBAs/Admins, but ONLY on the data-entry surfaces. Every
+ * other view — Goals & Targets, analytics, reports, a session's own recorded
+ * goals — still shows mastered goals, because that is where finished work is
+ * meant to be read.
+ *
+ * The local store's `status` is checked as well: a locally-created goal that
+ * has not been re-hydrated from the server can carry `status: "mastered"` with
+ * a stale phase.
+ */
+export function isOpenForDataEntry(target: {
+  phase?: string | null;
+  status?: string | null;
+}): boolean {
+  return !isMasteredPhase(target.phase) && target.status !== "mastered";
+}
+
+/**
+ * Prisma `where` fragment for `Target.phase` on the session-picker endpoint.
+ * Restricted viewers keep their phase allow-list (which already excludes
+ * MASTERED); an unrestricted viewer asking for data-entry goals gets
+ * everything except MASTERED.
+ */
+export function targetPhaseWhere(opts: { restricted: boolean; excludeMastered?: boolean }) {
+  if (opts.restricted) return restrictedPhaseWhere(true);
+  if (opts.excludeMastered) return { phase: { not: MASTERED_PHASE } };
+  return {};
+}
