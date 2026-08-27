@@ -683,6 +683,50 @@ identically and had to be rewritten by hand.
   data — and the modal says so rather than silently producing a supervision
   narrative about a session that does not exist.
 
+## Tracker Goals & Targets tab — server hierarchy wins over the local cache (fixed 2026-08-27)
+
+Reported as "I can't see Shlomo Schiff's goals". The goals were never missing:
+the client has 13 ACTIVE skill areas across 5 categories and ~51 targets, and
+`GET /api/clients/[clientId]/goals` returned all 13 to every ADMIN/BCBA account
+and 12 to the assigned RBTs (the 13th is a duplicate empty "Receptive Language"
+whose only target is inactive). The data was being hidden by the BROWSER, in
+`ProgramsTab.tsx`'s cross-device hydration effect.
+
+That tab renders from the persisted Zustand store (`useABAStore`, localStorage),
+not from the fetch response. The server response only ever ADDED to the store.
+Three defects let a bad parent link hide server data permanently:
+
+- **The two fetches raced.** Categories (`GET /api/programs?clientId=`) and skill
+  areas (`GET /api/clients/[clientId]/goals`) were two concurrent promises. A
+  locally-created category keeps a `local-…` id with `serverId` set, so if the
+  goals response landed first the category lookup missed and the skill area was
+  filed under the raw SERVER `Program` id. `categorySkills` filters
+  `item.categoryId === selectedCategory.id` against the LOCAL id, so that skill
+  area — and every goal under it — silently vanished from the drill-down. The
+  categories fetch is now **awaited** before skill areas are read.
+- **The loop read one stale snapshot.** `useABAStore.getState()` was destructured
+  once before the skill-area loop, so step 1's `addCategory` writes and the
+  loop's own earlier writes were invisible to later iterations. It is now
+  re-read every iteration, matching what the categories loop already did.
+- **Repair only filled BLANK links.** `else if (categoryId && !localSkill.categoryId)`
+  and `if (!localTarget.programId)` healed an empty parent id but never a
+  *wrong* one. Because the store is persisted, once a row had been written with
+  a bad non-empty id no reload, re-navigation or new session could fix it. Both
+  now **reconcile** against the server (`!== categoryId` / `!== skillLocalId`),
+  which is safe because the server is the source of truth for the hierarchy.
+
+The effect also carries a `cancelled` flag so a client switch mid-fetch cannot
+write one client's hierarchy into another's.
+
+**Access is a separate axis and was working correctly.** `smartsteps.goals.view`
+is scoped: `.all` (ADMIN / BCBA / SUPERVISOR / READ_ONLY) sees every client;
+`.assigned` (RBT, PARENT_VIEWER) requires a `ClientAssignment` row. An RBT with
+no assignment gets a 403 on the client itself, so their goals tab is empty
+because the whole client is out of scope — not because goals are filtered. Fix
+that by assigning the client in Settings → Staff, not by widening the role:
+PARENT_VIEWER shares the same scope machinery, so granting `.all` broadly would
+let a parent open every other child's clinical record.
+
 ## Rule 5: Deploy (step 3 of the Rule 0 end-of-task sequence)
 
 ### Smart Steps ABA Tracker (git-based, re-wired 2026-08-13)

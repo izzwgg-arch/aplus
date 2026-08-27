@@ -889,152 +889,176 @@ export function ProgramsTab({
   // Cross-device hydration: populate categories (DB: Program) and skill areas
   // (DB: ParentGoal) + their direct targets from the server so that data created
   // on Computer A is visible on Computer B with a fresh localStorage.
+  //
+  // The server is the source of truth for the HIERARCHY (which skill area a goal
+  // hangs off, which category a skill area hangs off). Three rules keep the
+  // drill-down from hiding server data:
+  //
+  //  1. Categories are hydrated to completion BEFORE skill areas are read. These
+  //     used to be two concurrent fetches; a locally-created category keeps a
+  //     `local-...` id, so if the goals response landed first the category lookup
+  //     missed and the skill area was filed under the raw SERVER Program id --
+  //     an id `categorySkills` never matches, so the skill area and every goal
+  //     under it silently vanished from the drill-down.
+  //  2. Store state is re-read on every iteration, so writes made earlier in the
+  //     loop (and by step 1) are visible to later ones.
+  //  3. A server-backed row RECONCILES its parent links, rather than only filling
+  //     in blank ones. Repairing just the empty case left a row that had already
+  //     been written with a WRONG (non-empty) parent id broken forever, because
+  //     the store is persisted -- no reload or new session could heal it.
   useEffect(() => {
+    let cancelled = false;
     const now = new Date().toISOString();
 
-    // 1. Fetch categories
-    fetch(`/smart-steps/api/programs?clientId=${clientId}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then(
-        (
-          programs: Array<{
-            id: string;
-            name: string;
-            description?: string;
-            createdAt?: string;
-          }> | null,
-        ) => {
-          if (!programs) return;
-          programs.forEach((p) => {
-            // Fresh read each iteration so setCategoryServerId updates are visible.
-            const current = useABAStore.getState().categories;
-            // Already in store with this server id — nothing to do.
-            if (current.some((c) => c.serverId === p.id || c.id === p.id)) return;
-            // Existing local category with same name and no serverId yet — link it
-            // instead of adding a duplicate.
-            const unsyncedMatch = current.find(
-              (c) =>
-                !c.serverId &&
-                c.clientId === clientId &&
-                c.name.trim().toLowerCase() === p.name.trim().toLowerCase(),
-            );
-            if (unsyncedMatch) {
-              setCategoryServerId(unsyncedMatch.id, p.id);
-              return;
-            }
-            // New server category not in store at all — add it.
-            addCategory({
-              id: p.id,
-              serverId: p.id,
-              clientId,
-              name: p.name,
-              description: p.description ?? "",
-              color: categoryColor(p.id),
-              createdAt: p.createdAt ?? now,
-              synced: true,
-            });
-          });
-        },
-      )
-      .catch(() => {});
+    async function hydrate() {
+      // 1. Fetch categories -- awaited, so every category is in the store before
+      //    any skill area tries to resolve its parent.
+      const programs: Array<{
+        id: string;
+        name: string;
+        description?: string;
+        createdAt?: string;
+      }> | null = await fetch(`/smart-steps/api/programs?clientId=${clientId}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null);
 
-    // 2. Fetch skill areas (ParentGoals) and their direct targets
-    fetch(`/smart-steps/api/clients/${clientId}/goals`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then(
-        (
-          serverGoals: Array<{
-            id: string;
-            title: string;
-            description?: string | null;
-            programId?: string | null;
-            createdAt?: string;
-            targets?: Array<{
-              id: string;
-              definition: string;
-              targetType: string;
-              phase: string;
-              isActive: boolean;
-              createdAt?: string;
-              updatedAt?: string;
-            }>;
-          }> | null,
-        ) => {
-          if (!serverGoals) return;
-          const { programs: storePrograms, targets: storeTargets, categories: storeCategories } = useABAStore.getState();
-          for (const sg of serverGoals) {
-            // Resolve the LOCAL category id for this skill area. Locally-created
-            // categories keep a `local-…` id (with serverId set), so we must map the
-            // server Program id (sg.programId) back to that local id — otherwise the
-            // skill area/targets point at an id no category actually has.
-            const serverCategoryId = sg.programId ?? "";
-            const localCategory = serverCategoryId
-              ? storeCategories.find((c) => c.serverId === serverCategoryId || c.id === serverCategoryId)
-              : null;
-            const categoryId = localCategory?.id ?? serverCategoryId;
+      if (cancelled) return;
 
-            // Add skill area if not already present; otherwise repair a missing
-            // category link (older hydration left orphaned skill areas invisible).
-            const localSkill = storePrograms.find((p) => p.serverId === sg.id || p.id === sg.id);
-            if (!localSkill) {
-              addProgram({
-                id: sg.id,
-                serverId: sg.id,
-                clientId,
-                name: sg.title,
-                description: sg.description ?? "",
-                categoryId,
-                createdAt: sg.createdAt ?? now,
-                synced: true,
-              });
-            } else if (categoryId && !localSkill.categoryId) {
-              updateProgram(localSkill.id, { categoryId });
-            }
-            // The local skill-area id targets must reference (falls back to sg.id when
-            // the skill area was just added above with id === sg.id).
-            const skillLocalId = localSkill?.id ?? sg.id;
-
-            // Add targets under this skill area with correct hierarchy IDs
-            for (const t of sg.targets ?? []) {
-              if (!t.isActive) continue;
-              const localTarget = storeTargets.find((lt) => lt.serverId === t.id || lt.id === t.id);
-              if (localTarget) {
-                // Repair goals that a previous hydration saved with an empty parent
-                // id — an empty programId matches no skill area so the goal vanishes
-                // from the drill-down. Only touch the broken (empty) case.
-                if (!localTarget.programId) {
-                  updateTarget(localTarget.id, {
-                    programId: skillLocalId,
-                    ...(categoryId ? { categoryId } : {}),
-                  });
-                }
-                continue;
-              }
-              addTarget({
-                id: t.id,
-                serverId: t.id,
-                clientId,
-                title: t.definition,
-                operationalDefinition: t.definition,
-                targetType: t.targetType as LocalTarget["targetType"],
-                phase: t.phase as LocalTarget["phase"],
-                status: (
-                  t.phase === "MASTERED" ? "mastered" : t.phase === "NEW" ? "new" : "active"
-                ) as LocalTarget["status"],
-                programId: skillLocalId,   // parent skill area id (local id / ParentGoal.id)
-                categoryId,                // parent category id (local id / Program.id)
-                masteryCriteria: defaultMastery(),
-                promptLevels: defaultPromptLevels(),
-                isActive: true,
-                synced: true,
-                createdAt: t.createdAt ?? now,
-                updatedAt: t.updatedAt ?? now,
-              });
-            }
+      if (programs) {
+        programs.forEach((p) => {
+          // Fresh read each iteration so setCategoryServerId updates are visible.
+          const current = useABAStore.getState().categories;
+          // Already in store with this server id -- nothing to do.
+          if (current.some((c) => c.serverId === p.id || c.id === p.id)) return;
+          // Existing local category with same name and no serverId yet -- link it
+          // instead of adding a duplicate.
+          const unsyncedMatch = current.find(
+            (c) =>
+              !c.serverId &&
+              c.clientId === clientId &&
+              c.name.trim().toLowerCase() === p.name.trim().toLowerCase(),
+          );
+          if (unsyncedMatch) {
+            setCategoryServerId(unsyncedMatch.id, p.id);
+            return;
           }
-        },
-      )
-      .catch(() => {});
+          // New server category not in store at all -- add it.
+          addCategory({
+            id: p.id,
+            serverId: p.id,
+            clientId,
+            name: p.name,
+            description: p.description ?? "",
+            color: categoryColor(p.id),
+            createdAt: p.createdAt ?? now,
+            synced: true,
+          });
+        });
+      }
+
+      // 2. Fetch skill areas (ParentGoals) and their direct targets
+      const serverGoals: Array<{
+        id: string;
+        title: string;
+        description?: string | null;
+        programId?: string | null;
+        createdAt?: string;
+        targets?: Array<{
+          id: string;
+          definition: string;
+          targetType: string;
+          phase: string;
+          isActive: boolean;
+          createdAt?: string;
+          updatedAt?: string;
+        }>;
+      }> | null = await fetch(`/smart-steps/api/clients/${clientId}/goals`)
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null);
+
+      if (cancelled || !serverGoals) return;
+
+      for (const sg of serverGoals) {
+        // Fresh read each iteration -- step 1's categories and this loop's own
+        // earlier writes must both be visible here.
+        const { programs: storePrograms, targets: storeTargets, categories: storeCategories } =
+          useABAStore.getState();
+
+        // Resolve the LOCAL category id for this skill area. Locally-created
+        // categories keep a `local-...` id (with serverId set), so we must map the
+        // server Program id (sg.programId) back to that local id -- otherwise the
+        // skill area/targets point at an id no category actually has.
+        const serverCategoryId = sg.programId ?? "";
+        const localCategory = serverCategoryId
+          ? storeCategories.find((c) => c.serverId === serverCategoryId || c.id === serverCategoryId)
+          : null;
+        const categoryId = localCategory?.id ?? serverCategoryId;
+
+        // Add skill area if not already present; otherwise reconcile its category
+        // link against the server so a stale or wrong id is corrected, not just a
+        // missing one.
+        const localSkill = storePrograms.find((p) => p.serverId === sg.id || p.id === sg.id);
+        if (!localSkill) {
+          addProgram({
+            id: sg.id,
+            serverId: sg.id,
+            clientId,
+            name: sg.title,
+            description: sg.description ?? "",
+            categoryId,
+            createdAt: sg.createdAt ?? now,
+            synced: true,
+          });
+        } else if (categoryId && localSkill.categoryId !== categoryId) {
+          updateProgram(localSkill.id, { categoryId });
+        }
+        // The local skill-area id targets must reference (falls back to sg.id when
+        // the skill area was just added above with id === sg.id).
+        const skillLocalId = localSkill?.id ?? sg.id;
+
+        // Add targets under this skill area with correct hierarchy IDs
+        for (const t of sg.targets ?? []) {
+          if (!t.isActive) continue;
+          const localTarget = storeTargets.find((lt) => lt.serverId === t.id || lt.id === t.id);
+          if (localTarget) {
+            // Reconcile the parent links. A goal whose programId matches no skill
+            // area -- empty OR stale -- never renders in the drill-down, and the
+            // persisted store means a bad value survives every reload until it is
+            // rewritten here.
+            const patch: Partial<LocalTarget> = {};
+            if (localTarget.programId !== skillLocalId) patch.programId = skillLocalId;
+            if (categoryId && localTarget.categoryId !== categoryId) patch.categoryId = categoryId;
+            if (Object.keys(patch).length > 0) updateTarget(localTarget.id, patch);
+            continue;
+          }
+          addTarget({
+            id: t.id,
+            serverId: t.id,
+            clientId,
+            title: t.definition,
+            operationalDefinition: t.definition,
+            targetType: t.targetType as LocalTarget["targetType"],
+            phase: t.phase as LocalTarget["phase"],
+            status: (
+              t.phase === "MASTERED" ? "mastered" : t.phase === "NEW" ? "new" : "active"
+            ) as LocalTarget["status"],
+            programId: skillLocalId,   // parent skill area id (local id / ParentGoal.id)
+            categoryId,                // parent category id (local id / Program.id)
+            masteryCriteria: defaultMastery(),
+            promptLevels: defaultPromptLevels(),
+            isActive: true,
+            synced: true,
+            createdAt: t.createdAt ?? now,
+            updatedAt: t.updatedAt ?? now,
+          });
+        }
+      }
+    }
+
+    hydrate();
+    return () => {
+      cancelled = true;
+    };
   }, [clientId, addCategory, addProgram, updateProgram, addTarget, updateTarget, setCategoryServerId]);
 
   const selectedCategory = view.level !== "categories" ? categories.find((item) => item.id === view.categoryId) ?? null : null;
