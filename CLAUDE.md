@@ -799,6 +799,46 @@ flag there, or mastered goals created on another device stop hydrating into the
 hierarchy. `TargetDetailPanel`'s ad-hoc single-trial log is reached by opening
 one specific goal, so it is untouched.
 
+## A+ Scheduling appointment length follows the SERVICE (2026-08-27)
+
+Every new appointment used to open as a flat 60 minutes whatever the service
+was, so a **Phone Appointment** (15 min) and a **2 H Mercier Therapy** both had
+to be re-timed by hand on every booking.
+
+`client/src/lib/serviceDuration.js` is the single source of truth for how long a
+service runs:
+
+1. **`Service.durationMinutes`** — what Settings -> Services stores. Edit it
+   there to change a service's length; it always wins. ("Phone Appointment"
+   already carries 15 in prod.)
+2. **A length spelled out in the service NAME** — `"2 H Mercier Therapy"` ->
+   120, `"Therapy 1 hour"` -> 60, `"45 min consult"` -> 45. Several live
+   services carry their length in the name with no `durationMinutes` set, so
+   reading the name books them correctly without re-typing the config. The unit
+   token is required and word-bounded, so a code or dosage in a name
+   ("Vitamin B12 Shot", "Smoke Service 1772994633") never matches. Results are
+   clamped to 5 min - 12 h.
+3. Neither -> null, and the caller keeps the old `DEFAULT_APPT_MINUTES` (60).
+
+In `AppointmentModal` (`client/src/pages/aplus/AppointmentsPage.jsx`):
+
+- **Picking a service resizes the appointment** to that service's length
+  (`handleServiceChange`), in both create and edit mode.
+- **Moving the Start carries the End with it**, preserving the current length
+  (`handleStartChange`) — the same thing dragging the card on the grid already
+  did. Falls back to the service length when there is no valid span yet.
+- **`endTouched` is the "except if more time was entered" rule.** The moment the
+  End field is edited by hand, neither handler recomputes it again, so a longer
+  slot the user typed is never silently shrunk back to the service default. The
+  ref resets every time the modal is opened.
+- Both handlers go through `shiftLocal()`, which refuses to build an end time
+  from a half-typed / unparseable `datetime-local` string.
+- The service banner now always shows the length ("15 min", "2 hrs"), not only
+  once the pricing preview has loaded, and the service dropdown shows each
+  service's real duration — it read `s.defaultDuration`, a field that does not
+  exist on `Service` (the column is `durationMinutes`), so the duration hint
+  never rendered at all.
+
 ## Rule 5: Deploy (step 3 of the Rule 0 end-of-task sequence)
 
 ### Smart Steps ABA Tracker (git-based, re-wired 2026-08-13)

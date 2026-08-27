@@ -3,6 +3,11 @@ import api from "../../lib/api";
 import { useToast } from "../../context/ToastContext";
 import { gregorianToHebrewForDisplay } from "../../lib/hebrewDate";
 import { getAllHolidays, dateKey } from "../../lib/holidayService";
+import {
+  serviceDurationMinutes,
+  serviceDurationOrDefault,
+  formatMinutes,
+} from "../../lib/serviceDuration";
 import AppointmentDetailsModal, { STATUS_CONFIG } from "./AppointmentDetailsDrawer";
 
 /* ─── Layout constants ──────────────────────────────────────────────────────── */
@@ -879,9 +884,17 @@ function AppointmentModal({ modal, onClose, onSaved, onDeleted, clients, service
 
   const isEdit = modal?.mode === "edit";
 
+  /* The appointment's length follows the SERVICE — a Phone Appointment books
+     15 minutes, a "2 H …" service books the full 2 hours — until the End field
+     is typed by hand.  `endTouched` is the "except if more time was entered"
+     half of that rule: once the user sets an end themselves, nothing here
+     recomputes it, so a longer slot is never silently shrunk back. */
+  const endTouched = useRef(false);
+
   // Populate form
   useEffect(() => {
     if (!modal) return;
+    endTouched.current = false;
     if (isEdit && modal.appt) {
       setClientMode("existing");
       setNewClient(EMPTY_NEW_CLIENT);
@@ -956,6 +969,48 @@ function AppointmentModal({ modal, onClose, onSaved, onDeleted, clients, service
   }, [modal, onClose]);
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  /* datetime-local strings are half-typed while the user edits — never build an
+     end time off an unparseable start. */
+  function shiftLocal(localStr, minutes) {
+    const base = new Date(localStr);
+    if (!localStr || Number.isNaN(base.getTime())) return null;
+    return toLocal(new Date(base.getTime() + minutes * 60_000));
+  }
+
+  /* Service picked → resize the appointment to that service's own length. */
+  function handleServiceChange(serviceId) {
+    setForm((f) => {
+      const next = { ...f, serviceId };
+      if (endTouched.current) return next;
+      const mins = serviceDurationMinutes(services.find((s) => s.id === serviceId));
+      if (!mins) return next;
+      const end = shiftLocal(f.startsAt, mins);
+      if (end) next.endsAt = end;
+      return next;
+    });
+  }
+
+  /* Start moved → the end travels with it, keeping the same length (the same
+     thing dragging the card on the grid already does). */
+  function handleStartChange(startsAt) {
+    setForm((f) => {
+      const next = { ...f, startsAt };
+      if (endTouched.current) return next;
+      const span = Math.round((new Date(f.endsAt) - new Date(f.startsAt)) / 60_000);
+      const mins = span > 0
+        ? span
+        : serviceDurationOrDefault(services.find((s) => s.id === f.serviceId));
+      const end = shiftLocal(startsAt, mins);
+      if (end) next.endsAt = end;
+      return next;
+    });
+  }
+
+  function handleEndChange(endsAt) {
+    endTouched.current = true;
+    set("endsAt", endsAt);
+  }
 
   async function handleSave(e) {
     e.preventDefault();
@@ -1173,12 +1228,11 @@ function AppointmentModal({ modal, onClose, onSaved, onDeleted, clients, service
                style={{ backgroundColor: modalLight, color: modalText, border: `1px solid ${modalAccent}22` }}>
             <span className="h-3 w-3 flex-none rounded-full" style={{ backgroundColor: modalAccent }} />
             {selSvc.name}
-            {preview && !prevLoad && (
-              <span className="ml-auto text-xs font-normal opacity-70">
-                {durMin} min · ${preview.estimatedCharge?.toFixed(2) ?? "—"}
-              </span>
-            )}
-            {prevLoad && <span className="ml-auto text-xs opacity-50">Calculating…</span>}
+            <span className="ml-auto text-xs font-normal opacity-70">
+              {formatMinutes(durMin)}
+              {preview && !prevLoad ? ` · $${preview.estimatedCharge?.toFixed(2) ?? "—"}` : ""}
+              {prevLoad ? " · calculating…" : ""}
+            </span>
           </div>
         )}
 
@@ -1188,13 +1242,16 @@ function AppointmentModal({ modal, onClose, onSaved, onDeleted, clients, service
             <div className="space-y-3">
               <FieldLabel label="Service *">
                 <select className="saas-input w-full" value={form.serviceId}
-                  onChange={(e) => set("serviceId", e.target.value)}>
+                  onChange={(e) => handleServiceChange(e.target.value)}>
                   <option value="">Select a service…</option>
-                  {services.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}{s.defaultDuration ? ` · ${s.defaultDuration} mins` : ""}{s.standardRate ? ` · $${Number(s.standardRate).toFixed(0)}` : ""}
-                    </option>
-                  ))}
+                  {services.map((s) => {
+                    const mins = serviceDurationMinutes(s);
+                    return (
+                      <option key={s.id} value={s.id}>
+                        {s.name}{mins ? ` · ${formatMinutes(mins)}` : ""}{s.standardRate ? ` · $${Number(s.standardRate).toFixed(0)}` : ""}
+                      </option>
+                    );
+                  })}
                 </select>
               </FieldLabel>
 
@@ -1316,11 +1373,11 @@ function AppointmentModal({ modal, onClose, onSaved, onDeleted, clients, service
               <div className="grid grid-cols-2 gap-3">
                 <FieldLabel label="Start *">
                   <input className="saas-input w-full" type="datetime-local" value={form.startsAt}
-                    onChange={(e) => set("startsAt", e.target.value)} />
+                    onChange={(e) => handleStartChange(e.target.value)} />
                 </FieldLabel>
                 <FieldLabel label="End *">
                   <input className="saas-input w-full" type="datetime-local" value={form.endsAt}
-                    onChange={(e) => set("endsAt", e.target.value)} />
+                    onChange={(e) => handleEndChange(e.target.value)} />
                 </FieldLabel>
               </div>
 
@@ -1465,11 +1522,11 @@ function AppointmentModal({ modal, onClose, onSaved, onDeleted, clients, service
               <div className="grid grid-cols-2 gap-3">
                 <FieldLabel label="Start">
                   <input className="saas-input w-full" type="datetime-local" value={form.startsAt}
-                    onChange={(e) => set("startsAt", e.target.value)} />
+                    onChange={(e) => handleStartChange(e.target.value)} />
                 </FieldLabel>
                 <FieldLabel label="End">
                   <input className="saas-input w-full" type="datetime-local" value={form.endsAt}
-                    onChange={(e) => set("endsAt", e.target.value)} />
+                    onChange={(e) => handleEndChange(e.target.value)} />
                 </FieldLabel>
               </div>
 
