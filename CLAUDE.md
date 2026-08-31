@@ -146,7 +146,13 @@ Gavriel Schiff-Weiss initial assessment). Key rules, all implemented in
   reassessment variant).
 - **Domain paragraphs** (Language & Communication, Social/Emotional, Challenging
   Behavior, Adaptive Behavior, Executive Functioning) generate from that
-  domain's MASTERED, active, and NEW targets.
+  domain's MASTERED, active, and NEW targets. `buildCategoryGoalsHtml` ALWAYS
+  returns content — a domain with no goals gets the heading plus an editable
+  no-goals line, never the template's raw placeholder text (2026-08-31).
+  Generated reports are stored snapshots: a report created before a generator
+  fix keeps its old content until regenerated (the two reports generated while
+  the "-Summary" sections still produced the signature block were repaired
+  in the prod DB on 2026-08-31 — log: `/root/summary-repair-20260831.log`).
 - **Goal tables** generate from BT-entered data: the mastered-goals table keeps
   the fixed category/skill skeleton (empty on an initial assessment); the
   skill-acquisition chart is grouped under fixed category headers with
