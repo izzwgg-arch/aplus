@@ -273,9 +273,9 @@ export function detectSectionType(title: string): SectionType {
   if (/schedule/.test(t))
     return { kind: "schedule" };
 
-  if (/summary|contact\s+information/.test(t))
-    return { kind: "summary_contact" };
-
+  // Domain-category checks must run BEFORE the summary check: live templates
+  // carry titles like "Language & Communication -Summary", which are domain
+  // sections, not the closing summary/contact block.
   if (/language|communication/.test(t))
     return { kind: "category_goals", keywords: FIXED_CATEGORIES[0].keywords, label: FIXED_CATEGORIES[0].label };
 
@@ -302,6 +302,9 @@ export function detectSectionType(title: string): SectionType {
 
   if (/vocational/.test(t))
     return { kind: "category_goals", keywords: ["vocational"], label: "VOCATIONAL" };
+
+  if (/summary|contact\s+information/.test(t))
+    return { kind: "summary_contact" };
 
   return { kind: "passthrough" };
 }
@@ -403,9 +406,8 @@ export function buildProviderInfoHtml(
     ["BCBA Phone",           provider.phone ? escapeHtml(provider.phone) : "[BCBA Phone]"],
   ];
 
-  if (client.guardianName)  rows.push(["Guardian / Parent", escapeHtml(client.guardianName)]);
-  if (client.guardianPhone) rows.push(["Guardian Phone",    escapeHtml(client.guardianPhone)]);
-  if (client.guardianEmail) rows.push(["Guardian Email",    escapeHtml(client.guardianEmail)]);
+  // Guardian/parent contact info is deliberately NOT included — the assessment
+  // document must not surface it (removed 2026-08-31 per clinical request).
 
   const tableRows = rows
     .map(([label, value]) => `<tr><td><strong>${label}</strong></td><td>${value}</td></tr>`)

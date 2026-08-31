@@ -23,6 +23,7 @@ import {
   buildSummaryContactHtml,
   buildBehaviorPlanHtml,
   computeAge,
+  firstNameOnly,
   type ReportClient,
   type ReportBcba,
   type ServicePeriod,
@@ -184,7 +185,11 @@ export async function POST(
   // placeholder (truthy string) so replacePlaceholders() replaces instead of
   // leaving the raw {{key}} token in the generated text.
   const values: Record<string, string> = {
-    client_name:                 client.name,
+    // Narrative prose uses the FIRST name only (approved layout rule) — every
+    // (Name)/{{client_name}} token in passthrough template text resolves to it.
+    // The full legal name appears only in the provider-info fact table.
+    client_name:                 firstNameOnly(client.name),
+    client_full_name:            client.name,
     dob:                         formatDate(client.dob),
     address:                     client.address                || "[Client Address]",
     assessment_date:             generationDate,
@@ -193,9 +198,8 @@ export async function POST(
     age:                         String(age),
     diagnosis:                   client.diagnosis.join(", ")   || "[Diagnosis]",
     insurance_id:                client.insuranceId            || "[Insurance ID]",
-    guardian_name:               client.guardianName           || "[Guardian / Parent Name]",
-    guardian_phone:              client.guardianPhone          || "[Guardian Phone]",
-    guardian_email:              client.guardianEmail          || "[Guardian Email]",
+    // guardian_* placeholders intentionally absent — guardian contact info
+    // must not appear in generated assessments (removed 2026-08-31)
     school:                      client.school                 || "[School / Program]",
     intake_notes:                client.intakeNotes            || "[Intake notes]",
     // biopsychosocial / biophysical — map to intakeNotes if present, else editable placeholder
