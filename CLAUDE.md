@@ -149,6 +149,25 @@ Gavriel Schiff-Weiss initial assessment). Key rules, all implemented in
   domain's MASTERED, active, and NEW targets. `buildCategoryGoalsHtml` ALWAYS
   returns content — a domain with no goals gets the heading plus an editable
   no-goals line, never the template's raw placeholder text (2026-08-31).
+- **Category assignment is EXCLUSIVE** (fixed 2026-08-31): every goal belongs
+  to exactly one fixed category via `fixedCategoryIndex()` — first keyword
+  match in document order, with a bare-"Behavior" domain falling back to
+  CHALLENGING BEHAVIOR. The challenging-behavior keyword list deliberately has
+  NO bare "behavior" keyword ("Adaptive Behavior"/"Verbal Behavior" contain
+  that word); do not re-add it, or adaptive goals show up in both the
+  Challenging Behavior chart group and both domain summaries again.
+- **Behavior Intervention Plan** (Attachment A): at most TWO target behaviors,
+  taken ONLY from CHALLENGING BEHAVIOR goals, with the Function of Behavior
+  inferred from the goal's own wording (`inferBehaviorFunction()` — heuristic,
+  BCBA reviews).
+- **"Update from data"** in the report editor calls
+  `POST /api/client-reports/[reportId]/regenerate`: rebuilds every
+  builder-generated section of an EXISTING report from the client's current
+  info/goals/trials (provider + service period recovered from the report's own
+  provider-info fact table; assessment type from the template/report name).
+  Passthrough sections are never touched; edits inside builder sections are
+  overwritten after an explicit confirm. Both generation routes share one core
+  (`src/lib/reportSectionGeneration.ts`) so they cannot drift.
   Generated reports are stored snapshots: a report created before a generator
   fix keeps its old content until regenerated (the two reports generated while
   the "-Summary" sections still produced the signature block were repaired

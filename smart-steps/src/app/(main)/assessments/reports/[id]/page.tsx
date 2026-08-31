@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Save, Plus, Trash2, GripVertical, Pencil, Printer, BookOpen } from "lucide-react";
+import { ArrowLeft, Save, Plus, Trash2, GripVertical, Pencil, Printer, BookOpen, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import RichTextEditor from "@/components/RichTextEditor";
 import AddGoalFromLibraryModal from "@/components/assessments/AddGoalFromLibraryModal";
@@ -42,6 +42,7 @@ export default function ClientReportEditorPage() {
   const [editTitle, setEditTitle] = useState(false);
   const [titleVal,  setTitleVal]  = useState("");
   const [status,    setStatus]    = useState("DRAFT");
+  const [regenerating, setRegenerating] = useState(false);
   const [showAddSection, setShowAddSection] = useState(false);
   const [newTitle,  setNewTitle]  = useState("");
   const [goalPicker, setGoalPicker] = useState<{ sectionId: string; title: string; kind: GoalTableKind } | null>(null);
@@ -115,6 +116,36 @@ export default function ClientReportEditorPage() {
   function updateSection(sectionId: string, field: "title" | "content", value: string) {
     setSections((p) => p.map((s) => s.id === sectionId ? { ...s, [field]: value } : s));
     setDirty(true);
+  }
+
+  /** "Update from client data" — rebuilds every auto-generated section of this
+   *  report from the client's CURRENT info, goals and trial data. */
+  async function regenerateFromClientData() {
+    if (!report) return;
+    const ok = confirm(
+      "Update this assessment from the client's current data?\n\n" +
+      "Sections generated from client info and goals (biopsychosocial, domain summaries, " +
+      "goal tables, behavior plan, …) will be rebuilt from what is in the system now. " +
+      "Any manual edits inside those sections will be replaced. " +
+      "Sections you wrote yourself are left untouched.",
+    );
+    if (!ok) return;
+    setRegenerating(true);
+    try {
+      const res = await fetch(`/smart-steps/api/client-reports/${id}/regenerate`, { method: "POST" });
+      if (!res.ok) throw new Error();
+      const data: Report & { regeneratedSections?: number } = await res.json();
+      setReport(data);
+      setSections(data.sections);
+      setDirty(false);
+      toast.success(
+        `Updated ${data.regeneratedSections ?? "the"} section${data.regeneratedSections === 1 ? "" : "s"} from client data.`,
+      );
+    } catch {
+      toast.error("Could not update the assessment from client data.");
+    } finally {
+      setRegenerating(false);
+    }
   }
 
   /** Drops a library-picked goal into the section's goal table, in place. */
@@ -203,6 +234,19 @@ export default function ClientReportEditorPage() {
           title="Print / Save as PDF"
         >
           <Printer className="h-4 w-4" /> Print
+        </button>
+
+        <button
+          type="button"
+          onClick={regenerateFromClientData}
+          disabled={regenerating}
+          className="flex items-center gap-1.5 rounded-xl border border-[var(--glass-border)] bg-white/5 px-3 py-1.5 text-sm text-zinc-400 hover:text-[var(--foreground)] hover:bg-white/10 transition-colors disabled:opacity-40"
+          title="Rebuild the auto-generated sections from the client's current info, goals and data"
+        >
+          {regenerating
+            ? <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-zinc-500/40 border-t-zinc-300" />
+            : <RefreshCw className="h-4 w-4" />}
+          Update from data
         </button>
 
         <button type="button" onClick={save} disabled={saving || !dirty}

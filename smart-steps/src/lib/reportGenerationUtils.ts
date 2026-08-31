@@ -115,11 +115,15 @@ const FIXED_CATEGORIES: FixedCategory[] = [
     skills: ["Social Interaction", "Social Awareness", "Perspective Taking", "Problem Solving", "Play/Leisure"],
   },
   {
+    // NOTE: deliberately NO bare "behavior" keyword — "Adaptive Behavior" and
+    // "Verbal Behavior" domains contain that word and must not land here.
+    // A domain that is literally just "Behavior" is handled by the fallback
+    // in fixedCategoryIndex().
     label: "CHALLENGING BEHAVIOR",
     tableLabel: "CHALLENGING BEHAVIOR",
     keywords: [
       "challenging", "behavior reduction", "aggression", "tantrum",
-      "compulsive", "stereotyp", "problem behavior", "behavior",
+      "compulsive", "stereotyp", "problem behavior", "disruptive", "self-injur",
     ],
     skills: ["Aggression", "Tantrums", "Compulsive Behavior"],
   },
@@ -159,10 +163,17 @@ function goalDomainString(g: ReportParentGoal, programMap: Map<string, string>):
   );
 }
 
-/** Index into FIXED_CATEGORIES, or -1 when the goal matches none of them. */
+/** Index into FIXED_CATEGORIES, or -1 when the goal matches none of them.
+ *  EXCLUSIVE: every goal belongs to exactly one category — first keyword match
+ *  in document order wins. A domain that is just "Behavior"/"Behavior Goals"
+ *  (no other category matched) falls back to CHALLENGING BEHAVIOR. */
+const CHALLENGING_BEHAVIOR_INDEX = 2;
 function fixedCategoryIndex(domainString: string): number {
   const d = domainString.toLowerCase();
-  return FIXED_CATEGORIES.findIndex((c) => c.keywords.some((kw) => d.includes(kw)));
+  const idx = FIXED_CATEGORIES.findIndex((c) => c.keywords.some((kw) => d.includes(kw)));
+  if (idx >= 0) return idx;
+  if (/\bbehav/.test(d)) return CHALLENGING_BEHAVIOR_INDEX;
+  return -1;
 }
 
 /**
@@ -546,22 +557,20 @@ export function buildCategoryGoalsHtml(
   const kwLower   = categoryKeywords.map((k) => k.toLowerCase());
   const label     = categoryLabel ?? (categoryKeywords[0] ?? "this domain").toUpperCase();
 
-  const matchingProgramIds = new Set<string>(
-    programs
-      .filter((p) =>
-        kwLower.some(
-          (kw) => p.name.toLowerCase().includes(kw) || p.domain.toLowerCase().includes(kw),
-        ),
-      )
-      .map((p) => p.id),
-  );
+  // EXCLUSIVE assignment for the five fixed categories: each goal belongs to
+  // exactly ONE category (via fixedCategoryIndex), so a goal filed under
+  // "Adaptive Behavior" can never also appear in the Challenging Behavior
+  // summary. Non-fixed sections (fine motor, academic, …) keep keyword
+  // matching — their keywords do not overlap the fixed sets.
+  const programMap  = new Map(programs.map((p) => [p.id, p.name]));
+  const fixedIdx    = FIXED_CATEGORIES.findIndex((c) => c.label === label);
 
-  const matchingGoals = allGoals.filter(
-    (g) =>
-      (g.programId && matchingProgramIds.has(g.programId)) ||
-      kwLower.some((kw) => (g.domain ?? "").toLowerCase().includes(kw)) ||
-      (g.program && kwLower.some((kw) => g.program!.name.toLowerCase().includes(kw))),
-  );
+  const matchingGoals = fixedIdx >= 0
+    ? allGoals.filter((g) => fixedCategoryIndex(goalDomainString(g, programMap)) === fixedIdx)
+    : allGoals.filter((g) => {
+        const domain = goalDomainString(g, programMap).toLowerCase();
+        return kwLower.some((kw) => domain.includes(kw));
+      });
 
   const allTs      = matchingGoals.flatMap((g) => g.targets);
   const masteredTs = allTs.filter((t) => t.phase === "MASTERED");
@@ -1051,11 +1060,36 @@ export function buildSummaryContactHtml(
 }
 
 /**
+ * Infers the likely function of a challenging behavior from the goal's own
+ * wording, so the BIP's "Function of Behavior" line matches the goal instead
+ * of showing a random placeholder. Heuristic — the BCBA reviews and edits.
+ */
+function inferBehaviorFunction(text: string): string {
+  const t = text.toLowerCase();
+  if (/told\s+.?no.?|denied|access to|preferred item|want(s|ed)?\s|tangible/.test(t))
+    return "Access to tangible, denied access";
+  if (/transition|change in (his|her|the)? ?routine|switch(ing)? activit|end(ing)? (an|the) activity/.test(t))
+    return "Escape";
+  if (/demand|instruction|task|comply|compliance|asked to|told to|direction/.test(t))
+    return "Escape (task/demand avoidance)";
+  if (/attention|ignored|look at (me|him|her)|calling/.test(t))
+    return "Attention";
+  if (/flap|rock|spin|stim|stereotyp|mouth|chew|sensory|flip(ping)? object/.test(t))
+    return "Sensory / automatic reinforcement";
+  if (/aggress|hit|kick|bite|throw|push|scratch/.test(t))
+    return "Access to tangible / Escape";
+  if (/tantrum|cry|scream|whin/.test(t))
+    return "Access to tangible, denied access";
+  return "[access to tangible / escape / attention / sensory]";
+}
+
+/**
  * Attachment A: Behavior Intervention Plan.
- * Pre-filled from the client's challenging-behavior goals when available
- * (behavior name from the goal title, operational definition from targets);
- * strategy lines stay as editable placeholders. Falls back to two skeleton
- * target-behavior blocks when no behavior goals exist.
+ * Pre-filled from the client's CHALLENGING BEHAVIOR goals ONLY (exclusive
+ * category assignment — adaptive-behavior goals never appear here), capped at
+ * TWO target behaviors. The Function of Behavior line is inferred from the
+ * goal's wording; strategy lines stay as editable placeholders. Falls back to
+ * two skeleton blocks when no behavior goals exist.
  */
 export function buildBehaviorPlanHtml(
   allGoals: ReportParentGoal[],
@@ -1067,13 +1101,13 @@ export function buildBehaviorPlanHtml(
 
   const behaviorGoals = allGoals.filter((g) => {
     const domain = goalDomainString(g, programMap);
-    return fixedCategoryIndex(domain) === 2; // CHALLENGING BEHAVIOR
+    return fixedCategoryIndex(domain) === CHALLENGING_BEHAVIOR_INDEX;
   });
 
-  const block = (n: number, behavior: string, definition: string) => [
+  const block = (n: number, behavior: string, definition: string, fn: string) => [
     `<p><strong>TARGET BEHAVIOR #${n}:</strong> ${behavior}</p>`,
     `<p>Operational Definition of Behavior: ${definition}</p>`,
-    `<p>Function of Behavior: [access to tangible / escape / attention / sensory]</p>`,
+    `<p>Function of Behavior: ${fn}</p>`,
     `<p>Reactive Strategies: [e.g., extinction]</p>`,
     `<p>Proactive Strategies: [e.g., warning before transitions]</p>`,
     `<p>Replacement Behaviors to be Taught: [e.g., complying, functional communication]</p>`,
@@ -1083,17 +1117,19 @@ export function buildBehaviorPlanHtml(
   const blocks: string[] = [];
   let n = 1;
   for (const g of behaviorGoals) {
-    const def = g.targets.length > 0
-      ? g.targets.map((t) => goalText(t.definition, firstName)).join("; ")
-      : (g.description ? goalText(g.description, firstName) : "[operational definition]");
-    blocks.push(block(n, goalText(g.title, firstName), def));
+    const rawDef = g.targets.length > 0
+      ? g.targets.map((t) => t.definition).join("; ")
+      : (g.description ?? "");
+    const def = rawDef ? goalText(rawDef, firstName) : "[operational definition]";
+    const fn  = rawDef ? inferBehaviorFunction(`${g.title} ${rawDef}`) : "[access to tangible / escape / attention / sensory]";
+    blocks.push(block(n, goalText(g.title, firstName), def, fn));
     n++;
-    if (n > 6) break;
+    if (n > 2) break; // the plan documents at most TWO target behaviors
   }
 
   if (blocks.length === 0) {
-    blocks.push(block(1, "[behavior name]", "[operational definition]"));
-    blocks.push(block(2, "[behavior name]", "[operational definition]"));
+    blocks.push(block(1, "[behavior name]", "[operational definition]", "[access to tangible / escape / attention / sensory]"));
+    blocks.push(block(2, "[behavior name]", "[operational definition]", "[access to tangible / escape / attention / sensory]"));
   }
 
   return blocks.join("\n<hr>\n");
