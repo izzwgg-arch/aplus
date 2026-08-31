@@ -21,10 +21,28 @@
 
 [data-theme="light"] {
   --background: #f8fafc;
-  --foreground: #0f172a;
+  --foreground: #000000;
   --glass-bg: rgba(255, 255, 255, 0.8);
   --glass-border: rgba(0, 0, 0, 0.08);
 }
+
+/* The component markup was authored for the dark background, so its text uses
+   the light half of the zinc scale (plus white on hover). In light theme those
+   utilities are remapped here — bright shades become black, muted shades become
+   dark grays — instead of editing a thousand class names across the app.
+   text-white is deliberately NOT remapped: every use sits on a colored chip,
+   tile or gradient where white is correct in both themes. */
+[data-theme="light"] .text-zinc-100,
+[data-theme="light"] .text-zinc-200,
+[data-theme="light"] .text-zinc-300 { color: #000000; }
+[data-theme="light"] .text-zinc-400 { color: #27272a; }
+[data-theme="light"] .text-zinc-500 { color: #3f3f46; }
+[data-theme="light"] .text-zinc-600 { color: #52525b; }
+[data-theme="light"] .hover\:text-zinc-100:hover,
+[data-theme="light"] .hover\:text-zinc-200:hover,
+[data-theme="light"] .hover\:text-zinc-300:hover { color: #000000; }
+[data-theme="light"] .hover\:text-zinc-400:hover { color: #27272a; }
+[data-theme="light"] .group:hover .group-hover\:text-zinc-300 { color: #000000; }
 
 body {
   background: var(--background);
@@ -72,6 +90,10 @@ body {
 .btn-secondary:hover {
   background: rgba(255, 255, 255, 0.08);
   border-color: rgba(255, 255, 255, 0.2);
+}
+[data-theme="light"] .btn-secondary:hover {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.2);
 }
 
 .btn-ghost {
@@ -210,6 +232,19 @@ select.field-input {
   color: #e4e4e7;
 }
 .rich-text-editor td { color: #d4d4d8; }
+
+/* Light theme: the editor's table/quote colors above are dark-background values */
+[data-theme="light"] .rich-text-editor th,
+[data-theme="light"] .rich-text-editor td {
+  border-color: rgba(0, 0, 0, 0.2);
+  color: #000000;
+}
+[data-theme="light"] .rich-text-editor th {
+  background: rgba(0, 0, 0, 0.05);
+}
+[data-theme="light"] .rich-text-editor blockquote {
+  color: #3f3f46;
+}
 
 /* Highlight cells on hover/focus for editing affordance */
 .rich-text-editor td:hover,
