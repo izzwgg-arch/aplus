@@ -527,7 +527,9 @@ export function buildWhyAbaHtml(
  * Challenging Behavior, Adaptive Behavior, …).
  * One underlined-heading paragraph generated from the client's MASTERED,
  * CURRENT (active), and FUTURE (new) goals in that domain.
- * Returns null when the domain has no goals at all (section stays editable).
+ * ALWAYS returns content (never null): a domain with no goals yet gets the
+ * heading plus an editable no-goals line — falling through to raw template
+ * text used to leave "[Describe...]" boilerplate in the generated report.
  */
 export function buildCategoryGoalsHtml(
   programs: ReportProgram[],
@@ -569,7 +571,10 @@ export function buildCategoryGoalsHtml(
   const heading = `<u><strong><em>${escapeHtml(label)}:</em></strong></u> `;
 
   if (allTs.length === 0) {
-    if (matchingGoals.length === 0) return null;
+    if (matchingGoals.length === 0) {
+      return `<p>${heading}No goals have been identified in this domain at this time. ` +
+        `[Describe ${first}'s current presentation in this area, or add goals in the Goals &amp; Targets tab and regenerate.]</p>`;
+    }
     return `<p>${heading}No objectives have been defined in this domain yet. [Describe ${first}'s current presentation in this area.]</p>`;
   }
 
