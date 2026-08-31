@@ -118,3 +118,7 @@ Local Dev -> Git Push -> Server Pull -> `./deploy.sh` -> PM2 restart
 - Smart Steps ABA Tracker loads in **light** theme by default; users can switch
   to dark or system in Settings → Appearance, and that choice persists per
   browser (`localStorage` key `smart-steps-theme`).
+- In light theme all text renders **black/dark** via central overrides in
+  `smart-steps/src/app/globals.css` that remap the zinc text utilities (the
+  markup was authored for the dark background). `text-white` is not remapped —
+  it only appears on colored chips/tiles where white is correct in both themes.
