@@ -160,6 +160,35 @@ Gavriel Schiff-Weiss initial assessment). Key rules, all implemented in
   taken ONLY from CHALLENGING BEHAVIOR goals, with the Function of Behavior
   inferred from the goal's own wording (`inferBehaviorFunction()` — heuristic,
   BCBA reviews).
+- **Domain summaries are clinical PROSE, not a goal list** (2026-09-01): each
+  paragraph states where the child is now (skill areas involved, objectives
+  already mastered, objectives in treatment, average trial accuracy when data
+  exists), then a "Because <domain rationale>, the objectives to be targeted
+  during this service period are: …" transition into the upcoming goals, and
+  closes with why those goals were chosen. Per-domain framing lives in
+  `DOMAIN_VOICES`; challenging behavior gets behavior-reduction wording, the
+  skill domains get skill-building wording.
+  **Goal text is INTRODUCED, never spliced into a verb phrase.** BT-written
+  definitions are already complete sentences ("Shulem will learn not to…",
+  "When Shulem is given a choice he will…"), so "teaching X to <goal>" built
+  broken sentences; grammatically rewriting them was rejected outright because
+  it can invert the meaning of a negative behavior goal.
+- **Editor formatting survives into the PDF** (fixed 2026-09-01):
+  `normalizeSectionHtml()` in `printAssessment.ts` used to unwrap every
+  `<span>` and strip every `style`, so font size, font, color and highlight
+  applied in the report editor were silently discarded when printing. It now
+  preserves `font-size`, `font-family`, `color`, `background-color` and
+  `text-align` on every element, and unwraps only spans carrying no style.
+- **RichTextEditor**: point sizes (9–24pt) lead the size list — an assessment
+  is a printed document. Applying a size/font/color with NOTHING selected
+  formats the WHOLE section rather than silently doing nothing (that no-op
+  read as "the font size button is broken"). Strikethrough and Clear
+  formatting were added; `sanitizeHtml` allows `<s>` and maps `<strike>` /
+  `<del>` onto it.
+- **"Add goal" is always visible** on every report section (it used to be
+  `opacity-0` until hover on any section whose title did not map to a goal
+  table, which is most of the live template), and reads "Add parent goal" on a
+  parent-training section.
 - **"Update from data"** in the report editor calls
   `POST /api/client-reports/[reportId]/regenerate`: rebuilds every
   builder-generated section of an EXISTING report from the client's current
