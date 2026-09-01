@@ -676,13 +676,20 @@ export function buildCategoryGoalsHtml(
   }
   sentences.push(`[Add any further detail about ${first}'s current presentation in this area.]`);
 
+  // Goal definitions are BT-written free text and are already complete
+  // sentences about the child ("Shulem will learn not to…", "When Shulem is
+  // given a choice he will…"). They are therefore INTRODUCED as objectives
+  // rather than spliced into a verb phrase — rewriting them grammatically
+  // would risk inverting the clinical meaning of a negative goal.
+  const objectiveList = (ts: ReportTarget[], max: number): string =>
+    ts.slice(0, max).map((t) => goalText(t.definition, firstName)).join("; ");
+
   // ── 2. What has been achieved so far ─────────────────────────────────────
   if (masteredTs.length > 0) {
-    const items = masteredTs.slice(0, 6).map((t) => goalText(t.definition, firstName));
     sentences.push(
-      `${first} has already mastered ${listPhrase(items)}` +
-      (masteredTs.length > items.length ? `, among other objectives` : "") +
-      `, which shows that ${first} responds well to structured teaching in this area and is ready to build on those skills.`,
+      `${first} has already mastered the following in this area: ${objectiveList(masteredTs, 8)}.` +
+      (masteredTs.length > 8 ? ` Additional mastered objectives are listed in the mastered-goals chart.` : "") +
+      ` This shows that ${first} responds well to structured teaching in this area and is ready to build on those skills.`,
     );
   }
 
@@ -692,13 +699,11 @@ export function buildCategoryGoalsHtml(
       .map((t) => ({ t, pct: trialPctFor(t) }))
       .filter((x) => x.pct !== null) as { t: ReportTarget; pct: number }[];
 
-    const items = activeTs.slice(0, 6).map((t) => goalText(t.definition, firstName));
     sentences.push(
       (voice.isBehavior
-        ? `${first} is currently working on reducing `
-        : `${first} is currently working on `) +
-      `${listPhrase(items)}` +
-      (activeTs.length > items.length ? `, among other objectives` : "") + `.`,
+        ? `The behaviors currently targeted for reduction are: `
+        : `${first} is at this point working on the following objectives: `) +
+      `${objectiveList(activeTs, 8)}.`,
     );
 
     if (withPct.length > 0) {
@@ -713,11 +718,10 @@ export function buildCategoryGoalsHtml(
 
   // ── 4. Because of that → what we will work on ────────────────────────────
   if (newTs.length > 0) {
-    const items = newTs.slice(0, 8).map((t) => goalText(t.definition, firstName));
     sentences.push(
-      `Because ${voice.reason}, treatment during this service period will focus on ` +
-      `teaching ${first} to ${listPhrase(items)}` +
-      (newTs.length > items.length ? `, along with the remaining objectives listed in the goal chart below` : "") + `.`,
+      `Because ${voice.reason}, the objectives to be targeted during this service period are: ` +
+      `${objectiveList(newTs, 10)}.` +
+      (newTs.length > 10 ? ` The remaining objectives are listed in the goal chart below.` : ""),
     );
     sentences.push(
       voice.isBehavior
