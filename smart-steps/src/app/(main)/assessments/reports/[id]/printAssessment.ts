@@ -86,20 +86,37 @@ function normalizeSectionHtml(html: string) {
   const root = doc.querySelector("main");
   if (!root) return "<p><em>(empty)</em></p>";
 
-  root.querySelectorAll("span").forEach((span) => {
-    const parent = span.parentNode;
-    if (!parent) return;
-    while (span.firstChild) parent.insertBefore(span.firstChild, span);
-    span.remove();
-  });
+  // Formatting the BCBA applied in the editor MUST survive into the PDF —
+  // font size/family, text color and highlight are all carried on <span
+  // style="…"> (see RichTextEditor.applyInlineStyle). Unwrapping those spans
+  // or stripping their style silently discarded every formatting choice, so
+  // only spans carrying no formatting are unwrapped, and these four
+  // properties (plus text-align) are preserved on every element.
+  const KEPT_STYLE_PROPS = [
+    "fontSize", "fontFamily", "color", "backgroundColor", "textAlign",
+  ] as const;
 
   root.querySelectorAll<HTMLElement>("*").forEach((el) => {
-    // Keep text-align (category header rows are centered); drop everything else
-    const align = el.style?.textAlign;
+    const kept: [string, string][] = [];
+    for (const prop of KEPT_STYLE_PROPS) {
+      const v = el.style?.[prop];
+      if (v) kept.push([prop, v]);
+    }
     el.removeAttribute("style");
     el.removeAttribute("class");
     el.removeAttribute("id");
-    if (align) el.style.textAlign = align;
+    for (const [prop, v] of kept) {
+      (el.style as unknown as Record<string, string>)[prop] = v;
+    }
+  });
+
+  // Unwrap only spans that carry nothing — a formatted span is kept
+  root.querySelectorAll("span").forEach((span) => {
+    const parent = span.parentNode;
+    if (!parent) return;
+    if (span.getAttribute("style")) return; // formatting — keep the wrapper
+    while (span.firstChild) parent.insertBefore(span.firstChild, span);
+    span.remove();
   });
 
   const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -265,6 +282,7 @@ export function printAssessmentReport(
     strong { font-weight: bold; }
     em, i { font-style: italic; }
     u { text-decoration: underline; }
+    s { text-decoration: line-through; }
     table {
       width: 100%;
       border-collapse: collapse;

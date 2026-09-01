@@ -7,9 +7,13 @@ const MAX_CONTENT_LENGTH = 150_000;
 
 const ALLOWED_TAGS = new Set([
   "a", "b", "blockquote", "br", "div", "em", "hr", "i",
-  "h2", "h3", "h4", "li", "ol", "p", "span", "strong",
+  "h2", "h3", "h4", "li", "ol", "p", "s", "span", "strong",
   "table", "tbody", "td", "th", "thead", "tr", "u", "ul",
 ]);
+
+/** Legacy/alias tags rewritten to their allowed equivalent rather than dropped.
+ *  execCommand("strikeThrough") still emits <strike> in some browsers. */
+const TAG_ALIASES: Record<string, string> = { strike: "s", del: "s" };
 
 const ALLOWED_ATTRS: Record<string, Set<string>> = {
   a:  new Set(["href", "target", "rel"]),
@@ -161,7 +165,7 @@ export function sanitizeHtml(raw: string | null | undefined): string {
   const result = cleaned.replace(
     /<\s*(\/)?([a-zA-Z][\w:-]*)([^>]*)>/g,
     (_match, closing, rawTag: string, rawAttrs: string) => {
-      const tag = rawTag.toLowerCase();
+      const tag = TAG_ALIASES[rawTag.toLowerCase()] ?? rawTag.toLowerCase();
       if (!ALLOWED_TAGS.has(tag)) return "";
       if (closing) return `</${tag}>`;
       return `<${tag}${sanitizeAttrs(tag, rawAttrs)}>`;

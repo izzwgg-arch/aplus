@@ -343,12 +343,19 @@ export default function ClientReportEditorPage() {
                       onClick={() =>
                         setGoalPicker({ sectionId: sec.id, title: sec.title, kind: tableKind ?? "current_goals" })
                       }
-                      className={`flex shrink-0 items-center gap-1.5 rounded-lg border border-[var(--accent-cyan)]/30 bg-[var(--accent-cyan)]/10 px-2.5 py-1 text-[11px] font-semibold text-[var(--accent-cyan)] hover:bg-[var(--accent-cyan)]/20 transition-all ${
-                        isGoalSection ? "" : "opacity-0 group-hover:opacity-100"
+                      className={`flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition-all ${
+                        isGoalSection
+                          ? "border-[var(--accent-cyan)]/40 bg-[var(--accent-cyan)]/15 text-[var(--accent-cyan)] hover:bg-[var(--accent-cyan)]/25"
+                          : "border-[var(--glass-border)] bg-white/5 text-zinc-400 hover:border-[var(--accent-cyan)]/40 hover:text-[var(--accent-cyan)]"
                       }`}
-                      title="Pick a goal from the Goal Library"
+                      title={
+                        tableKind === "parent_goals"
+                          ? "Add a parent-training goal from the Parent Goal Library"
+                          : "Add a goal or skill area from the Goal Library"
+                      }
                     >
-                      <BookOpen className="h-3 w-3" /> Add goal
+                      <BookOpen className="h-3 w-3" />
+                      {tableKind === "parent_goals" ? "Add parent goal" : "Add goal"}
                     </button>
                   )}
                   <div className="flex shrink-0 items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">

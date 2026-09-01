@@ -14,7 +14,12 @@ interface Props {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const FONT_SIZES = ["10px", "12px", "14px", "16px", "18px", "20px", "24px"] as const;
+/** Point sizes first — an assessment is a printed clinical document and staff
+ *  think in Word's point sizes. px kept for text formatted before pt existed. */
+const FONT_SIZES = [
+  "9pt", "10pt", "11pt", "12pt", "14pt", "16pt", "18pt", "24pt",
+  "12px", "14px", "16px", "20px",
+] as const;
 
 const FONT_FAMILIES = [
   "Arial",
@@ -328,18 +333,29 @@ export default function RichTextEditor({ value, onChange, disabled = false, plac
     const el = editorRef.current;
     if (!el || disabled) return;
 
+    const sel = window.getSelection();
+    if (!sel) return;
+
     // Restore saved selection (editor may have lost focus to toolbar select)
     const savedRange = savedRangeRef.current;
-    const sel = window.getSelection();
-    if (!sel || !savedRange) return;
+    let haveSelection = false;
+    if (savedRange) {
+      try {
+        if (el.contains(savedRange.commonAncestorContainer)) {
+          sel.removeAllRanges();
+          sel.addRange(savedRange);
+          haveSelection = !sel.isCollapsed;
+        }
+      } catch { /* fall through to whole-section handling */ }
+    }
 
-    try {
-      if (!el.contains(savedRange.commonAncestorContainer)) return;
-      sel.removeAllRanges();
-      sel.addRange(savedRange);
-    } catch { return; }
-
-    if (sel.isCollapsed) return; // nothing selected — silent no-op
+    // Nothing selected → apply to the WHOLE section. Silently doing nothing
+    // here reads as "the font size button is broken"; formatting an entire
+    // section at once is also the common case in a clinical document.
+    if (!haveSelection) {
+      applyStyleToWholeSection(cssProp, cssValue);
+      return;
+    }
 
     el.focus();
 
@@ -369,6 +385,64 @@ export default function RichTextEditor({ value, onChange, disabled = false, plac
       return; // safe failure — do not emit
     }
 
+    emit();
+  }
+
+  /**
+   * Applies an inline style to EVERY block in the section — used when the
+   * toolbar is operated with no text selected. Tables are styled at the cell
+   * level so the value lands on the text rather than on the table box.
+   */
+  function applyStyleToWholeSection(
+    cssProp: "fontSize" | "fontFamily" | "color" | "backgroundColor",
+    cssValue: string,
+  ) {
+    const el = editorRef.current;
+    if (!el || disabled) return;
+
+    const setStyle = (node: HTMLElement) => {
+      if (cssProp === "color") node.style.setProperty("color", cssValue);
+      else if (cssProp === "backgroundColor") node.style.setProperty("background-color", cssValue);
+      else node.style[cssProp] = cssValue;
+    };
+
+    // Bare text directly under the editor gets wrapped so it can carry a style
+    Array.from(el.childNodes).forEach((n) => {
+      if (n.nodeType === Node.TEXT_NODE && (n.nodeValue ?? "").trim()) {
+        const p = document.createElement("p");
+        n.parentNode?.insertBefore(p, n);
+        p.appendChild(n);
+      }
+    });
+
+    const blocks = el.querySelectorAll<HTMLElement>(
+      ":scope > p, :scope > h2, :scope > h3, :scope > h4, :scope > ul, :scope > ol, :scope > div, :scope > blockquote, li, td, th",
+    );
+    if (blocks.length === 0) {
+      setStyle(el);
+    } else {
+      blocks.forEach(setStyle);
+    }
+    emit();
+  }
+
+  /** Removes inline formatting from the selection (or the whole section). */
+  function clearFormatting() {
+    const el = editorRef.current;
+    if (!el || disabled) return;
+    const sel = window.getSelection();
+    const savedRange = savedRangeRef.current;
+    if (sel && savedRange && el.contains(savedRange.commonAncestorContainer) && !savedRange.collapsed) {
+      try {
+        sel.removeAllRanges();
+        sel.addRange(savedRange);
+        el.focus();
+        document.execCommand("removeFormat");
+        emit();
+        return;
+      } catch { /* fall through */ }
+    }
+    el.querySelectorAll<HTMLElement>("[style]").forEach((n) => n.removeAttribute("style"));
     emit();
   }
 
@@ -620,6 +694,7 @@ export default function RichTextEditor({ value, onChange, disabled = false, plac
         <Btn title="Bold (Ctrl+B)"      onClick={() => cmd("bold")}>Bold</Btn>
         <Btn title="Italic (Ctrl+I)"    onClick={() => cmd("italic")}><em>Italic</em></Btn>
         <Btn title="Underline (Ctrl+U)" onClick={() => cmd("underline")}>Underline</Btn>
+        <Btn title="Strikethrough"      onClick={() => cmd("strikeThrough")}><s>Strike</s></Btn>
         <Btn title="Heading"            onClick={() => cmd("formatBlock", "h3")}>Heading</Btn>
         <Btn title="Paragraph"          onClick={() => cmd("formatBlock", "p")}>Paragraph</Btn>
         <Btn title="Bulleted list"      onClick={() => cmd("insertUnorderedList")}>• List</Btn>
@@ -644,6 +719,9 @@ export default function RichTextEditor({ value, onChange, disabled = false, plac
           onSaveSelection={saveSelection}
           onApply={(v) => applyInlineStyle("fontSize", v)}
         />
+        <Btn title="Clear formatting from the selection (or whole section)" onClick={clearFormatting}>
+          Clear
+        </Btn>
         <ToolbarSelect
           placeholder="Font"
           options={FONT_FAMILIES}

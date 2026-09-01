@@ -533,11 +533,68 @@ export function buildWhyAbaHtml(
   ].join("\n");
 }
 
+/** Joins items into readable prose: "a", "a and b", "a, b, and c". */
+function listPhrase(items: string[]): string {
+  const list = items.filter(Boolean);
+  if (list.length === 0) return "";
+  if (list.length === 1) return list[0];
+  if (list.length === 2) return `${list[0]} and ${list[1]}`;
+  return `${list.slice(0, -1).join(", ")}, and ${list[list.length - 1]}`;
+}
+
+/** Clinical framing per domain: how to describe the need, and the rationale
+ *  sentence that links the current presentation to the upcoming goals. */
+interface DomainVoice {
+  /** "…presents with needs in <area>" */
+  area: string;
+  /** Verb phrase for what the child does now, challenging-behavior vs skills */
+  isBehavior?: boolean;
+  /** "Because <reason>, …" */
+  reason: string;
+}
+
+const DOMAIN_VOICES: Record<string, DomainVoice> = {
+  "LANGUAGE AND COMMUNICATION": {
+    area: "speech, language and communication",
+    reason: "these communication deficits limit NAME's ability to express wants and needs and to understand and follow what is said",
+  },
+  "SOCIAL/EMOTIONAL SKILLS": {
+    area: "social interaction, play and emotional regulation",
+    reason: "these social and emotional deficits limit NAME's ability to engage with peers, tolerate frustration and participate in shared activities",
+  },
+  "CHALLENGING BEHAVIOR": {
+    area: "challenging behavior",
+    isBehavior: true,
+    reason: "these behaviors interfere with NAME's learning, daily routines and safety, and place demands on the family throughout the day",
+  },
+  "ADAPTIVE BEHAVIOR": {
+    area: "daily living and self-help skills",
+    reason: "these adaptive deficits limit NAME's independence in everyday routines and keep NAME reliant on adult assistance",
+  },
+  "EXECUTIVE FUNCTIONING": {
+    area: "attending, planning and self-regulation",
+    reason: "these executive functioning deficits limit NAME's ability to attend to instruction, follow a sequence of steps and complete tasks",
+  },
+};
+
+function domainVoice(label: string, first: string): DomainVoice {
+  const v = DOMAIN_VOICES[label] ?? {
+    area: label.toLowerCase(),
+    reason: `these deficits limit ${first}'s progress in this area`,
+  };
+  return { ...v, reason: v.reason.replace(/NAME/g, first) };
+}
+
 /**
  * Domain narrative section (Language & Communication, Social/Emotional,
  * Challenging Behavior, Adaptive Behavior, …).
- * One underlined-heading paragraph generated from the client's MASTERED,
- * CURRENT (active), and FUTURE (new) goals in that domain.
+ *
+ * Writes CLINICAL PROSE, not a list of goals: where the child is now (skills
+ * already mastered, what is currently being worked on, with trial performance
+ * when data exists), then a "because of this, this is what we will be working
+ * on" rationale leading into the upcoming goals. The goal wording is woven
+ * into sentences rather than dumped as a semicolon list.
+ *
  * ALWAYS returns content (never null): a domain with no goals yet gets the
  * heading plus an editable no-goals line — falling through to raw template
  * text used to leave "[Describe...]" boilerplate in the generated report.
@@ -587,42 +644,100 @@ export function buildCategoryGoalsHtml(
     return `<p>${heading}No objectives have been defined in this domain yet. [Describe ${first}'s current presentation in this area.]</p>`;
   }
 
-  const sentences: string[] = [];
+  const voice = domainVoice(label, first);
+  const trialPctFor = (t: ReportTarget): number | null => {
+    const s = _trialStats.get(t.id);
+    if (!s || s.total === 0) return null;
+    return Math.round((s.correct / s.total) * 100);
+  };
 
-  // Editable client-specific opener
-  sentences.push(
-    `[Describe ${first}'s current presentation and difficulties in this area.]`,
+  // Skill areas involved, from the goal (parent-goal) titles — what the domain
+  // is about, phrased as areas rather than a dump of every objective.
+  const skillAreas = listPhrase(
+    Array.from(new Set(matchingGoals.map((g) => g.title.trim()).filter(Boolean)))
+      .slice(0, 6)
+      .map((s) => goalText(s.toLowerCase(), firstName)),
   );
 
-  // Mastered goals → accomplishments to date
+  const sentences: string[] = [];
+
+  // ── 1. Where the child is now ────────────────────────────────────────────
+  if (voice.isBehavior) {
+    sentences.push(
+      `${first} currently engages in challenging behavior` +
+      (skillAreas ? ` in the areas of ${skillAreas}` : "") +
+      `, which is targeted for reduction through this treatment plan.`,
+    );
+  } else {
+    sentences.push(
+      `${first} presents with needs in ${voice.area}` +
+      (skillAreas ? `, specifically in ${skillAreas}` : "") + `.`,
+    );
+  }
+  sentences.push(`[Add any further detail about ${first}'s current presentation in this area.]`);
+
+  // ── 2. What has been achieved so far ─────────────────────────────────────
   if (masteredTs.length > 0) {
-    const list = masteredTs.map((t) => goalText(t.definition, firstName)).join("; ");
+    const items = masteredTs.slice(0, 6).map((t) => goalText(t.definition, firstName));
     sentences.push(
-      `${first} has mastered the following objective${masteredTs.length !== 1 ? "s" : ""} in this area: ${list}.`,
+      `${first} has already mastered ${listPhrase(items)}` +
+      (masteredTs.length > items.length ? `, among other objectives` : "") +
+      `, which shows that ${first} responds well to structured teaching in this area and is ready to build on those skills.`,
     );
   }
 
-  // Current goals → active treatment focus
+  // ── 3. Where the child is up to right now ────────────────────────────────
   if (activeTs.length > 0) {
-    const list = activeTs.map((t) => goalText(t.definition, firstName)).join("; ");
+    const withPct = activeTs
+      .map((t) => ({ t, pct: trialPctFor(t) }))
+      .filter((x) => x.pct !== null) as { t: ReportTarget; pct: number }[];
+
+    const items = activeTs.slice(0, 6).map((t) => goalText(t.definition, firstName));
     sentences.push(
-      `Currently, the goal is for ${first} to work on the following: ${list}.`,
+      (voice.isBehavior
+        ? `${first} is currently working on reducing `
+        : `${first} is currently working on `) +
+      `${listPhrase(items)}` +
+      (activeTs.length > items.length ? `, among other objectives` : "") + `.`,
     );
+
+    if (withPct.length > 0) {
+      const avg = Math.round(withPct.reduce((n, x) => n + x.pct, 0) / withPct.length);
+      sentences.push(
+        `Data collected over the current period show ${first} performing at an average of ${avg}% across ` +
+        `${withPct.length} objective${withPct.length !== 1 ? "s" : ""} with recorded data, ` +
+        `so ${first} has not yet reached mastery criteria and continues to require prompting and reinforcement in this area.`,
+      );
+    }
   }
 
-  // Future goals → upcoming targets
+  // ── 4. Because of that → what we will work on ────────────────────────────
   if (newTs.length > 0) {
-    const list = newTs.map((t) => goalText(t.definition, firstName)).join("; ");
+    const items = newTs.slice(0, 8).map((t) => goalText(t.definition, firstName));
     sentences.push(
-      `In addition, ${first} will work toward the following upcoming goal${newTs.length !== 1 ? "s" : ""}: ${list}.`,
+      `Because ${voice.reason}, treatment during this service period will focus on ` +
+      `teaching ${first} to ${listPhrase(items)}` +
+      (newTs.length > items.length ? `, along with the remaining objectives listed in the goal chart below` : "") + `.`,
+    );
+    sentences.push(
+      voice.isBehavior
+        ? `These goals were selected to reduce the behaviors that most interfere with ${first}'s daily functioning, ` +
+          `and to teach appropriate replacement behaviors that serve the same purpose for ${first}.`
+        : `These goals were selected to build the skills ${first} needs most in order to participate more independently ` +
+          `at home, in the community, and alongside peers.`,
+    );
+  } else if (activeTs.length > 0) {
+    sentences.push(
+      `Because ${voice.reason}, treatment during this service period will continue to target these objectives ` +
+      `until mastery criteria are met, with ongoing data review guiding any changes to the teaching procedures.`,
+    );
+  } else if (assessmentType === "initial") {
+    sentences.push(
+      `Because ${voice.reason}, goals in this area will be established at the start of services and reviewed as data are collected.`,
     );
   }
 
-  if (assessmentType === "initial" && masteredTs.length === 0 && activeTs.length === 0 && newTs.length === 0) {
-    sentences.push(`Goals in this area will be identified as treatment progresses.`);
-  }
-
-  return `<p>${heading}${sentences.join("  ")}</p>`;
+  return `<p>${heading}${sentences.join(" ")}</p>`;
 }
 
 /**
