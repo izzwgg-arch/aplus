@@ -168,11 +168,17 @@ Gavriel Schiff-Weiss initial assessment). Key rules, all implemented in
   closes with why those goals were chosen. Per-domain framing lives in
   `DOMAIN_VOICES`; challenging behavior gets behavior-reduction wording, the
   skill domains get skill-building wording.
-  **Goal text is INTRODUCED, never spliced into a verb phrase.** BT-written
-  definitions are already complete sentences ("Shulem will learn not to…",
-  "When Shulem is given a choice he will…"), so "teaching X to <goal>" built
-  broken sentences; grammatically rewriting them was rejected outright because
-  it can invert the meaning of a negative behavior goal.
+  **Summaries describe THEMES, they do not enumerate goals** (2026-09-01):
+  quoting every definition read as a list, so `goalTopic()` reduces a goal to
+  a short verb phrase — it strips trailing prompt/trial codes ("v/p", "(8-12)")
+  and everything up to the last "will", then normalizes the learn-form
+  ("will learn that X" -> "understand that X", "will learn not to X" ->
+  "not to X"). At most THREE topics are folded into "…focus on helping <Name>
+  X, Y, and Z", and the remainder is referred to the goal chart by count.
+  `goalTopic()` returns null when the wording has no "will" clause and the
+  caller then omits it — a goal is never rewritten in a way that could invert
+  a negation, which would be a clinical error. Do not "improve" this into a
+  general paraphraser.
 - **Editor formatting survives into the PDF** (fixed 2026-09-01):
   `normalizeSectionHtml()` in `printAssessment.ts` used to unwrap every
   `<span>` and strip every `style`, so font size, font, color and highlight

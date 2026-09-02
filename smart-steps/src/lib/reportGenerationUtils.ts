@@ -542,6 +542,76 @@ function listPhrase(items: string[]): string {
   return `${list.slice(0, -1).join(", ")}, and ${list[list.length - 1]}`;
 }
 
+/**
+ * Condenses a BT-written goal definition into a short verb phrase that can be
+ * folded into narrative prose after "helping <Name> …".
+ *
+ * BT goals are free text and are already complete sentences ("Shulem will
+ * learn not to…", "When Shulem is given a choice he will learn to…"), so a
+ * summary that quotes them verbatim reads as a list rather than a paragraph.
+ * This strips the trailing prompt/trial codes ("v/p", "(8-12)") and everything
+ * up to the last "will …", then normalizes the learn-form:
+ *
+ *   "… will learn to say where he placed the item v/p"  -> "say where he placed the item"
+ *   "… will learn not to use the bathroom as an escape" -> "not to use the bathroom as an escape"
+ *   "… will learn that drinking water is not an escape" -> "understand that drinking water is not an escape"
+ *
+ * Returns null when the wording cannot be reduced safely (no "will" clause) —
+ * the caller then omits it rather than emitting a broken sentence. Negations
+ * are preserved verbatim: inverting a behavior goal would be a clinical error.
+ */
+function goalTopic(raw: string, firstName: string): string | null {
+  let t = replaceClientNamePlaceholders(raw ?? "", firstName).trim();
+  if (!t) return null;
+
+  // Trailing trial-count "(8-12)" and prompt codes "v/p", "with physical prompt"
+  t = t.replace(/[\s.,;]*[([]\s*\d+\s*[-–—]\s*\d+\s*[)\]]\s*$/g, "");
+  t = t.replace(
+    /[\s.,;]*\b(?:with|using|getting|w\/)?\s*(?:a\s+)?(?:[vpgif]\s*[/|]\s*p|verbal\s+prompts?|physical\s+prompts?|gestural\s+prompts?|hand\s+over\s+hand|independently)\s*\.?\s*$/i,
+    "",
+  );
+  t = t.replace(/[\s.;,]+$/, "").trim();
+  if (!t) return null;
+
+  // Take everything after the LAST "will"/"shall" — drops the subject and any
+  // leading "When <name> is given …" condition clause.
+  const willRe = /\b(?:will|shall)\s+/gi;
+  let cut = -1;
+  let m: RegExpExecArray | null;
+  while ((m = willRe.exec(t)) !== null) cut = m.index + m[0].length;
+  if (cut < 0) return null; // not a "<subject> will …" goal — cannot reduce safely
+
+  let rest = t.slice(cut).trim();
+  if (!rest) return null;
+
+  rest = rest.replace(/^learn\s+how\s+to\s+/i, "");
+  rest = rest.replace(/^learn\s+not\s+to\s+/i, "not to ");
+  rest = rest.replace(/^learn\s+that\s+/i, "understand that ");
+  rest = rest.replace(/^learn\s+to\s+/i, "");
+  rest = rest.replace(/^(?:try|continue)\s+to\s+/i, "");
+  rest = rest.replace(/^be\s+able\s+to\s+/i, "");
+  rest = rest.trim();
+
+
+  return rest.length >= 3 ? rest : null;
+}
+
+/** Up to `max` distinct goal topics rendered as prose, or "" when none parse. */
+function topicPhrase(ts: ReportTarget[], firstName: string, max: number): string {
+  const seen = new Set<string>();
+  const topics: string[] = [];
+  for (const t of ts) {
+    const topic = goalTopic(t.definition, firstName);
+    if (!topic) continue;
+    const key = topic.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    topics.push(escapeHtml(topic));
+    if (topics.length >= max) break;
+  }
+  return listPhrase(topics);
+}
+
 /** Clinical framing per domain: how to describe the need, and the rationale
  *  sentence that links the current presentation to the upcoming goals. */
 interface DomainVoice {
@@ -661,73 +731,81 @@ export function buildCategoryGoalsHtml(
 
   const sentences: string[] = [];
 
-  // ── 1. Where the child is now ────────────────────────────────────────────
+  // ── 1. Present level — where the child is now ────────────────────────────
   if (voice.isBehavior) {
     sentences.push(
-      `${first} currently engages in challenging behavior` +
+      `${first} continues to engage in challenging behavior` +
       (skillAreas ? ` in the areas of ${skillAreas}` : "") +
-      `, which is targeted for reduction through this treatment plan.`,
+      `, and these behaviors remain a priority for reduction.`,
     );
   } else {
     sentences.push(
-      `${first} presents with needs in ${voice.area}` +
-      (skillAreas ? `, specifically in ${skillAreas}` : "") + `.`,
+      `${first}'s ${voice.area} remain an area of significant need` +
+      (skillAreas ? `, with current programming addressing ${skillAreas}` : "") + `.`,
     );
   }
   sentences.push(`[Add any further detail about ${first}'s current presentation in this area.]`);
 
-  // Goal definitions are BT-written free text and are already complete
-  // sentences about the child ("Shulem will learn not to…", "When Shulem is
-  // given a choice he will…"). They are therefore INTRODUCED as objectives
-  // rather than spliced into a verb phrase — rewriting them grammatically
-  // would risk inverting the clinical meaning of a negative goal.
-  const objectiveList = (ts: ReportTarget[], max: number): string =>
-    ts.slice(0, max).map((t) => goalText(t.definition, firstName)).join("; ");
-
-  // ── 2. What has been achieved so far ─────────────────────────────────────
+  // ── 2. The update — what has changed, and where things stand ─────────────
+  // Themes, not a transcript: a handful of representative objectives is what
+  // makes this read as a paragraph. The full list lives in the goal chart.
   if (masteredTs.length > 0) {
+    const mastTopics = topicPhrase(masteredTs, firstName, 2);
     sentences.push(
-      `${first} has already mastered the following in this area: ${objectiveList(masteredTs, 8)}.` +
-      (masteredTs.length > 8 ? ` Additional mastered objectives are listed in the mastered-goals chart.` : "") +
-      ` This shows that ${first} responds well to structured teaching in this area and is ready to build on those skills.`,
+      `Since the previous review ${first} has mastered ${masteredTs.length} ` +
+      `objective${masteredTs.length !== 1 ? "s" : ""} in this area` +
+      (mastTopics ? `, including learning to ${mastTopics}` : "") +
+      `, which shows that ${first} responds well to structured teaching here and is ready to build on those gains.`,
     );
   }
 
-  // ── 3. Where the child is up to right now ────────────────────────────────
   if (activeTs.length > 0) {
     const withPct = activeTs
       .map((t) => ({ t, pct: trialPctFor(t) }))
       .filter((x) => x.pct !== null) as { t: ReportTarget; pct: number }[];
-
-    sentences.push(
-      (voice.isBehavior
-        ? `The behaviors currently targeted for reduction are: `
-        : `${first} is at this point working on the following objectives: `) +
-      `${objectiveList(activeTs, 8)}.`,
-    );
+    const plural = activeTs.length !== 1;
 
     if (withPct.length > 0) {
       const avg = Math.round(withPct.reduce((n, x) => n + x.pct, 0) / withPct.length);
       sentences.push(
-        `Data collected over the current period show ${first} performing at an average of ${avg}% across ` +
-        `${withPct.length} objective${withPct.length !== 1 ? "s" : ""} with recorded data, ` +
-        `so ${first} has not yet reached mastery criteria and continues to require prompting and reinforcement in this area.`,
+        `${activeTs.length} objective${plural ? "s" : ""} ${plural ? "remain" : "remains"} in treatment, ` +
+        `with performance averaging ${avg}% across those with recorded data, so mastery criteria have not yet been met ` +
+        `and ${first} continues to require prompting and reinforcement in this area.`,
+      );
+    } else {
+      sentences.push(
+        `${activeTs.length} objective${plural ? "s" : ""} ${plural ? "remain" : "remains"} in treatment and ` +
+        `${plural ? "continue" : "continues"} to require prompting and reinforcement before mastery criteria can be met.`,
       );
     }
+  } else if (masteredTs.length === 0 && assessmentType === "initial") {
+    sentences.push(
+      `As this is an initial assessment, no data have been collected in this area yet and baseline levels will be ` +
+      `established as programming begins.`,
+    );
   }
 
-  // ── 4. Because of that → what we will work on ────────────────────────────
+  // ── 3. Why the goals are needed → what this period targets ───────────────
   if (newTs.length > 0) {
+    const topics = topicPhrase(newTs, firstName, 3);
+    const shown  = topics ? Math.min(3, newTs.length) : newTs.length;
+    const rest   = newTs.length - shown;
+
     sentences.push(
-      `Because ${voice.reason}, the objectives to be targeted during this service period are: ` +
-      `${objectiveList(newTs, 10)}.` +
-      (newTs.length > 10 ? ` The remaining objectives are listed in the goal chart below.` : ""),
+      `Because ${voice.reason}, the goals selected for this service period` +
+      (topics ? ` focus on helping ${first} ${topics}` : ` target the objectives set out in the goal chart below`) + `.`,
     );
+    if (rest > 0) {
+      sentences.push(
+        `${rest} further objective${rest !== 1 ? "s" : ""} in this domain ${rest !== 1 ? "are" : "is"} ` +
+        `detailed in the goal chart below.`,
+      );
+    }
     sentences.push(
       voice.isBehavior
-        ? `These goals were selected to reduce the behaviors that most interfere with ${first}'s daily functioning, ` +
-          `and to teach appropriate replacement behaviors that serve the same purpose for ${first}.`
-        : `These goals were selected to build the skills ${first} needs most in order to participate more independently ` +
+        ? `These goals were chosen to reduce the behaviors that most interfere with ${first}'s daily functioning and ` +
+          `learning, and to teach appropriate replacement behaviors that serve the same purpose for ${first}.`
+        : `These goals were chosen to build the skills ${first} needs most in order to participate more independently ` +
           `at home, in the community, and alongside peers.`,
     );
   } else if (activeTs.length > 0) {
