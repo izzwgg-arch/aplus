@@ -130,6 +130,8 @@ export default function SessionNewPage() {
     timeOut: "",
     providerId: "",
     providerName: "",
+    supervised: false,
+    supervisorId: "",
   });
 
   useEffect(() => {
@@ -248,7 +250,12 @@ export default function SessionNewPage() {
    * fire and any existing unsaved session was unconditionally overwritten.
    * See resolveSessionStart in abaStore.ts for the shared, centralized fix. */
   const createSession = useCallback(async (
-    setup?: { startedAt?: string; endedAt?: string; providerId?: string },
+    setup?: {
+      startedAt?: string; endedAt?: string; providerId?: string;
+      /** A BCBA supervised this session, and who — a direct-supervision note
+       *  can only be generated from a session carrying this. */
+      supervised?: boolean; supervisorId?: string;
+    },
     opts?: { force?: boolean },
   ) => {
     const result = resolveSessionStart(clientId, opts);
@@ -296,6 +303,8 @@ export default function SessionNewPage() {
           ...(setup?.startedAt  ? { startedAt:  setup.startedAt  } : {}),
           ...(setup?.endedAt    ? { endedAt:    setup.endedAt    } : {}),
           ...(setup?.providerId ? { providerId: setup.providerId } : {}),
+          supervised: setup?.supervised === true,
+          ...(setup?.supervised && setup?.supervisorId ? { supervisorId: setup.supervisorId } : {}),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -314,6 +323,8 @@ export default function SessionNewPage() {
           startedAt: setup?.startedAt ?? new Date().toISOString(),
           endedAt: setup?.endedAt,
           providerId: setup?.providerId,
+          supervised: setup?.supervised,
+          supervisorId: setup?.supervisorId,
         }).catch(() => {});
         toast.info("Working offline — session saved locally", { duration: 3000 });
       }
@@ -325,6 +336,8 @@ export default function SessionNewPage() {
         startedAt: setup?.startedAt ?? new Date().toISOString(),
         endedAt: setup?.endedAt,
         providerId: setup?.providerId,
+        supervised: setup?.supervised,
+        supervisorId: setup?.supervisorId,
       }).catch(() => {});
       toast.info("Offline mode — trials saved locally", { duration: 3000 });
     }
@@ -351,6 +364,8 @@ export default function SessionNewPage() {
       startedAt,
       endedAt,
       providerId: setupForm.providerId || undefined,
+      supervised: setupForm.supervised,
+      supervisorId: setupForm.supervised ? (setupForm.supervisorId || undefined) : undefined,
     });
   }, [createSession, setupForm]);
 
@@ -687,6 +702,43 @@ export default function SessionNewPage() {
                   className={`w-full rounded-xl border bg-[var(--glass-bg)] px-3 py-2.5 text-sm text-[var(--foreground)] ${setupForm.timeOut ? "border-[var(--glass-border)]" : "border-[var(--accent-pink)]/50"}`}
                 />
               </div>
+            </div>
+
+            {/* Supervision — what makes this session eligible to be written up
+                as a BCBA direct-supervision note. */}
+            <div className="rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] p-3">
+              <label className="flex items-center gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={setupForm.supervised}
+                  onChange={(e) => setSetupForm((f) => ({
+                    ...f,
+                    supervised: e.target.checked,
+                    supervisorId: e.target.checked ? f.supervisorId : "",
+                  }))}
+                  className="h-4 w-4 rounded border-[var(--glass-border)] accent-[var(--accent-purple)]"
+                />
+                <span className="text-sm font-medium text-[var(--foreground)]">
+                  A BCBA supervised this session
+                </span>
+              </label>
+              {setupForm.supervised && (
+                <select
+                  value={setupForm.supervisorId}
+                  onChange={(e) => setSetupForm((f) => ({ ...f, supervisorId: e.target.value }))}
+                  className="mt-2.5 w-full rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] px-3 py-2.5 text-sm text-[var(--foreground)]"
+                >
+                  <option value="">Supervising BCBA (optional)</option>
+                  {providerList.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name ?? p.id}{p.displayRole ? ` — ${p.displayRole}` : p.role !== "RBT" ? ` — ${p.role}` : ""}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <p className="mt-2 text-[11px] text-zinc-500">
+                Only sessions marked here can be written up as a BCBA direct-supervision note.
+              </p>
             </div>
           </div>
 

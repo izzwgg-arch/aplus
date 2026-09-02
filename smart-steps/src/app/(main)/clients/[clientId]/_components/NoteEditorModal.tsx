@@ -78,6 +78,8 @@ type GeneratedNoteResponse = {
   nextSteps:       string;
   sessionId:       string | null;
   matchedSessions: number;
+  /** True when only supervised sessions were considered (direct supervision). */
+  supervisedOnly:  boolean;
   sessions: Array<{
     id:           string;
     startedAt:    string;
@@ -352,9 +354,16 @@ export function NoteEditorModal({
       if (!data.sessions || data.sessions.length === 0) {
         setGenInfo(null);
         setGenWarning(
-          btUserId
-            ? "No session was found for that therapist on this date — the note was written from the program data instead."
-            : "No session data was found on this date — the note was written from the program data instead."
+          data.supervisedOnly
+            /* A DSU note only ever reads sessions flagged as supervised, so
+               "nothing found" usually means the session exists but was never
+               marked — which is fixed on the session, not here. */
+            ? (btUserId
+                ? "No SUPERVISED session is on record for that therapist on this date. Mark the session as supervised on the Sessions tab, then generate again."
+                : "No SUPERVISED session is on record for this date. Mark the session as supervised on the Sessions tab, then generate again.")
+            : btUserId
+              ? "No session was found for that therapist on this date — the note was written from the program data instead."
+              : "No session data was found on this date — the note was written from the program data instead."
         );
       } else {
         setGenWarning(null);
@@ -610,7 +619,7 @@ export function NoteEditorModal({
 
                   <div>
                     <label className="block text-xs text-zinc-500 mb-1 flex items-center gap-1">
-                      <User className="h-3 w-3" /> BT / Therapist for this service
+                      <User className="h-3 w-3" /> {bcbaServiceType === "DSU" ? "BT / Therapist supervised" : "BT / Therapist for this service"}
                     </label>
                     <BtSelect value={btUserId} onChange={setBtUserId} />
                   </div>
@@ -651,7 +660,8 @@ export function NoteEditorModal({
                   </button>
                   <p className="text-[11px] text-zinc-500 flex-1 min-w-[12rem]">
                     Writes a {bcbaServiceLabel(bcbaServiceType).toLowerCase()} note from what was actually
-                    entered for this date.
+                    entered for this date
+                    {bcbaServiceType === "DSU" ? ", using only sessions marked as supervised" : ""}.
                   </p>
                 </div>
 

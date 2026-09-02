@@ -85,6 +85,11 @@ type SessionDetail = {
   notes: string | null;
   voiceNotes: string | null;
   user?: { id?: string | null; name?: string | null; email?: string | null } | null;
+  /** A BCBA supervised this session — only these can be written up as a
+   *  direct-supervision (DSU) note. */
+  supervised?: boolean;
+  supervisorId?: string | null;
+  supervisorName?: string | null;
   trialCount: number;
   trials: TrialRecord[];
   sessionTargets: SessionTargetSummary[];
@@ -298,7 +303,10 @@ export function SessionSnapshotDrawer({
   // Session-header editing (date / time in / time out / provider)
   const [editingSession, setEditingSession] = useState(false);
   const [savingSession, setSavingSession]   = useState(false);
-  const [sessForm, setSessForm] = useState({ date: "", timeIn: "", timeOut: "", providerId: "" });
+  const [sessForm, setSessForm] = useState({
+    date: "", timeIn: "", timeOut: "", providerId: "",
+    supervised: false, supervisorId: "",
+  });
 
   // Adding a goal that was worked on without trial data
   const [addingGoal, setAddingGoal]   = useState(false);
@@ -607,6 +615,8 @@ export function SessionSnapshotDrawer({
       timeIn:     toTimeInputValue(data.startedAt),
       timeOut:    toTimeInputValue(data.endedAt),
       providerId: data.user?.id ?? data.userId ?? "",
+      supervised:   data.supervised === true,
+      supervisorId: data.supervisorId ?? "",
     });
     setEditingSession(true);
   }
@@ -641,6 +651,10 @@ export function SessionSnapshotDrawer({
           startedAt,
           endedAt,
           ...(sessForm.providerId ? { providerId: sessForm.providerId } : {}),
+          // Marking supervision here is how a session that was supervised but
+          // not flagged at entry becomes eligible for a DSU note.
+          supervised:   sessForm.supervised,
+          supervisorId: sessForm.supervised ? (sessForm.supervisorId || null) : null,
         }),
       });
       if (!res.ok) {
@@ -814,6 +828,40 @@ export function SessionSnapshotDrawer({
                               ))}
                             </select>
                           </div>
+                          <div className="rounded-lg border border-[var(--glass-border)] p-2.5">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={sessForm.supervised}
+                                onChange={(e) => setSessForm((f) => ({
+                                  ...f,
+                                  supervised: e.target.checked,
+                                  supervisorId: e.target.checked ? f.supervisorId : "",
+                                }))}
+                                className="h-3.5 w-3.5 rounded border-[var(--glass-border)] accent-[var(--accent-purple)]"
+                              />
+                              <span className="text-xs font-medium text-[var(--foreground)]">
+                                A BCBA supervised this session
+                              </span>
+                            </label>
+                            {sessForm.supervised && (
+                              <select
+                                value={sessForm.supervisorId}
+                                onChange={(e) => setSessForm((f) => ({ ...f, supervisorId: e.target.value }))}
+                                className="field-input mt-2 w-full text-sm"
+                              >
+                                <option value="">Supervising BCBA (optional)</option>
+                                {providers.map((p) => (
+                                  <option key={p.id} value={p.id}>
+                                    {p.name || "(no name)"}{p.displayRole ? ` · ${p.displayRole}` : ` · ${p.role}`}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                            <p className="mt-1.5 text-[11px] text-zinc-500">
+                              Direct-supervision notes are generated only from sessions marked here.
+                            </p>
+                          </div>
                           <p className="text-[11px] leading-relaxed text-zinc-500">
                             Updating these fields edits this session in place — trials, notes, behaviors, and reports are preserved. No duplicate session is created.
                           </p>
@@ -851,6 +899,13 @@ export function SessionSnapshotDrawer({
                       {
                         label: "Duration",
                         value: formatSessionDuration(data.startedAt, data.endedAt),
+                      },
+                      // Whether this session can be written up as direct supervision.
+                      {
+                        label: "Supervision",
+                        value: data.supervised
+                          ? (data.supervisorName ? `Supervised by ${data.supervisorName}` : "Supervised")
+                          : "Not supervised",
                       },
                     ].map((item) => (
                       <div key={item.label} className="rounded-2xl border border-[var(--glass-border)] bg-[var(--glass-bg)]/20 p-3">

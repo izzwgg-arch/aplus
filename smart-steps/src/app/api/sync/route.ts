@@ -108,6 +108,10 @@ export async function POST(req: Request) {
                 startedAt: new Date(p.startedAt as string),
                 ...(p.endedAt ? { endedAt: new Date(p.endedAt as string) } : {}),
                 mode: (p.mode as string | undefined) || "DTT",
+                supervised: p.supervised === true,
+                ...(p.supervised === true && p.supervisorId
+                  ? { supervisorId: p.supervisorId as string }
+                  : {}),
               },
             });
             synced.push(`session:${created.id}`);

@@ -919,6 +919,43 @@ In `AppointmentModal` (`client/src/pages/aplus/AppointmentsPage.jsx`):
   exist on `Service` (the column is `durationMinutes`), so the duration hint
   never rendered at all.
 
+## Tracker sessions record SUPERVISION, and DSU notes require it (2026-08-27)
+
+A direct-supervision note documents supervision that actually happened. Before
+this the DSU generator read every session on the service date, so a session no
+BCBA ever attended could be written up as supervised — and a note that says a
+BCBA observed a session that was never observed is a false clinical record.
+
+- **`Session.supervised` (Boolean, default false) + `Session.supervisorId`**
+  (migration `20260827000000_session_supervision`). The second `Session -> User`
+  link means both relations are named: `SessionProvider` (who ran the session)
+  and `SessionSupervisor` (who supervised it). Clearing `supervised` clears the
+  supervisor with it — an unsupervised session must not keep one on record.
+- **Entered where the session is.** "A BCBA supervised this session" plus an
+  optional supervising-BCBA dropdown appear on both session setup forms
+  (`DataEntryTab` and `clients/[clientId]/session/new`) and in the Session
+  Snapshot drawer's edit panel, so a session supervised but not flagged at entry
+  can be corrected afterwards. Supervision is per-session and is reset for the
+  next one, never carried over. `POST /api/sessions`, `PATCH
+  /api/sessions/[sessionId]`, `queueSession()` and `/api/sync` all carry the two
+  fields, so an offline session keeps its supervision when it syncs.
+- **Visible without opening the session**: a purple "Supervised" chip on the
+  session cards (tooltip names the supervisor), a Supervision fact on the
+  snapshot, and a `supervised=1|0` filter on `GET /api/sessions` exposed in the
+  Sessions tab filter panel — server-side, like every other session filter,
+  because the list is paginated.
+- **DSU generation is restricted to supervised sessions.**
+  `loadClientSessionsInRange({ supervisedOnly })` adds `supervised: true` to the
+  query, and `generate-bcba-note` sets it for `serviceType === "DSU"` only —
+  every other service type may still reference any session on the date. The
+  narrative names the supervising BCBA from the session record when there is
+  one, falling back to the note's author.
+- **With no supervised session the note refuses to invent one.** It states that
+  no supervised session is on record for that date instead of describing an
+  observation that did not happen, and the editor's warning says to mark the
+  session as supervised on the Sessions tab and generate again — the fix is on
+  the session, not in the note.
+
 ## Rule 5: Deploy (step 3 of the Rule 0 end-of-task sequence)
 
 ### Smart Steps ABA Tracker (git-based, re-wired 2026-08-13)

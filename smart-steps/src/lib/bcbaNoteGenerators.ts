@@ -24,6 +24,10 @@ export type ObservedSession = {
   mode:          string;
   providerName:  string;
   providerRole:  string | null;
+  /** A BCBA supervised this session — set by whoever entered the session. */
+  supervised:    boolean;
+  /** The supervising BCBA on record, when one was named. */
+  supervisorName: string | null;
   targets:       SessionTargetSummary[];
   behaviors:     BehaviorRecord[];
 };
@@ -215,11 +219,6 @@ function section(heading: string, body: string[] | string): string[] {
   return [heading, ...lines, ""];
 }
 
-/** The line every service type opens with when no session data backs it up. */
-function noSessionLine(serviceLabel: string, clientName: string, dateStr: string): string {
-  return `No session data was recorded for ${clientName} on ${dateStr}, so this ${serviceLabel} note documents the service without reference to same-day session data.`;
-}
-
 /* ── Per-service generators ───────────────────────────────────────────────── */
 
 function generateSupervision(input: GenerateInput): GeneratedNote {
@@ -230,13 +229,22 @@ function generateSupervision(input: GenerateInput): GeneratedNote {
   const trials = totalTrials(targets);
   const therapists = Array.from(new Set(sessions.map((s) => s.providerName)));
 
+  /* A supervision note documents supervision that happened. The route only
+     hands this generator sessions flagged as supervised, so an unsupervised
+     session can never be written up as one. */
+  const supervisorNames = Array.from(new Set(
+    sessions.map((s) => s.supervisorName).filter((n): n is string => !!n)
+  ));
+  const supervisorText = supervisorNames.length > 0 ? supervisorNames.join(" and ") : bcbaName;
+
   const summary: string[] = [];
   if (sessions.length === 0) {
-    summary.push(noSessionLine("direct supervision", clientName, dateStr));
-    summary.push(`${bcbaName} provided direct supervision of ABA therapy services for ${clientName}, reviewed program data, and provided feedback to the treatment team.`);
+    summary.push(
+      `No supervised session is on record for ${clientName} on ${dateStr}. A session must be marked as supervised on the session record before it can be documented as direct supervision.`
+    );
   } else {
     summary.push(
-      `On ${dateStr}, ${bcbaName} conducted direct supervision (DSU) of ABA therapy services delivered to ${clientName} by ` +
+      `On ${dateStr}, ${supervisorText} conducted direct supervision (DSU) of ABA therapy services delivered to ${clientName} by ` +
       `${therapists.join(" and ")}${sessions[0].providerRole ? `, ${sessions[0].providerRole}` : ""}.`
     );
     summary.push(
@@ -258,7 +266,8 @@ function generateSupervision(input: GenerateInput): GeneratedNote {
     const st = scored(s.targets);
     return `  • ${s.providerName}${s.providerRole ? ` (${s.providerRole})` : ""} — ${fmtWindow(s, tz)}, ${modeLabel(s.mode)}; ` +
       `${totalTrials(s.targets)} trial${totalTrials(s.targets) !== 1 ? "s" : ""} across ${st.length} target${st.length !== 1 ? "s" : ""}` +
-      `${overallPct(s.targets) !== null ? `, ${overallPct(s.targets)}% accuracy` : ""}.`;
+      `${overallPct(s.targets) !== null ? `, ${overallPct(s.targets)}% accuracy` : ""}` +
+      `${s.supervisorName ? `; supervised by ${s.supervisorName}` : ""}.`;
   });
 
   const feedback: string[] = [];

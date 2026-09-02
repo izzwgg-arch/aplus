@@ -82,13 +82,18 @@ export async function POST(req: Request, { params }: Params) {
     });
     if (!client) return NextResponse.json({ error: "Client not found" }, { status: 404 });
 
-    /* ── 1. The session(s) the service was delivered around ───────────────── */
+    /* ── 1. The session(s) the service was delivered around ─────────────────
+       Direct supervision documents supervision that actually happened, so it
+       reads ONLY sessions marked as supervised on the session record. Every
+       other service type may reference any session on the date. */
+    const supervisedOnly = serviceType === "DSU";
     const rawSessions = await loadClientSessionsInRange({
       clientId,
       from:      dayStart,
       to:        dayEnd,
       userId:    body.btUserId || null,
       sessionId: body.sessionId || null,
+      supervisedOnly,
     });
 
     const sessions: ObservedSession[] = rawSessions.map((s: SessionWithNoteData) => ({
@@ -98,8 +103,10 @@ export async function POST(req: Request, { params }: Params) {
       mode:         s.mode,
       providerName: s.user?.name ?? "the assigned therapist",
       providerRole: s.user?.displayRole ?? (s.user?.role === "RBT" ? "BT/RBT" : s.user?.role ?? null),
-      targets:      summarizeSessionTargets(s),
-      behaviors:    s.behaviors,
+      supervised:     s.supervised,
+      supervisorName: s.supervisor?.name ?? null,
+      targets:        summarizeSessionTargets(s),
+      behaviors:      s.behaviors,
     }));
 
     /* ── 2. The program picture behind planning / meeting / assessment ────── */
@@ -131,6 +138,9 @@ export async function POST(req: Request, { params }: Params) {
         targetCount:  s.targets.length,
       })),
       matchedSessions: sessions.length,
+      /* Lets the editor say WHY nothing matched: no session at all, or sessions
+         that day which were never marked as supervised. */
+      supervisedOnly,
     });
   } catch (e) {
     console.error("POST /api/clients/[clientId]/generate-bcba-note error:", e);

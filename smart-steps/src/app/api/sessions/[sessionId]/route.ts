@@ -35,6 +35,8 @@ export async function PATCH(
       notes?: string;
       startedAt?: string;
       providerId?: string;
+      supervised?: boolean;
+      supervisorId?: string | null;
     };
 
     const updated = await prisma.session.update({
@@ -44,6 +46,14 @@ export async function PATCH(
         notes: body.notes ?? undefined,
         startedAt: body.startedAt ? new Date(body.startedAt) : undefined,
         userId: body.providerId ?? undefined,
+        // Clearing the flag clears the supervisor with it — a session that was
+        // not supervised must not keep a supervisor on record.
+        ...(body.supervised !== undefined
+          ? { supervised: body.supervised, ...(body.supervised ? {} : { supervisorId: null }) }
+          : {}),
+        ...(body.supervisorId !== undefined && body.supervised !== false
+          ? { supervisorId: body.supervisorId || null }
+          : {}),
       },
     });
 
@@ -98,6 +108,7 @@ export async function GET(
         },
         behaviors: { orderBy: { createdAt: "asc" }, select: { id: true, type: true, behavior: true, antecedent: true, consequence: true, intensity: true, createdAt: true } },
         user: { select: { id: true, name: true, email: true } },
+        supervisor: { select: { id: true, name: true } },
         // Goals attached by hand (worked on without trial data). Merged into
         // `sessionTargets` below alongside the trial-derived ones.
         addedTargets: {
@@ -271,6 +282,11 @@ export async function GET(
       createdAt: s.createdAt.toISOString(),
       notes: s.notes ?? null,
       voiceNotes: s.voiceNotes ?? null,
+      // Supervision is what makes a session eligible to be written up as a
+      // direct-supervision note.
+      supervised: s.supervised,
+      supervisorId: s.supervisorId,
+      supervisorName: s.supervisor?.name ?? null,
       user: s.user,
       trials: s.trials.map((trial) => ({
         id: trial.id,

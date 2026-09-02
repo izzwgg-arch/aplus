@@ -90,6 +90,9 @@ export async function queueSession(payload: {
   /** The provider the user picked on the setup form. */
   providerId?: string;
   mode?: string;
+  /** Whether a BCBA supervised this session, and who — set on the setup form. */
+  supervised?: boolean;
+  supervisorId?: string;
 }) {
   await db.syncQueue.add({
     table: "sessions",

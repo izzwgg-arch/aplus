@@ -66,6 +66,7 @@ const TARGET_SELECT = {
 export const sessionNoteInclude = {
   client:    { select: { id: true, name: true } },
   user:      { select: { id: true, name: true, role: true, displayRole: true, credentials: true } },
+  supervisor: { select: { id: true, name: true, credentials: true } },
   trials:    {
     where:   { deletedAt: null },
     include: { target: { select: TARGET_SELECT } },
@@ -180,12 +181,14 @@ export async function loadClientSessionsInRange(opts: {
   to:        Date;
   userId?:   string | null;
   sessionId?: string | null;
+  /** Only sessions a BCBA supervised — what a direct-supervision note documents. */
+  supervisedOnly?: boolean;
 }): Promise<SessionWithNoteData[]> {
-  const { clientId, from, to, userId, sessionId } = opts;
+  const { clientId, from, to, userId, sessionId, supervisedOnly } = opts;
 
   if (sessionId) {
     const one = await prisma.session.findFirst({
-      where:   { id: sessionId, clientId, deletedAt: null },
+      where:   { id: sessionId, clientId, deletedAt: null, ...(supervisedOnly ? { supervised: true } : {}) },
       include: sessionNoteInclude,
     });
     return one ? [one] : [];
@@ -197,6 +200,7 @@ export async function loadClientSessionsInRange(opts: {
       deletedAt: null,
       startedAt: { gte: from, lte: to },
       ...(userId ? { userId } : {}),
+      ...(supervisedOnly ? { supervised: true } : {}),
     },
     include: sessionNoteInclude,
     orderBy: { startedAt: "asc" },

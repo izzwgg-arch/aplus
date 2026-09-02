@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Activity, Calendar, Clock, FileCheck2, FilePlus2, Filter, Target as TargetIcon,
+  Activity, Calendar, Clock, Eye, FileCheck2, FilePlus2, Filter, Target as TargetIcon,
   Trash2, User, X, Zap, StickyNote,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -33,6 +33,10 @@ export type SessionListItem = {
   noteIsGenerated?: boolean | null;
   /** Goals attached to the session by hand, without trial data. */
   addedGoalCount?: number;
+  /** A BCBA supervised this session — only these can be written up as a
+   *  direct-supervision (DSU) note. */
+  supervised?: boolean;
+  supervisorName?: string | null;
 };
 
 type ProviderOption = { id: string; name: string | null; role: string; displayRole?: string | null };
@@ -45,9 +49,11 @@ type Filters = {
   withData: boolean;
   /** "" = any, "1" = note written, "0" = still needs a note. */
   hasNote: string;
+  /** "" = any, "1" = supervised, "0" = not supervised. */
+  supervised: string;
 };
 
-const EMPTY_FILTERS: Filters = { from: "", to: "", providerId: "", mode: "", withData: false, hasNote: "" };
+const EMPTY_FILTERS: Filters = { from: "", to: "", providerId: "", mode: "", withData: false, hasNote: "", supervised: "" };
 
 const MODE_LABELS: Record<string, string> = {
   DTT: "DTT",
@@ -98,7 +104,7 @@ export function SessionsTab({
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const filtersActive =
-    Boolean(filters.from || filters.to || filters.providerId || filters.mode || filters.withData || filters.hasNote);
+    Boolean(filters.from || filters.to || filters.providerId || filters.mode || filters.withData || filters.hasNote || filters.supervised);
 
   /* Provider list for the filter dropdown (active staff, any role). */
   const { data: providers = [] } = useQuery<ProviderOption[]>({
@@ -123,7 +129,7 @@ export function SessionsTab({
     hasNextPage,
     isFetchingNextPage,
   } = useInfiniteQuery({
-    queryKey: ["sessions", clientId, filters.from, filters.to, filters.providerId, filters.mode, filters.withData, filters.hasNote],
+    queryKey: ["sessions", clientId, filters.from, filters.to, filters.providerId, filters.mode, filters.withData, filters.hasNote, filters.supervised],
     initialPageParam: 0,
     queryFn: async ({ pageParam }) => {
       const params = new URLSearchParams({
@@ -137,6 +143,7 @@ export function SessionsTab({
       if (filters.mode) params.set("mode", filters.mode);
       if (filters.withData) params.set("withData", "1");
       if (filters.hasNote) params.set("hasNote", filters.hasNote);
+      if (filters.supervised) params.set("supervised", filters.supervised);
       const res = await fetch(`/smart-steps/api/sessions?${params}`);
       if (!res.ok) return [] as SessionListItem[];
       return (await res.json()) as SessionListItem[];
@@ -281,6 +288,19 @@ export function SessionsTab({
                 </select>
               </div>
 
+              <div>
+                <label className="mb-1 block text-xs text-zinc-500">Supervision</label>
+                <select
+                  value={filters.supervised}
+                  onChange={(e) => setFilters((f) => ({ ...f, supervised: e.target.value }))}
+                  className="field-input w-full text-sm"
+                >
+                  <option value="">Any</option>
+                  <option value="1">Supervised</option>
+                  <option value="0">Not supervised</option>
+                </select>
+              </div>
+
               <label className="col-span-full flex w-fit cursor-pointer items-center gap-2 text-xs text-zinc-400">
                 <input
                   type="checkbox"
@@ -378,6 +398,14 @@ export function SessionsTab({
                     ) : (
                       <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-400">
                         <FilePlus2 className="h-3 w-3" /> No note yet
+                      </span>
+                    )}
+                    {s.supervised && (
+                      <span
+                        title={s.supervisorName ? `Supervised by ${s.supervisorName}` : "A BCBA supervised this session"}
+                        className="inline-flex items-center gap-1 rounded-full bg-[var(--accent-purple)]/10 px-2 py-0.5 text-[11px] font-semibold text-[var(--accent-purple)]"
+                      >
+                        <Eye className="h-3 w-3" /> Supervised
                       </span>
                     )}
                     {(s.addedGoalCount ?? 0) > 0 && (

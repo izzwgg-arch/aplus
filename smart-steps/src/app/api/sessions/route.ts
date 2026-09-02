@@ -26,6 +26,8 @@ export async function GET(req: Request) {
   // "1" = only sessions that already have a note, "0" = only sessions still
   // missing one (the daily "what do I still have to write up?" question).
   const hasNoteParam = searchParams.get("hasNote");
+  // "1" = only sessions a BCBA supervised, "0" = only unsupervised ones.
+  const supervisedParam = searchParams.get("supervised");
 
   if (clientId) {
     const denied = await requireClientAccessResponse(user.id, clientId, "smartsteps.sessions.view");
@@ -55,6 +57,8 @@ export async function GET(req: Request) {
         ...(withData ? { trials: { some: { deletedAt: null } } } : {}),
         ...(hasNoteParam === "1" ? { sessionNotes: { some: {} } } : {}),
         ...(hasNoteParam === "0" ? { sessionNotes: { none: {} } } : {}),
+        ...(supervisedParam === "1" ? { supervised: true } : {}),
+        ...(supervisedParam === "0" ? { supervised: false } : {}),
       },
       orderBy: { startedAt: "desc" },
       take: limit,
@@ -68,7 +72,10 @@ export async function GET(req: Request) {
         clientId: true,
         userId: true,
         notes: true,
+        supervised: true,
+        supervisorId: true,
         user: { select: { id: true, name: true, displayRole: true, role: true } },
+        supervisor: { select: { id: true, name: true } },
         trials: {
           where: { deletedAt: null },
           select: { result: true },
@@ -100,6 +107,9 @@ export async function GET(req: Request) {
         therapistName: s.user?.name ?? null,
         therapistRole: s.user?.displayRole ?? s.user?.role ?? null,
         hasNotes: Boolean(s.notes?.trim()),
+        supervised: s.supervised,
+        supervisorId: s.supervisorId,
+        supervisorName: s.supervisor?.name ?? null,
         noteCount: s.sessionNotes.length,
         noteGeneratedAt: latestNote?.createdAt ?? null,
         noteIsGenerated: latestNote ? latestNote.isGenerated : null,
@@ -125,12 +135,14 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-    const { clientId, mode, startedAt, endedAt, providerId } = body as {
+    const { clientId, mode, startedAt, endedAt, providerId, supervised, supervisorId } = body as {
       clientId?: string;
       mode?: string;
       startedAt?: string;
       endedAt?: string;
       providerId?: string;
+      supervised?: boolean;
+      supervisorId?: string | null;
     };
     if (!clientId) {
       return NextResponse.json({ error: "clientId required" }, { status: 400 });
@@ -144,6 +156,10 @@ export async function POST(req: Request) {
         mode: mode || "DTT",
         ...(startedAt ? { startedAt: new Date(startedAt) } : {}),
         ...(endedAt ? { endedAt: new Date(endedAt) } : {}),
+        // Whether a BCBA supervised this session. Only supervised sessions can
+        // be written up as direct supervision.
+        supervised: supervised === true,
+        ...(supervised === true && supervisorId ? { supervisorId } : {}),
       },
     });
     return NextResponse.json({ id: sessionRecord.id });

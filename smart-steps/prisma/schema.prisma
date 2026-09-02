@@ -96,7 +96,8 @@ model User {
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
   assignedClients      ClientAssignment[]
-  sessions             Session[]
+  sessions             Session[]        @relation("SessionProvider")
+  supervisedSessions   Session[]        @relation("SessionSupervisor")
   notes                Note[]
   auditEntries         AuditEntry[]
   completedAssessments ClientAssessment[]
@@ -306,11 +307,16 @@ model Session {
   endedAt            DateTime?
   notes              String?
   voiceNotes         String?
+  /// A BCBA supervised this session. Direct-supervision notes are generated
+  /// ONLY from sessions carrying this flag.
+  supervised         Boolean             @default(false)
+  supervisorId       String?
   deletedAt          DateTime?
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
   client             Client              @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user               User                @relation("SessionProvider", fields: [userId], references: [id], onDelete: Cascade)
+  supervisor         User?               @relation("SessionSupervisor", fields: [supervisorId], references: [id], onDelete: SetNull)
   trials             Trial[]
   behaviors          BehaviorEvent[]
   intervalRecordings IntervalRecording[]
@@ -319,6 +325,7 @@ model Session {
 
   @@index([clientId, startedAt])
   @@index([deletedAt])
+  @@index([supervisorId])
 }
 
 /// A goal that was worked on during a session but has no trial data of its own
