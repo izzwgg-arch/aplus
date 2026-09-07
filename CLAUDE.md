@@ -241,6 +241,19 @@ Gavriel Schiff-Weiss initial assessment). Key rules, all implemented in
   domain summaries in production. Verified in the print harness for a properly
   titled BIP and for a legacy one titled "New Section" — each lands alone on a
   fresh final page with no blank page introduced.
+- **A BIP is never numbered, and a stray section heading above it is dropped**
+  (2026-09-07). All 50 legacy BIP sections in production sit under a stray
+  title ("New Section" x49, "BIP" x1) AND already open with their own centered
+  "Attachment A: Behavior Intervention Plan" line, so they used to print as
+  "9. New Section" followed by the real heading. At render time the section is
+  now titled by `BIP_HEADING` when its own title is not an attachment title,
+  and `leadsWithBipHeading()` suppresses the section heading entirely when the
+  content already carries it — one heading, never two.
+  **The section TITLES were deliberately NOT renamed in the database.** All 50
+  are hand-written clinical plans with zero generator placeholders, and
+  `detectSectionType("Attachment A: …")` maps to `behavior_plan`: renaming them
+  would make "Update from data" regenerate over a BCBA's hand-written plan.
+  Left as passthrough, that content is protected. Do not "tidy" these titles.
 - `public/letterhead/smart-steps-top.png` was edited 2026-08-17 to align the
   envelope icon and email text with the other contact rows (cache-buster
   `?v=aligned-20260817`).

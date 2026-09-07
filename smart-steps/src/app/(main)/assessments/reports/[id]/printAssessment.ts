@@ -60,31 +60,42 @@ function stripNumberPrefix(title: string) {
   return title.replace(/^\s*\d+\.\s*/, "").trim();
 }
 
+/** The standard heading for the Behavior Intervention Plan attachment. */
+const BIP_HEADING = "Attachment A: Behavior Intervention Plan";
+
 /**
- * Sections that must START ON THEIR OWN PAGE in the printed document.
+ * Is this section the Behavior Intervention Plan?
  *
- * The Behavior Intervention Plan is a standalone clinical attachment — it gets
- * detached, signed and filed on its own, so it must not begin halfway down the
- * page under the end of another section.
+ * Decided at RENDER time, so it applies to every already-generated report the
+ * next time it is printed — nothing stored is rewritten and no hand-edited
+ * content is touched.
  *
- * This is decided at RENDER time, so it applies to every already-generated
- * report the next time it is printed — nothing stored is rewritten and no
- * hand-edited content is touched.
- *
- * The title alone is not enough. Reports generated before the live template
- * was repaired (2026-08-31) carry their BIP under headings like "New Section"
- * or "BIP": of 57 BIP sections in production, only 3 had a matching title.
- * The CONTENT test therefore requires BOTH a numbered target-behavior heading
- * and a "Function of Behavior:" line, which is the shape the BIP builder
- * emits. Both are needed to keep it off the Challenging Behavior domain
- * section, whose template text says "Identified Target Behaviors:" and a bare
- * "Function:" — that combination matched 0 sections in production, while the
- * pair below matched all 53 real plans.
+ * The title alone is not a sufficient test. Reports generated before the live
+ * template was repaired (2026-08-31) carry their BIP under headings like
+ * "New Section" or "BIP": of 57 BIP sections in production, only 3 had a
+ * matching title. The CONTENT test therefore requires BOTH a numbered
+ * target-behavior heading and a "Function of Behavior:" line, which is the
+ * shape the BIP builder emits and the shape the BCBAs write by hand. Both are
+ * required to keep the rule off the Challenging Behavior domain section, whose
+ * template text says "Identified Target Behaviors:" and a bare "Function:" —
+ * that combination matched 0 sections in production, while the pair below
+ * matched all 53 real plans.
  */
-function startsOwnPage(cleanTitle: string, rawContent: string): boolean {
+function isBipSection(cleanTitle: string, rawContent: string): boolean {
   if (/^attachment\b|behavior\s+intervention\s+plan/i.test(cleanTitle)) return true;
   const c = rawContent || "";
   return /TARGET\s+BEHAVIOR\s*#/i.test(c) && /Function\s+of\s+Behavior\s*:/i.test(c);
+}
+
+/**
+ * Does the section's own content already open with the "Attachment A…"
+ * heading? Every one of the 50 legacy BIPs in production does — the BCBA
+ * typed it as a centered bold/underlined first line — so printing the
+ * section's stray title ("New Section") above it would show the heading twice.
+ */
+function leadsWithBipHeading(rawContent: string): boolean {
+  return /^\s*<(?:p|h[1-6]|div)\b[^>]*>(?:\s*<(?:strong|b|u|em|i|span)\b[^>]*>)*\s*Attachment\s+A\b[:\s]/i
+    .test(rawContent || "");
 }
 
 /** Reads label/value rows out of the provider-info section's table. */
@@ -215,12 +226,26 @@ export function printAssessmentReport(
   let sectionNumber = 0;
   const sectionHtml = contentSections
     .map((section) => {
-      const cleanTitle = stripNumberPrefix(section.title);
-      const isAttachment = /^attachment/i.test(cleanTitle);
-      const headingText = isAttachment ? cleanTitle : `${++sectionNumber}. ${cleanTitle}`;
+      const cleanTitle    = stripNumberPrefix(section.title);
+      const titledAsAttach = /^attachment\b/i.test(cleanTitle);
+      const isBip         = isBipSection(cleanTitle, section.content);
+      const isAttachment  = isBip || titledAsAttach;
+
+      // A BIP is never numbered, and one sitting under a stray heading
+      // ("New Section", "BIP") is titled by the standard heading instead.
+      const headingText = isBip && !titledAsAttach
+        ? BIP_HEADING
+        : isAttachment ? cleanTitle : `${++sectionNumber}. ${cleanTitle}`;
+
+      // …but when the content already carries that heading itself, the
+      // section heading is dropped so the page shows exactly one.
+      const headingHtml = isBip && leadsWithBipHeading(section.content)
+        ? ""
+        : `<h2 class="section-title">${escapeHtml(headingText)}</h2>`;
+
       return `
-      <section class="report-section"${startsOwnPage(cleanTitle, section.content) ? ' data-own-page="1"' : ""} data-section-id="${escapeHtml(section.id)}">
-        <h2 class="section-title">${escapeHtml(headingText)}</h2>
+      <section class="report-section"${isBip ? ' data-own-page="1"' : ""} data-section-id="${escapeHtml(section.id)}">
+        ${headingHtml}
         <div class="section-content">${normalizeSectionHtml(section.content)}</div>
       </section>`;
     })
