@@ -60,6 +60,33 @@ function stripNumberPrefix(title: string) {
   return title.replace(/^\s*\d+\.\s*/, "").trim();
 }
 
+/**
+ * Sections that must START ON THEIR OWN PAGE in the printed document.
+ *
+ * The Behavior Intervention Plan is a standalone clinical attachment — it gets
+ * detached, signed and filed on its own, so it must not begin halfway down the
+ * page under the end of another section.
+ *
+ * This is decided at RENDER time, so it applies to every already-generated
+ * report the next time it is printed — nothing stored is rewritten and no
+ * hand-edited content is touched.
+ *
+ * The title alone is not enough. Reports generated before the live template
+ * was repaired (2026-08-31) carry their BIP under headings like "New Section"
+ * or "BIP": of 57 BIP sections in production, only 3 had a matching title.
+ * The CONTENT test therefore requires BOTH a numbered target-behavior heading
+ * and a "Function of Behavior:" line, which is the shape the BIP builder
+ * emits. Both are needed to keep it off the Challenging Behavior domain
+ * section, whose template text says "Identified Target Behaviors:" and a bare
+ * "Function:" — that combination matched 0 sections in production, while the
+ * pair below matched all 53 real plans.
+ */
+function startsOwnPage(cleanTitle: string, rawContent: string): boolean {
+  if (/^attachment\b|behavior\s+intervention\s+plan/i.test(cleanTitle)) return true;
+  const c = rawContent || "";
+  return /TARGET\s+BEHAVIOR\s*#/i.test(c) && /Function\s+of\s+Behavior\s*:/i.test(c);
+}
+
 /** Reads label/value rows out of the provider-info section's table. */
 function extractFacts(html: string): FactMap {
   const doc = parseHtmlFragment(html);
@@ -192,7 +219,7 @@ export function printAssessmentReport(
       const isAttachment = /^attachment/i.test(cleanTitle);
       const headingText = isAttachment ? cleanTitle : `${++sectionNumber}. ${cleanTitle}`;
       return `
-      <section class="report-section" data-section-id="${escapeHtml(section.id)}">
+      <section class="report-section"${startsOwnPage(cleanTitle, section.content) ? ' data-own-page="1"' : ""} data-section-id="${escapeHtml(section.id)}">
         <h2 class="section-title">${escapeHtml(headingText)}</h2>
         <div class="section-content">${normalizeSectionHtml(section.content)}</div>
       </section>`;
@@ -404,6 +431,14 @@ export function printAssessmentReport(
       let placedInCurrent = 0;
 
       if (!pageInner) createPage();
+      // A section flagged for its own page starts a fresh one unless the
+      // current page is still empty (never emit a blank page to get there).
+      if (
+        (section as HTMLElement).dataset?.ownPage === "1" &&
+        pageInner!.childNodes.length > 0
+      ) {
+        createPage();
+      }
       pageInner!.appendChild(current.shell);
 
       if (pageOverflows()) {

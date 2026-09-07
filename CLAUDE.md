@@ -222,6 +222,25 @@ Gavriel Schiff-Weiss initial assessment). Key rules, all implemented in
   fill-in header block on page 1 (values read from the provider-info section's
   label/value table — keep those labels stable), numbered sections, and
   row-level table splitting across pages (nothing is clipped).
+- **The Behavior Intervention Plan always STARTS ON ITS OWN PAGE** when printed
+  (2026-09-07). It is a standalone clinical attachment that gets detached,
+  signed and filed separately, so it must not begin halfway down a page.
+  `startsOwnPage()` in `printAssessment.ts` flags the section with
+  `data-own-page="1"` and the paginator opens a fresh page before it — unless
+  the current page is still empty, so no blank page is ever emitted.
+  Because this is RENDER-time, it applies to every already-generated report the
+  next time it is printed; nothing stored is rewritten and hand-edited content
+  is untouched.
+  **The title alone is not a sufficient test.** Reports generated before the
+  live template was repaired carry the BIP under headings like "New Section"
+  (49 of them) or "BIP" — only 3 of 57 production BIP sections had a matching
+  title. So the CONTENT test requires BOTH `TARGET BEHAVIOR #` and
+  `Function of Behavior:`. Both are required to keep the rule off the
+  Challenging Behavior domain section, whose template says "Identified Target
+  Behaviors:" and a bare "Function:"; the pair matched all 53 real plans and 0
+  domain summaries in production. Verified in the print harness for a properly
+  titled BIP and for a legacy one titled "New Section" — each lands alone on a
+  fresh final page with no blank page introduced.
 - `public/letterhead/smart-steps-top.png` was edited 2026-08-17 to align the
   envelope icon and email text with the other contact rows (cache-buster
   `?v=aligned-20260817`).
