@@ -132,6 +132,8 @@ export default function SessionNewPage() {
     providerName: "",
     supervised: false,
     supervisorId: "",
+    supervisionTimeIn: "",
+    supervisionTimeOut: "",
   });
 
   useEffect(() => {
@@ -255,6 +257,8 @@ export default function SessionNewPage() {
       /** A BCBA supervised this session, and who — a direct-supervision note
        *  can only be generated from a session carrying this. */
       supervised?: boolean; supervisorId?: string;
+      /** When the BCBA was actually present (ISO) — empty means the whole session. */
+      supervisionStartedAt?: string; supervisionEndedAt?: string;
     },
     opts?: { force?: boolean },
   ) => {
@@ -305,6 +309,8 @@ export default function SessionNewPage() {
           ...(setup?.providerId ? { providerId: setup.providerId } : {}),
           supervised: setup?.supervised === true,
           ...(setup?.supervised && setup?.supervisorId ? { supervisorId: setup.supervisorId } : {}),
+          ...(setup?.supervised && setup?.supervisionStartedAt ? { supervisionStartedAt: setup.supervisionStartedAt } : {}),
+          ...(setup?.supervised && setup?.supervisionEndedAt   ? { supervisionEndedAt:   setup.supervisionEndedAt }   : {}),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -325,6 +331,8 @@ export default function SessionNewPage() {
           providerId: setup?.providerId,
           supervised: setup?.supervised,
           supervisorId: setup?.supervisorId,
+          supervisionStartedAt: setup?.supervisionStartedAt,
+          supervisionEndedAt: setup?.supervisionEndedAt,
         }).catch(() => {});
         toast.info("Working offline — session saved locally", { duration: 3000 });
       }
@@ -338,6 +346,8 @@ export default function SessionNewPage() {
         providerId: setup?.providerId,
         supervised: setup?.supervised,
         supervisorId: setup?.supervisorId,
+        supervisionStartedAt: setup?.supervisionStartedAt,
+        supervisionEndedAt: setup?.supervisionEndedAt,
       }).catch(() => {});
       toast.info("Offline mode — trials saved locally", { duration: 3000 });
     }
@@ -360,12 +370,24 @@ export default function SessionNewPage() {
       toast.error("Time Out must be after Time In.");
       return;
     }
+    // Optional supervision window — a DSU note bills exactly this.
+    const supervisionStartedAt = setupForm.supervised && setupForm.supervisionTimeIn
+      ? new Date(`${setupForm.sessionDate}T${setupForm.supervisionTimeIn}:00`).toISOString() : undefined;
+    const supervisionEndedAt = setupForm.supervised && setupForm.supervisionTimeOut
+      ? new Date(`${setupForm.sessionDate}T${setupForm.supervisionTimeOut}:00`).toISOString() : undefined;
+    if (supervisionStartedAt && supervisionEndedAt &&
+        new Date(supervisionEndedAt).getTime() <= new Date(supervisionStartedAt).getTime()) {
+      toast.error("Supervision Time Out must be after Supervision Time In.");
+      return;
+    }
     void createSession({
       startedAt,
       endedAt,
       providerId: setupForm.providerId || undefined,
       supervised: setupForm.supervised,
       supervisorId: setupForm.supervised ? (setupForm.supervisorId || undefined) : undefined,
+      supervisionStartedAt,
+      supervisionEndedAt,
     });
   }, [createSession, setupForm]);
 
@@ -735,6 +757,31 @@ export default function SessionNewPage() {
                     </option>
                   ))}
                 </select>
+              )}
+              {setupForm.supervised && (
+                <div className="mt-2.5 grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] text-zinc-500 mb-1">Supervision Time In</label>
+                      <input
+                        type="time"
+                        value={setupForm.supervisionTimeIn}
+                        onChange={(e) => setSetupForm((f) => ({ ...f, supervisionTimeIn: e.target.value }))}
+                        className="w-full rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] px-3 py-2 text-sm text-[var(--foreground)]"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-zinc-500 mb-1">Supervision Time Out</label>
+                      <input
+                        type="time"
+                        value={setupForm.supervisionTimeOut}
+                        onChange={(e) => setSetupForm((f) => ({ ...f, supervisionTimeOut: e.target.value }))}
+                        className="w-full rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] px-3 py-2 text-sm text-[var(--foreground)]"
+                      />
+                    </div>
+                    <p className="col-span-2 text-[11px] text-zinc-500">
+                      Leave empty if the BCBA was present for the whole session.
+                    </p>
+                  </div>
               )}
               <p className="mt-2 text-[11px] text-zinc-500">
                 Only sessions marked here can be written up as a BCBA direct-supervision note.

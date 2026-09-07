@@ -9,6 +9,7 @@ import {
 } from "@/lib/sessionNoteData";
 import {
   generateBcbaNote,
+  supervisionSpan,
   type ObservedSession,
   type ProgramSnapshot,
 } from "@/lib/bcbaNoteGenerators";
@@ -105,6 +106,8 @@ export async function POST(req: Request, { params }: Params) {
       providerRole: s.user?.displayRole ?? (s.user?.role === "RBT" ? "BT/RBT" : s.user?.role ?? null),
       supervised:     s.supervised,
       supervisorName: s.supervisor?.name ?? null,
+      supervisionStartedAt: s.supervisionStartedAt,
+      supervisionEndedAt:   s.supervisionEndedAt,
       targets:        summarizeSessionTargets(s),
       behaviors:      s.behaviors,
     }));
@@ -132,6 +135,10 @@ export async function POST(req: Request, { params }: Params) {
         id:           s.id,
         startedAt:    s.startedAt,
         endedAt:      s.endedAt,
+        /* What a supervision note's Time In / Time Out should be: the recorded
+           supervision window when there is one, else the session window. */
+        billedStartedAt: supervisionSpan(s).startedAt,
+        billedEndedAt:   supervisionSpan(s).endedAt,
         mode:         s.mode,
         providerName: s.providerName,
         trialCount:   s.targets.reduce((sum, t) => sum + t.trialCount, 0),

@@ -10,7 +10,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { usePermissions } from "@/hooks/usePermissions";
-import { formatSessionHours } from "@/lib/formatDuration";
+import { formatSessionHours, formatClockRange12h } from "@/lib/formatDuration";
 
 /* ─── Types ────────────────────────────────────────────────────────────────── */
 
@@ -90,6 +90,9 @@ type SessionDetail = {
   supervised?: boolean;
   supervisorId?: string | null;
   supervisorName?: string | null;
+  /** When the BCBA was actually present — null means the whole session. */
+  supervisionStartedAt?: string | null;
+  supervisionEndedAt?: string | null;
   trialCount: number;
   trials: TrialRecord[];
   sessionTargets: SessionTargetSummary[];
@@ -305,7 +308,7 @@ export function SessionSnapshotDrawer({
   const [savingSession, setSavingSession]   = useState(false);
   const [sessForm, setSessForm] = useState({
     date: "", timeIn: "", timeOut: "", providerId: "",
-    supervised: false, supervisorId: "",
+    supervised: false, supervisorId: "", supTimeIn: "", supTimeOut: "",
   });
 
   // Adding a goal that was worked on without trial data
@@ -617,6 +620,8 @@ export function SessionSnapshotDrawer({
       providerId: data.user?.id ?? data.userId ?? "",
       supervised:   data.supervised === true,
       supervisorId: data.supervisorId ?? "",
+      supTimeIn:    toTimeInputValue(data.supervisionStartedAt ?? null),
+      supTimeOut:   toTimeInputValue(data.supervisionEndedAt ?? null),
     });
     setEditingSession(true);
   }
@@ -641,6 +646,13 @@ export function SessionSnapshotDrawer({
       toast.error("Time out must be after time in.");
       return;
     }
+    // Optional supervision window — a DSU note bills exactly this.
+    const supStart = sessForm.supervised ? combineToIso(sessForm.date, sessForm.supTimeIn)  : null;
+    const supEnd   = sessForm.supervised ? combineToIso(sessForm.date, sessForm.supTimeOut) : null;
+    if (supStart && supEnd && new Date(supEnd).getTime() <= new Date(supStart).getTime()) {
+      toast.error("Supervision time out must be after supervision time in.");
+      return;
+    }
 
     setSavingSession(true);
     try {
@@ -655,6 +667,8 @@ export function SessionSnapshotDrawer({
           // not flagged at entry becomes eligible for a DSU note.
           supervised:   sessForm.supervised,
           supervisorId: sessForm.supervised ? (sessForm.supervisorId || null) : null,
+          supervisionStartedAt: supStart,
+          supervisionEndedAt:   supEnd,
         }),
       });
       if (!res.ok) {
@@ -858,6 +872,31 @@ export function SessionSnapshotDrawer({
                                 ))}
                               </select>
                             )}
+                            {sessForm.supervised && (
+                              <div className="mt-2 grid grid-cols-2 gap-2">
+                                <div>
+                                  <label className="mb-1 block text-[11px] text-zinc-400">Supervision Time In</label>
+                                  <input
+                                    type="time"
+                                    value={sessForm.supTimeIn}
+                                    onChange={(e) => setSessForm((f) => ({ ...f, supTimeIn: e.target.value }))}
+                                    className="field-input w-full text-sm"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="mb-1 block text-[11px] text-zinc-400">Supervision Time Out</label>
+                                  <input
+                                    type="time"
+                                    value={sessForm.supTimeOut}
+                                    onChange={(e) => setSessForm((f) => ({ ...f, supTimeOut: e.target.value }))}
+                                    className="field-input w-full text-sm"
+                                  />
+                                </div>
+                                <p className="col-span-2 text-[11px] text-zinc-500">
+                                  Leave empty if the BCBA was present for the whole session.
+                                </p>
+                              </div>
+                            )}
                             <p className="mt-1.5 text-[11px] text-zinc-500">
                               Direct-supervision notes are generated only from sessions marked here.
                             </p>
@@ -904,7 +943,14 @@ export function SessionSnapshotDrawer({
                       {
                         label: "Supervision",
                         value: data.supervised
-                          ? (data.supervisorName ? `Supervised by ${data.supervisorName}` : "Supervised")
+                          ? `${data.supervisorName ? `Supervised by ${data.supervisorName}` : "Supervised"}${
+                              data.supervisionStartedAt
+                                ? ` · ${formatClockRange12h(
+                                    toTimeInputValue(data.supervisionStartedAt),
+                                    toTimeInputValue(data.supervisionEndedAt ?? null),
+                                  )}`
+                                : ""
+                            }`
                           : "Not supervised",
                       },
                     ].map((item) => (

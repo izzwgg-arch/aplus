@@ -74,6 +74,8 @@ export async function GET(req: Request) {
         notes: true,
         supervised: true,
         supervisorId: true,
+        supervisionStartedAt: true,
+        supervisionEndedAt: true,
         user: { select: { id: true, name: true, displayRole: true, role: true } },
         supervisor: { select: { id: true, name: true } },
         trials: {
@@ -110,6 +112,8 @@ export async function GET(req: Request) {
         supervised: s.supervised,
         supervisorId: s.supervisorId,
         supervisorName: s.supervisor?.name ?? null,
+        supervisionStartedAt: s.supervisionStartedAt,
+        supervisionEndedAt: s.supervisionEndedAt,
         noteCount: s.sessionNotes.length,
         noteGeneratedAt: latestNote?.createdAt ?? null,
         noteIsGenerated: latestNote ? latestNote.isGenerated : null,
@@ -124,6 +128,25 @@ export async function GET(req: Request) {
   }
 }
 
+/**
+ * Validates an optional supervision window. Returns the prisma data fragment,
+ * `null` when neither end was given (whole session), or "invalid" when the end
+ * is not after the start — a negative window must never be stored, it would
+ * bill as nothing and render as "—".
+ */
+export function supervisionWindow(
+  start: string | null | undefined,
+  end: string | null | undefined,
+): { supervisionStartedAt: Date | null; supervisionEndedAt: Date | null } | null | "invalid" {
+  const s = start ? new Date(start) : null;
+  const e = end ? new Date(end) : null;
+  if (s && Number.isNaN(s.getTime())) return "invalid";
+  if (e && Number.isNaN(e.getTime())) return "invalid";
+  if (!s && !e) return null;
+  if (s && e && e.getTime() <= s.getTime()) return "invalid";
+  return { supervisionStartedAt: s, supervisionEndedAt: e };
+}
+
 export async function POST(req: Request) {
   const user = await requireSession();
   if (!user) {
@@ -135,7 +158,10 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-    const { clientId, mode, startedAt, endedAt, providerId, supervised, supervisorId } = body as {
+    const {
+      clientId, mode, startedAt, endedAt, providerId,
+      supervised, supervisorId, supervisionStartedAt, supervisionEndedAt,
+    } = body as {
       clientId?: string;
       mode?: string;
       startedAt?: string;
@@ -143,7 +169,13 @@ export async function POST(req: Request) {
       providerId?: string;
       supervised?: boolean;
       supervisorId?: string | null;
+      /** When the BCBA was actually present — optional, ISO instants. */
+      supervisionStartedAt?: string | null;
+      supervisionEndedAt?: string | null;
     };
+    const window = supervised === true ? supervisionWindow(supervisionStartedAt, supervisionEndedAt) : null;
+    if (window === "invalid")
+      return NextResponse.json({ error: "Supervision end must be after supervision start" }, { status: 400 });
     if (!clientId) {
       return NextResponse.json({ error: "clientId required" }, { status: 400 });
     }
@@ -160,6 +192,7 @@ export async function POST(req: Request) {
         // be written up as direct supervision.
         supervised: supervised === true,
         ...(supervised === true && supervisorId ? { supervisorId } : {}),
+        ...(window ? window : {}),
       },
     });
     return NextResponse.json({ id: sessionRecord.id });

@@ -1,15 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X, Save, FileText, User, Calendar, Clock, CheckCircle,
-  ChevronDown, Sparkles, Trash2, Printer, Wand2, AlertCircle,
+  ChevronDown, Sparkles, Trash2, Printer, Wand2, AlertCircle, Eye,
 } from "lucide-react";
 import { toast } from "sonner";
 import { printSessionNotes, type PrintableNote } from "@/lib/printNotes";
 import { NOTE_TYPES, BCBA_SERVICE_TYPES, bcbaServiceLabel } from "@/lib/noteTypes";
+import { formatClockRange12h } from "@/lib/formatDuration";
 import { TimeInput12h } from "@/components/common/TimeInput12h";
 
 /* ── Types ─────────────────────────────────────────────────────────────────── */
@@ -84,12 +85,37 @@ type GeneratedNoteResponse = {
     id:           string;
     startedAt:    string;
     endedAt:      string | null;
+    /** The window a supervision note bills: recorded supervision time when
+     *  the session carries one, otherwise the session window. */
+    billedStartedAt: string;
+    billedEndedAt:   string | null;
     mode:         string;
     providerName: string;
     trialCount:   number;
     targetCount:  number;
   }>;
 };
+
+/** A session of this client on the note's service date, as `GET /api/sessions` lists it. */
+type SessionOnDate = {
+  id:                   string;
+  startedAt:            string;
+  endedAt:              string | null;
+  therapistName:        string | null;
+  trialCount:           number;
+  supervised?:          boolean;
+  supervisorId?:        string | null;
+  supervisionStartedAt?: string | null;
+  supervisionEndedAt?:   string | null;
+};
+
+/** "YYYY-MM-DD" + "HH:MM" in the BROWSER's clock → ISO instant, or null. */
+function combineToIso(dateStr: string, timeStr: string): string | null {
+  if (!dateStr || !timeStr) return null;
+  const dt = new Date(`${dateStr}T${timeStr}:00`);
+  if (Number.isNaN(dt.getTime())) return null;
+  return dt.toISOString();
+}
 
 /** Local "HH:MM" for a timestamp — converted in the BROWSER, which sits in the
  *  clinic's timezone; the server's does not. */
@@ -215,7 +241,15 @@ function ProviderSelect({
  * finds that therapist's session on the service date, which is what the note is
  * generated from. "Any therapist" folds in every session on the date.
  */
-function BtSelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+function BtSelect({
+  value,
+  onChange,
+  placeholder = "Any therapist on this date",
+}: {
+  value:        string;
+  onChange:     (value: string) => void;
+  placeholder?: string;
+}) {
   const { data: providers = [] } = useQuery<ProviderOption[]>({
     queryKey: ["providers-dropdown"],
     queryFn: async () => {
@@ -233,7 +267,7 @@ function BtSelect({ value, onChange }: { value: string; onChange: (value: string
         onChange={(e) => onChange(e.target.value)}
         className="field-input w-full text-sm appearance-none pr-8"
       >
-        <option value="">Any therapist on this date</option>
+        <option value="">{placeholder}</option>
         {providers.filter((p) => !!p.name).map((p) => (
           <option key={p.id} value={p.id}>
             {p.name}
@@ -279,6 +313,14 @@ export function NoteEditorModal({
      is ABOUT that therapist's session, so it drives what gets generated. */
   const [btUserId,        setBtUserId]        = useState(note?.session?.user?.id ?? "");
   const [linkedSessionId, setLinkedSessionId] = useState<string | null>(note?.sessionId ?? null);
+  /* Supervision recorded FROM a BT session note onto its session — the DSU
+     note is generated from exactly this. */
+  const [supervised,      setSupervised]      = useState(false);
+  const [supervisorId,    setSupervisorId]    = useState("");
+  const [supTimeIn,       setSupTimeIn]       = useState("");
+  const [supTimeOut,      setSupTimeOut]      = useState("");
+  const [supPrefilledFor, setSupPrefilledFor] = useState<string | null>(null);
+  const qc = useQueryClient();
   const [generating,      setGenerating]      = useState(false);
   const [genInfo,         setGenInfo]         = useState<string | null>(null);
   const [genWarning,      setGenWarning]      = useState<string | null>(null);
@@ -305,6 +347,66 @@ export function NoteEditorModal({
     else if (type === "BCBA")   setTitle(`${bcbaServiceLabel(bcbaServiceType)} Note${suffix}`);
     else                        setTitle("");
   }, [type, bcbaServiceType, serviceDate, titleTouched]);
+
+  /* The client's sessions on this service date — what a BT note is linked to
+     and where its supervision is recorded. */
+  const { data: sessionsOnDate = [] } = useQuery<SessionOnDate[]>({
+    queryKey: ["sessions-on-date", clientId, serviceDate],
+    queryFn: async () => {
+      const params = new URLSearchParams({ clientId, from: serviceDate, to: serviceDate, limit: "50" });
+      const res = await fetch(`/smart-steps/api/sessions?${params}`);
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: type === "BT_SESSION" && !!serviceDate,
+    staleTime: 0,
+  });
+
+  /* Auto-link a BT note to the only session on its date, and pull that
+     session's current supervision into the form once per linked session. */
+  useEffect(() => {
+    if (type !== "BT_SESSION") return;
+    if (!linkedSessionId && sessionsOnDate.length === 1) {
+      setLinkedSessionId(sessionsOnDate[0].id);
+      return;
+    }
+    if (!linkedSessionId || supPrefilledFor === linkedSessionId) return;
+    const row = sessionsOnDate.find((x) => x.id === linkedSessionId);
+    if (!row) return;
+    setSupervised(row.supervised === true);
+    setSupervisorId(row.supervisorId ?? "");
+    setSupTimeIn(row.supervisionStartedAt ? toClockString(row.supervisionStartedAt) : "");
+    setSupTimeOut(row.supervisionEndedAt ? toClockString(row.supervisionEndedAt) : "");
+    setSupPrefilledFor(linkedSessionId);
+  }, [type, linkedSessionId, sessionsOnDate, supPrefilledFor]);
+
+  /**
+   * Writes the supervision recorded on a BT note onto its session. This is the
+   * record a Direct Supervision note is generated from, so it lives on the
+   * session, not on the note.
+   */
+  async function saveSupervisionToSession(): Promise<boolean> {
+    if (type !== "BT_SESSION" || !linkedSessionId || supPrefilledFor !== linkedSessionId) return true;
+    const startIso = supervised && supTimeIn  ? combineToIso(serviceDate, supTimeIn)  : null;
+    const endIso   = supervised && supTimeOut ? combineToIso(serviceDate, supTimeOut) : null;
+    const res = await fetch(`/smart-steps/api/sessions/${linkedSessionId}`, {
+      method:  "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        supervised,
+        supervisorId:         supervised ? (supervisorId || null) : null,
+        supervisionStartedAt: startIso,
+        supervisionEndedAt:   endIso,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({})) as { error?: string };
+      throw new Error(err.error ?? "Failed to update supervision on the session");
+    }
+    qc.invalidateQueries({ queryKey: ["sessions", clientId] });
+    qc.invalidateQueries({ queryKey: ["sessions-on-date", clientId] });
+    return true;
+  }
 
   /**
    * Builds the narrative from the DATA behind this service: the selected BT's
@@ -347,8 +449,12 @@ export function NoteEditorModal({
          times from it when the BCBA has not entered their own. */
       const only = data.sessions?.length === 1 ? data.sessions[0] : null;
       if (only) {
-        if (!timeIn  && only.startedAt) setTimeIn(toClockString(only.startedAt));
-        if (!timeOut && only.endedAt)   setTimeOut(toClockString(only.endedAt));
+        /* A supervision note bills the recorded supervision window when the
+           session has one, not the whole session. */
+        const start = only.billedStartedAt ?? only.startedAt;
+        const end   = only.billedEndedAt   ?? only.endedAt;
+        if (!timeIn  && start) setTimeIn(toClockString(start));
+        if (!timeOut && end)   setTimeOut(toClockString(end));
       }
 
       if (!data.sessions || data.sessions.length === 0) {
@@ -399,6 +505,10 @@ export function NoteEditorModal({
 
   async function handleSave() {
     if (!content.trim()) { toast.error("Note content is required."); return; }
+    if (type === "BT_SESSION" && supervised && supTimeIn && supTimeOut && supTimeOut <= supTimeIn) {
+      toast.error("Supervision end must be after supervision start.");
+      return;
+    }
     setSaving(true);
     try {
       const payload = {
@@ -440,6 +550,14 @@ export function NoteEditorModal({
       }
 
       const saved = await res.json() as NoteRecord;
+      try {
+        await saveSupervisionToSession();
+      } catch (e) {
+        /* The note itself is saved — say exactly what did not happen. */
+        toast.error(`Note saved, but supervision was not updated on the session: ${String(e)}`);
+        onSaved(saved);
+        return;
+      }
       toast.success(isEdit ? "Note updated." : "Note saved.");
       onSaved(saved);
     } catch (e) {
@@ -711,6 +829,83 @@ export function NoteEditorModal({
                       <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500" />
                     </div>
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* Supervision recorded on the BT session this note is for */}
+            {isBt && (
+              <div className="glass-card rounded-2xl p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400 mb-1 flex items-center gap-1.5">
+                  <Eye className="h-3.5 w-3.5 text-[var(--accent-purple)]" /> Supervision
+                </p>
+                <p className="text-[11px] text-zinc-500 mb-3">
+                  Whether a BCBA supervised this session and when. A Direct Supervision note is
+                  generated from exactly this, so it is saved on the session itself.
+                </p>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs text-zinc-500 mb-1">Session this note is for</label>
+                    <div className="relative">
+                      <select
+                        value={linkedSessionId ?? ""}
+                        onChange={(e) => { setLinkedSessionId(e.target.value || null); setSupPrefilledFor(null); }}
+                        className="field-input w-full text-sm appearance-none pr-8"
+                      >
+                        <option value="">
+                          {sessionsOnDate.length === 0 ? "No sessions on this date" : "Select the session…"}
+                        </option>
+                        {sessionsOnDate.map((sess) => (
+                          <option key={sess.id} value={sess.id}>
+                            {formatClockRange12h(toClockString(sess.startedAt), sess.endedAt ? toClockString(sess.endedAt) : null)}
+                            {sess.therapistName ? ` · ${sess.therapistName}` : ""}
+                            {` · ${sess.trialCount} trial${sess.trialCount !== 1 ? "s" : ""}`}
+                            {sess.supervised ? " · supervised" : ""}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500" />
+                    </div>
+                  </div>
+
+                  <label className={`sm:col-span-2 flex items-center gap-2.5 ${linkedSessionId ? "cursor-pointer" : "opacity-50"}`}>
+                    <input
+                      type="checkbox"
+                      checked={supervised}
+                      disabled={!linkedSessionId}
+                      onChange={(e) => {
+                        setSupervised(e.target.checked);
+                        if (!e.target.checked) { setSupervisorId(""); setSupTimeIn(""); setSupTimeOut(""); }
+                      }}
+                      className="h-4 w-4 rounded border-[var(--glass-border)] accent-[var(--accent-purple)]"
+                    />
+                    <span className="text-sm font-medium text-[var(--foreground)]">A BCBA supervised this session</span>
+                  </label>
+
+                  {supervised && linkedSessionId && (
+                    <>
+                      <div className="sm:col-span-2">
+                        <label className="block text-xs text-zinc-500 mb-1">Supervising BCBA</label>
+                        <BtSelect value={supervisorId} onChange={setSupervisorId} placeholder="Supervising BCBA (optional)" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-zinc-500 mb-1 flex items-center gap-1">
+                          <Clock className="h-3 w-3" /> Supervision Time In
+                        </label>
+                        <TimeInput12h value={supTimeIn} onChange={setSupTimeIn} ariaLabel="Supervision time in" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-zinc-500 mb-1 flex items-center gap-1">
+                          <Clock className="h-3 w-3" /> Supervision Time Out
+                        </label>
+                        <TimeInput12h value={supTimeOut} onChange={setSupTimeOut} ariaLabel="Supervision time out" />
+                      </div>
+                      <p className="sm:col-span-2 text-[11px] text-zinc-500">
+                        Leave the times empty if the BCBA was present for the whole session.
+                      </p>
+                    </>
+                  )}
                 </div>
               </div>
             )}

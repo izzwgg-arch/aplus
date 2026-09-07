@@ -53,6 +53,9 @@ interface SessionSetup {
    *  only be generated from a session carrying this. */
   supervised?: boolean;
   supervisorId?: string;
+  /** When the BCBA was actually present (ISO) — empty means the whole session. */
+  supervisionStartedAt?: string;
+  supervisionEndedAt?: string;
 }
 
 interface ProviderOption {
@@ -424,6 +427,8 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
     providerName: "",
     supervised: false,
     supervisorId: "",
+    supervisionTimeIn: "",
+    supervisionTimeOut: "",
   });
 
   /* Set default provider once auth loads */
@@ -739,6 +744,8 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
           ...(setup?.providerId ? { providerId: setup.providerId } : {}),
           supervised: setup?.supervised === true,
           ...(setup?.supervised && setup?.supervisorId ? { supervisorId: setup.supervisorId } : {}),
+          ...(setup?.supervised && setup?.supervisionStartedAt ? { supervisionStartedAt: setup.supervisionStartedAt } : {}),
+          ...(setup?.supervised && setup?.supervisionEndedAt   ? { supervisionEndedAt:   setup.supervisionEndedAt }   : {}),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -751,12 +758,12 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
         // recorded against `lid` below would reference a session id that
         // never exists server-side and could never sync, no matter how
         // many times it's retried (see queueSession() for full context).
-        queueSession({ localId: lid, clientId, startedAt: new Date(setup?.startedAt ?? Date.now()).toISOString(), endedAt: setup?.endedAt, providerId: setup?.providerId, mode: setup?.mode ?? "DTT", supervised: setup?.supervised, supervisorId: setup?.supervisorId }).catch(() => {});
+        queueSession({ localId: lid, clientId, startedAt: new Date(setup?.startedAt ?? Date.now()).toISOString(), endedAt: setup?.endedAt, providerId: setup?.providerId, mode: setup?.mode ?? "DTT", supervised: setup?.supervised, supervisorId: setup?.supervisorId, supervisionStartedAt: setup?.supervisionStartedAt, supervisionEndedAt: setup?.supervisionEndedAt }).catch(() => {});
         toast.info("Working offline — data saved locally", { duration: 3000 });
       }
     } catch {
       setSessionId(lid);
-      queueSession({ localId: lid, clientId, startedAt: new Date(setup?.startedAt ?? Date.now()).toISOString(), endedAt: setup?.endedAt, providerId: setup?.providerId, mode: setup?.mode ?? "DTT", supervised: setup?.supervised, supervisorId: setup?.supervisorId }).catch(() => {});
+      queueSession({ localId: lid, clientId, startedAt: new Date(setup?.startedAt ?? Date.now()).toISOString(), endedAt: setup?.endedAt, providerId: setup?.providerId, mode: setup?.mode ?? "DTT", supervised: setup?.supervised, supervisorId: setup?.supervisorId, supervisionStartedAt: setup?.supervisionStartedAt, supervisionEndedAt: setup?.supervisionEndedAt }).catch(() => {});
       toast.info("Offline mode — data saved locally", { duration: 3000 });
     }
   }, [clientId, storeSetServerId]);
@@ -861,6 +868,8 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
               ...(setup?.providerId ? { providerId: setup.providerId } : {}),
               supervised: setup?.supervised === true,
               ...(setup?.supervised && setup?.supervisorId ? { supervisorId: setup.supervisorId } : {}),
+              ...(setup?.supervised && setup?.supervisionStartedAt ? { supervisionStartedAt: setup.supervisionStartedAt } : {}),
+              ...(setup?.supervised && setup?.supervisionEndedAt   ? { supervisionEndedAt:   setup.supervisionEndedAt }   : {}),
               ...(setup?.mode       ? { mode:       setup.mode       } : {}),
               endedAt,
             }),
@@ -1019,6 +1028,8 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
       // Supervision is per-session — never carried over to the next one.
       supervised: false,
       supervisorId: "",
+      supervisionTimeIn: "",
+      supervisionTimeOut: "",
     });
     setView("history");
     refetchSessions();
@@ -1069,6 +1080,16 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
         toast.error("Time Out must be after Time In.");
         return;
       }
+      // Optional supervision window — a DSU note bills exactly this.
+      const supervisionStartedAt = setupForm.supervised && setupForm.supervisionTimeIn
+        ? new Date(`${setupForm.sessionDate}T${setupForm.supervisionTimeIn}:00`).toISOString() : null;
+      const supervisionEndedAt = setupForm.supervised && setupForm.supervisionTimeOut
+        ? new Date(`${setupForm.sessionDate}T${setupForm.supervisionTimeOut}:00`).toISOString() : null;
+      if (supervisionStartedAt && supervisionEndedAt &&
+          new Date(supervisionEndedAt).getTime() <= new Date(supervisionStartedAt).getTime()) {
+        toast.error("Supervision Time Out must be after Supervision Time In.");
+        return;
+      }
       await startSession({
         startedAt: new Date(startedAt).toISOString(),
         endedAt:   new Date(endedAt).toISOString(),
@@ -1076,6 +1097,8 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
         mode: setupForm.mode,
         supervised: setupForm.supervised,
         supervisorId: setupForm.supervised ? (setupForm.supervisorId || undefined) : undefined,
+        supervisionStartedAt: supervisionStartedAt ?? undefined,
+        supervisionEndedAt:   supervisionEndedAt   ?? undefined,
       });
     };
 
@@ -1210,6 +1233,31 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
                 </select>
                 <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
               </div>
+            )}
+            {setupForm.supervised && (
+                <div className="mt-2.5 grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] text-zinc-500 mb-1">Supervision Time In</label>
+                    <input
+                      type="time"
+                      value={setupForm.supervisionTimeIn}
+                      onChange={(e) => setSetupForm((f) => ({ ...f, supervisionTimeIn: e.target.value }))}
+                      className="w-full rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] px-3 py-2 text-sm text-[var(--foreground)]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-zinc-500 mb-1">Supervision Time Out</label>
+                    <input
+                      type="time"
+                      value={setupForm.supervisionTimeOut}
+                      onChange={(e) => setSetupForm((f) => ({ ...f, supervisionTimeOut: e.target.value }))}
+                      className="w-full rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] px-3 py-2 text-sm text-[var(--foreground)]"
+                    />
+                  </div>
+                  <p className="col-span-2 text-[11px] text-zinc-500">
+                    Leave empty if the BCBA was present for the whole session.
+                  </p>
+                </div>
             )}
             <p className="mt-2 text-[11px] text-zinc-500">
               Only sessions marked here can be written up as a BCBA direct-supervision note.

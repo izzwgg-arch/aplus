@@ -311,6 +311,10 @@ model Session {
   /// ONLY from sessions carrying this flag.
   supervised         Boolean             @default(false)
   supervisorId       String?
+  /// When the BCBA was actually present. Optional — empty means the whole
+  /// session window. A direct-supervision note bills THIS window.
+  supervisionStartedAt DateTime?
+  supervisionEndedAt   DateTime?
   deletedAt          DateTime?
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt

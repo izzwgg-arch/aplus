@@ -28,6 +28,9 @@ export type ObservedSession = {
   supervised:    boolean;
   /** The supervising BCBA on record, when one was named. */
   supervisorName: string | null;
+  /** When the BCBA was actually present. Null = the whole session window. */
+  supervisionStartedAt: Date | null;
+  supervisionEndedAt:   Date | null;
   targets:       SessionTargetSummary[];
   behaviors:     BehaviorRecord[];
 };
@@ -104,6 +107,22 @@ function fmtWindow(s: ObservedSession, tz: number): string {
   const hoursText = `${hours.toFixed(2).replace(/\.?0+$/, "")} ${hours === 1 ? "hr" : "hrs"}`;
   const plausible = minutes > 0 && minutes <= 8 * 60;
   return `${start} – ${fmtTime(s.endedAt, tz)}${plausible ? ` (${hoursText})` : ""}`;
+}
+
+/**
+ * The window a supervision note bills: the recorded supervision times when the
+ * session carries them, otherwise the whole session. Returned as a pseudo
+ * session so `fmtWindow` renders it identically.
+ */
+export function supervisionSpan(s: ObservedSession): { startedAt: Date; endedAt: Date | null } {
+  if (s.supervisionStartedAt) {
+    return { startedAt: s.supervisionStartedAt, endedAt: s.supervisionEndedAt ?? s.endedAt };
+  }
+  return { startedAt: s.startedAt, endedAt: s.endedAt };
+}
+
+function fmtSpan(span: { startedAt: Date; endedAt: Date | null }, tz: number): string {
+  return fmtWindow({ startedAt: span.startedAt, endedAt: span.endedAt } as ObservedSession, tz);
 }
 
 function modeLabel(mode: string): string {
@@ -247,10 +266,16 @@ function generateSupervision(input: GenerateInput): GeneratedNote {
       `On ${dateStr}, ${supervisorText} conducted direct supervision (DSU) of ABA therapy services delivered to ${clientName} by ` +
       `${therapists.join(" and ")}${sessions[0].providerRole ? `, ${sessions[0].providerRole}` : ""}.`
     );
+    /* The billed window is the recorded supervision time when there is one;
+       the session's own window is still named so the reader sees both. */
+    const first = sessions[0];
+    const partial = first.supervisionStartedAt !== null;
     summary.push(
       sessions.length === 1
-        ? `Supervision covered the ${fmtWindow(sessions[0], tz)} ${modeLabel(sessions[0].mode)} session.`
-        : `Supervision covered ${sessions.length} sessions: ${sessions.map((s) => fmtWindow(s, tz)).join("; ")}.`
+        ? (partial
+            ? `Supervision was provided ${fmtSpan(supervisionSpan(first), tz)} during the ${fmtWindow(first, tz)} ${modeLabel(first.mode)} session.`
+            : `Supervision covered the ${fmtWindow(first, tz)} ${modeLabel(first.mode)} session.`)
+        : `Supervision covered ${sessions.length} sessions: ${sessions.map((s) => fmtSpan(supervisionSpan(s), tz)).join("; ")}.`
     );
     summary.push(
       trials > 0
@@ -267,7 +292,8 @@ function generateSupervision(input: GenerateInput): GeneratedNote {
     return `  • ${s.providerName}${s.providerRole ? ` (${s.providerRole})` : ""} — ${fmtWindow(s, tz)}, ${modeLabel(s.mode)}; ` +
       `${totalTrials(s.targets)} trial${totalTrials(s.targets) !== 1 ? "s" : ""} across ${st.length} target${st.length !== 1 ? "s" : ""}` +
       `${overallPct(s.targets) !== null ? `, ${overallPct(s.targets)}% accuracy` : ""}` +
-      `${s.supervisorName ? `; supervised by ${s.supervisorName}` : ""}.`;
+      `${s.supervisorName ? `; supervised by ${s.supervisorName}` : ""}` +
+      `${s.supervisionStartedAt ? ` (supervision ${fmtSpan(supervisionSpan(s), tz)})` : ""}.`;
   });
 
   const feedback: string[] = [];

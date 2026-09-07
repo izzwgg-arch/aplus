@@ -9,7 +9,13 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { usePermissions } from "@/hooks/usePermissions";
-import { formatSessionHours } from "@/lib/formatDuration";
+import { formatSessionHours, formatClockRange12h } from "@/lib/formatDuration";
+
+/** Local "HH:MM" for a timestamp — converted in the browser, which sits in the clinic's timezone. */
+function toClock(iso: string): string {
+  const d = new Date(iso);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
 
 /* ── Types ───────────────────────────────────────────────────────────────── */
 
@@ -37,6 +43,8 @@ export type SessionListItem = {
    *  direct-supervision (DSU) note. */
   supervised?: boolean;
   supervisorName?: string | null;
+  supervisionStartedAt?: string | null;
+  supervisionEndedAt?: string | null;
 };
 
 type ProviderOption = { id: string; name: string | null; role: string; displayRole?: string | null };
@@ -402,7 +410,11 @@ export function SessionsTab({
                     )}
                     {s.supervised && (
                       <span
-                        title={s.supervisorName ? `Supervised by ${s.supervisorName}` : "A BCBA supervised this session"}
+                        title={`${s.supervisorName ? `Supervised by ${s.supervisorName}` : "A BCBA supervised this session"}${
+                          s.supervisionStartedAt
+                            ? ` · ${formatClockRange12h(toClock(s.supervisionStartedAt), s.supervisionEndedAt ? toClock(s.supervisionEndedAt) : null)}`
+                            : ""
+                        }`}
                         className="inline-flex items-center gap-1 rounded-full bg-[var(--accent-purple)]/10 px-2 py-0.5 text-[11px] font-semibold text-[var(--accent-purple)]"
                       >
                         <Eye className="h-3 w-3" /> Supervised

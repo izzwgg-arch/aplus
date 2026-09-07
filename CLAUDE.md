@@ -956,6 +956,43 @@ BCBA observed a session that was never observed is a false clinical record.
   session as supervised on the Sessions tab and generate again — the fix is on
   the session, not in the note.
 
+## Tracker supervision has a TIME WINDOW, recorded from the BT note too (2026-09-07)
+
+A BCBA is often present for only part of a BT session. The DSU note bills the
+supervision that actually happened, so the session now records WHEN the BCBA
+was there, and the BT writing up the session can record it without leaving
+their note.
+
+- **`Session.supervisionStartedAt` / `Session.supervisionEndedAt`** (migration
+  `20260907000000_session_supervision_window`), both optional. NULL means the
+  BCBA was present for the whole session, so nothing already marked supervised
+  changed meaning. `supervisionWindow()` in `src/app/api/sessions/route.ts`
+  validates a window (end must be after start; a negative span is refused, not
+  stored) and is shared by `POST` and `PATCH /api/sessions/[sessionId]`. On
+  PATCH, `supervised: false` clears the window along with the supervisor; the
+  offline queue and `/api/sync` carry the two fields like the flag.
+- **Three places to enter it**, all alongside the "A BCBA supervised this
+  session" checkbox: both session setup forms, the Session Snapshot edit panel,
+  and — new — a **Supervision card on the BT session note** in
+  `NoteEditorModal`. A BT note shows the client's sessions on its service date
+  (`GET /api/sessions?clientId&from&to`), auto-links to the only one when there
+  is exactly one, and pulls that session's current supervision into the form
+  once per linked session (`supPrefilledFor`). Saving the note then PATCHes the
+  session — the note is saved first, and if the session write fails the toast
+  says exactly that, so the BT never loses their note over it. **Supervision
+  lives on the session, never on the note**, because the session is what a
+  DSU note is generated from.
+- **The DSU note bills the supervision window.** `supervisionSpan()` in
+  `bcbaNoteGenerators.ts` returns the recorded window when there is one and the
+  session window otherwise; `generate-bcba-note` returns it as
+  `billedStartedAt` / `billedEndedAt` and the editor fills the note's Time In /
+  Time Out from THAT, not the session's start/end. The narrative reads
+  "Supervision was provided 3:30 PM – 4:30 PM (1 hr) during the
+  3:00 PM – 5:00 PM (2 hrs) Discrete Trial Training (DTT) session", and the
+  per-session line carries "(supervision 3:30 PM – 4:30 PM (1 hr))".
+- The session card chip tooltip and the snapshot's Supervision fact show the
+  window in 12-hour form via `formatClockRange12h`.
+
 ## Rule 5: Deploy (step 3 of the Rule 0 end-of-task sequence)
 
 ### Smart Steps ABA Tracker (git-based, re-wired 2026-08-13)

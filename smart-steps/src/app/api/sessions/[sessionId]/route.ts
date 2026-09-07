@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
 import { requireAnyPermissionResponse, requireClientAccessResponse, requirePermissionResponse } from "@/lib/permissions";
 import { prisma } from "@/lib/db";
+import { supervisionWindow } from "../route";
 
 export async function PATCH(
   req: Request,
@@ -37,7 +38,22 @@ export async function PATCH(
       providerId?: string;
       supervised?: boolean;
       supervisorId?: string | null;
+      /** When the BCBA was actually present — optional, ISO instants. Send
+       *  null for both to clear the window back to "whole session". */
+      supervisionStartedAt?: string | null;
+      supervisionEndedAt?: string | null;
     };
+
+    /* A window only makes sense on a supervised session; clearing the flag
+       clears the window with it. */
+    const windowGiven = body.supervisionStartedAt !== undefined || body.supervisionEndedAt !== undefined;
+    const window = body.supervised === false
+      ? { supervisionStartedAt: null, supervisionEndedAt: null }
+      : windowGiven
+        ? supervisionWindow(body.supervisionStartedAt, body.supervisionEndedAt) ?? { supervisionStartedAt: null, supervisionEndedAt: null }
+        : undefined;
+    if (window === "invalid")
+      return NextResponse.json({ error: "Supervision end must be after supervision start" }, { status: 400 });
 
     const updated = await prisma.session.update({
       where: { id: sessionId },
@@ -54,6 +70,7 @@ export async function PATCH(
         ...(body.supervisorId !== undefined && body.supervised !== false
           ? { supervisorId: body.supervisorId || null }
           : {}),
+        ...(window ?? {}),
       },
     });
 
@@ -287,6 +304,8 @@ export async function GET(
       supervised: s.supervised,
       supervisorId: s.supervisorId,
       supervisorName: s.supervisor?.name ?? null,
+      supervisionStartedAt: s.supervisionStartedAt?.toISOString() ?? null,
+      supervisionEndedAt: s.supervisionEndedAt?.toISOString() ?? null,
       user: s.user,
       trials: s.trials.map((trial) => ({
         id: trial.id,

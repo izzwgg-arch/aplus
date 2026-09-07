@@ -112,6 +112,12 @@ export async function POST(req: Request) {
                 ...(p.supervised === true && p.supervisorId
                   ? { supervisorId: p.supervisorId as string }
                   : {}),
+                ...(p.supervised === true && p.supervisionStartedAt
+                  ? { supervisionStartedAt: new Date(p.supervisionStartedAt as string) }
+                  : {}),
+                ...(p.supervised === true && p.supervisionEndedAt
+                  ? { supervisionEndedAt: new Date(p.supervisionEndedAt as string) }
+                  : {}),
               },
             });
             synced.push(`session:${created.id}`);

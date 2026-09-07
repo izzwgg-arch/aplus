@@ -93,6 +93,9 @@ export async function queueSession(payload: {
   /** Whether a BCBA supervised this session, and who — set on the setup form. */
   supervised?: boolean;
   supervisorId?: string;
+  /** When the BCBA was actually present (ISO) — optional. */
+  supervisionStartedAt?: string;
+  supervisionEndedAt?: string;
 }) {
   await db.syncQueue.add({
     table: "sessions",
