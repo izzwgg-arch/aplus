@@ -6,6 +6,7 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import { ArrowLeft, Plus, X, UserPlus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { parseDob, DOB_ERROR, MIN_DOB_YEAR, todayDateInputValue } from "@/lib/dob";
 
 const COMMON_DIAGNOSES = ["ASD", "ADHD", "ID", "ODD", "SPD", "Down Syndrome", "Cerebral Palsy", "Apraxia", "Other"];
 
@@ -92,6 +93,7 @@ export default function EditClientPage() {
     e.preventDefault();
     if (!form.name.trim()) return toast.error("Name is required");
     if (!form.dob) return toast.error("Date of birth is required");
+    if (!parseDob(form.dob)) return toast.error(DOB_ERROR);
 
     setSaving(true);
     try {
@@ -173,7 +175,7 @@ export default function EditClientPage() {
             <label className="block text-sm font-medium text-zinc-300 mb-1.5">
               Date of birth <span className="text-[var(--accent-pink)]">*</span>
             </label>
-            <input required type="date" value={form.dob} onChange={(e) => set("dob", e.target.value)} className="field-input w-full" />
+            <input required type="date" min={`${MIN_DOB_YEAR}-01-01`} max={todayDateInputValue()} value={form.dob} onChange={(e) => set("dob", e.target.value)} className="field-input w-full" />
           </div>
 
           <div>

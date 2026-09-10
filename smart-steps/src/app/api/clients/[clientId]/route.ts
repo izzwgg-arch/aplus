@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
 import { requireClientAccessResponse, requirePermissionResponse } from "@/lib/permissions";
+import { parseDob, DOB_ERROR } from "@/lib/dob";
 import { prisma } from "@/lib/db";
 
 export async function GET(
@@ -147,7 +148,11 @@ export async function PATCH(
 
     const data: Record<string, unknown> = {};
     if (name !== undefined) data.name = name.trim();
-    if (dob !== undefined) data.dob = new Date(dob);
+    if (dob !== undefined) {
+      const dobDate = parseDob(dob);
+      if (!dobDate) return NextResponse.json({ error: DOB_ERROR }, { status: 400 });
+      data.dob = dobDate;
+    }
     if (diagnosis !== undefined) data.diagnosis = Array.isArray(diagnosis) ? diagnosis.filter(Boolean) : [];
     if (guardianName !== undefined) data.guardianName = guardianName?.trim() || null;
     if (guardianEmail !== undefined) data.guardianEmail = guardianEmail?.trim() || null;

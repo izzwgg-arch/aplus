@@ -278,6 +278,18 @@ Gavriel Schiff-Weiss initial assessment). Key rules, all implemented in
   section title now maps to a builder. Full pre-change backup:
   `/root/initial-template-fix-20260831.log` on the server.
 
+## Tracker client DOB is validated (fixed 2026-09-10)
+
+"Failed to create client" was a stray digit in the date-of-birth year ("20009",
+"62025"): `new Date()` parses those fine, so the old isNaN check passed, and
+Prisma then refused the out-of-range timestamp with a 500.
+`smart-steps/src/lib/dob.ts` (`parseDob`, `DOB_ERROR`, `MIN_DOB_YEAR`,
+`todayDateInputValue`) is the single source of truth: DOB must be between 1900
+and today. Enforced in `POST /api/clients`, `PATCH /api/clients/[clientId]`
+(which previously did not validate the date at all), and both client forms
+(min/max on the date input + a specific toast before submit). No corrupt DOB
+ever reached the prod DB — the bad creates all failed.
+
 ## Tracker sessions — soft delete, filters, at-a-glance cards (2026-08-19)
 
 The client Sessions tab lives in

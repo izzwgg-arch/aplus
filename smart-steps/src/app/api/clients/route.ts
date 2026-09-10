@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
 import { accessibleClientIds, requirePermissionResponse } from "@/lib/permissions";
+import { parseDob, DOB_ERROR } from "@/lib/dob";
 import { prisma } from "@/lib/db";
 
 export async function GET() {
@@ -79,9 +80,9 @@ export async function POST(req: Request) {
     if (!name?.trim()) return NextResponse.json({ error: "Name is required" }, { status: 400 });
     if (!dob) return NextResponse.json({ error: "Date of birth is required" }, { status: 400 });
 
-    const dobDate = new Date(dob);
-    if (isNaN(dobDate.getTime())) {
-      return NextResponse.json({ error: "Invalid date of birth" }, { status: 400 });
+    const dobDate = parseDob(dob);
+    if (!dobDate) {
+      return NextResponse.json({ error: DOB_ERROR }, { status: 400 });
     }
 
     const client = await prisma.client.create({
