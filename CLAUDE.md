@@ -1094,7 +1094,7 @@ confirmed; the fix makes the next occurrence visible and self-reporting:
   `window.onerror`, `unhandledrejection`) to **`POST /api/client-errors`**
   (`server/src/routes/clientErrors.routes.js`, auth required, 5/min per tab),
   which writes it to the app log. **Next time it blanks, read
-  `/home/aba/.pm2/logs/aba-app-error.log` and grep `[client-error]`** — the
+  `/home/aba/.pm2/logs/aba-app-error-0.log` and grep `[client-error]`** — the
   message, stack, component stack, URL and browser are all there.
 - Crash candidates found by reading and fixed anyway: the directory `Avatar`
   threw on a null/blank name (`name.charCodeAt`); the details drawer's "View
@@ -1122,6 +1122,14 @@ confirmed; the fix makes the next occurrence visible and self-reporting:
 - **Invoices page**: the search is debounced (300 ms) with the same stale-reply
   guard, and the 1.3 MB full client list for the pickers is fetched once on
   mount instead of on every keystroke.
+
+Deployed 2026-09-17 (client rebuild + `pm2 startOrReload` of `aba-app`;
+backups `/root/aba-dist-backup-20260917-174847.tar.gz` and
+`/root/aba-src-backup-20260917-174848.tar.gz`). **`InvoicesPage.jsx` on the
+server is NOT the repo file**: the repo copy carries an `EditInvoiceModal`
+that production never received (the 2026-08-13 audit's "repo is newer"), so
+only this task's search hunk was applied to the server's copy with `patch`.
+A future full copy of that file would ship the modal — decide that on purpose.
 
 ## Git line endings on this machine (2026-09-17)
 
