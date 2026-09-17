@@ -1336,7 +1336,8 @@ export default function AppointmentDetailsModal({
           <div className="flex items-center justify-between border-t border-slate-100 px-6 py-4 gap-2">
             <button
               type="button"
-              onClick={() => navigate(`/aplus/clients/${appt.clientId}`)}
+              onClick={() => { const cid = appt.clientId || appt.client?.id; if (cid) navigate(`/aplus/clients/${cid}`); else toast?.error("This appointment has no client on record."); }}
+              disabled={!(appt.clientId || appt.client?.id)}
               className="btn-secondary px-4 py-2 text-sm shrink-0"
             >
               View Client

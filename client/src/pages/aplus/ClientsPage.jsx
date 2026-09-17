@@ -81,9 +81,13 @@ const Icon = {
 
 // Initials avatar
 function Avatar({ name }) {
-  const parts = (name || "?").trim().split(/\s+/);
+  // Never trust the name to be a non-empty string: a row with a null or blank
+  // name used to throw here (`name.charCodeAt`), and a throw inside a row
+  // takes the whole directory down with it.
+  const safeName = typeof name === "string" && name.trim() ? name.trim() : "?";
+  const parts = safeName.split(/\s+/);
   const initials = parts.length >= 2
-    ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+    ? ((parts[0][0] || "") + (parts[parts.length - 1][0] || "") || "?").toUpperCase()
     : (parts[0][0] || "?").toUpperCase();
   const colors = [
     "bg-indigo-100 text-indigo-700", "bg-violet-100 text-violet-700",
@@ -91,7 +95,7 @@ function Avatar({ name }) {
     "bg-teal-100 text-teal-700",    "bg-emerald-100 text-emerald-700",
     "bg-amber-100 text-amber-700",  "bg-rose-100 text-rose-700",
   ];
-  const color = colors[name.charCodeAt(0) % colors.length];
+  const color = colors[safeName.charCodeAt(0) % colors.length];
   return (
     <span className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${color}`}>
       {initials}
@@ -242,6 +246,16 @@ export default function ClientsPage() {
   const anchorRestoredRef = useRef(false);
   const searchInputRef    = useRef(null);
   const importCsvInputRef = useRef(null);
+  // The search value this page last wrote into the URL. When the URL's search
+  // changes to something else, the change came from OUTSIDE the box (the
+  // sidebar "Clients" link, the browser back button, a pasted URL) and the box
+  // must follow it — otherwise the debounce below writes the old text straight
+  // back and the search can never be cleared by leaving the page.
+  const lastPushedSearchRef = useRef(committedSearch);
+  // Sequence number of the newest request. Responses to older requests are
+  // dropped: with three keystrokes in flight, the reply to "s" must not land
+  // after the reply to "sch" and replace the right results with the wrong ones.
+  const requestSeqRef = useRef(0);
 
   // ── Modal / form state ────────────────────────────────────────────────────
   const [modalOpen, setModalOpen]           = useState(false);
@@ -276,18 +290,39 @@ export default function ClientsPage() {
     const anchorId = sessionStorage.getItem(ANCHOR_KEY);
     if (!anchorId) return;
     requestAnimationFrame(() => {
-      const row = document.querySelector(`[data-client-id="${anchorId}"]`);
-      if (row) row.scrollIntoView({ block: "center", behavior: "instant" });
+      try {
+        const row  = document.querySelector(`[data-client-id="${CSS.escape(anchorId)}"]`);
+        const main = document.getElementById("app-main-scroll");
+        if (!row || !main) return;
+        // Scroll ONLY the page's own scroll container. `scrollIntoView` walks
+        // every ancestor, including the overflow-hidden app shell, and an
+        // ancestor nudged out of place has no scrollbar to bring it back.
+        const rowRect  = row.getBoundingClientRect();
+        const mainRect = main.getBoundingClientRect();
+        const delta    = (rowRect.top + rowRect.height / 2) - (mainRect.top + mainRect.height / 2);
+        main.scrollTop = Math.max(0, main.scrollTop + delta);
+      } catch {
+        // a bad anchor id is not worth an error
+      }
     });
   }, [isLoading]);
 
-  // ── Debounce search ───────────────────────────────────────────────────────
+  // ── URL → search box (external navigation) ────────────────────────────────
+  useEffect(() => {
+    if (committedSearch === lastPushedSearchRef.current) return;
+    lastPushedSearchRef.current = committedSearch;
+    setSearchInput(committedSearch);
+  }, [committedSearch]);
+
+  // ── Search box → URL (debounced) ──────────────────────────────────────────
   useEffect(() => {
     const t = setTimeout(() => {
-      if (searchInput === committedSearch) return;
+      const wanted = searchInput.trim();
+      if (wanted === committedSearch) return;
+      lastPushedSearchRef.current = wanted;
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev);
-        if (searchInput) next.set("search", searchInput); else next.delete("search");
+        if (wanted) next.set("search", wanted); else next.delete("search");
         next.set("page", "1");
         return next;
       }, { replace: true });
@@ -296,6 +331,11 @@ export default function ClientsPage() {
     }, 300);
     return () => clearTimeout(t);
   }, [searchInput, committedSearch, setSearchParams]);
+
+  const clearSearch = useCallback(() => {
+    setSearchInput("");
+    searchInputRef.current?.focus();
+  }, []);
 
   // ── Pagination ────────────────────────────────────────────────────────────
   const goToPage = useCallback((newPage) => {
@@ -321,20 +361,28 @@ export default function ClientsPage() {
 
   // ── Load ──────────────────────────────────────────────────────────────────
   const load = useCallback(async () => {
+    const seq = ++requestSeqRef.current;
     setIsLoading(true);
     try {
       const { data: res } = await api.get("/clients", {
         params: { page, limit: LIMIT, search: committedSearch || undefined, defaultDobOnly: showDefaultDobOnly ? "true" : undefined }
       });
-      setClients(res.data);
-      setTotal(res.total);
-      setTotalPages(res.totalPages);
-      if (updateCache) updateCache({ page, search: committedSearch, dobFilter: showDefaultDobOnly, clients: res.data, total: res.total, totalPages: res.totalPages });
+      if (seq !== requestSeqRef.current) return; // a newer search has superseded this one
+      // Never let an unexpected response shape reach render: `undefined.map`
+      // in a row is exactly the kind of throw that blanks the page.
+      const rows       = Array.isArray(res?.data) ? res.data.filter((c) => c && c.id) : [];
+      const totalCount = Number.isFinite(Number(res?.total)) ? Number(res.total) : rows.length;
+      const pages      = Math.max(1, Number(res?.totalPages) || 1);
+      setClients(rows);
+      setTotal(totalCount);
+      setTotalPages(pages);
+      if (updateCache) updateCache({ page, search: committedSearch, dobFilter: showDefaultDobOnly, clients: rows, total: totalCount, totalPages: pages });
     } catch (error) {
+      if (seq !== requestSeqRef.current) return;
       setClients([]);
       toast?.error(error?.response?.data?.error || "Could not load clients.");
     } finally {
-      setIsLoading(false);
+      if (seq === requestSeqRef.current) setIsLoading(false);
     }
   }, [page, committedSearch, showDefaultDobOnly, updateCache]);
 
@@ -520,11 +568,24 @@ export default function ClientsPage() {
             <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400">{Icon.search}</span>
             <input
               ref={searchInputRef}
-              className="saas-input pl-9 text-sm"
-              placeholder="Search clients…"
+              className="saas-input pl-9 pr-8 text-sm"
+              placeholder="Search name, phone, email…"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Escape" && searchInput) { e.preventDefault(); clearSearch(); } }}
+              aria-label="Search clients"
             />
+            {searchInput && (
+              <button
+                type="button"
+                onClick={clearSearch}
+                aria-label="Clear search"
+                title="Clear search (Esc)"
+                className="absolute inset-y-0 right-2 flex items-center text-slate-400 hover:text-slate-600"
+              >
+                {Icon.x}
+              </button>
+            )}
           </div>
 
           {/* DOB filter */}

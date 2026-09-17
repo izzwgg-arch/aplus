@@ -12,7 +12,7 @@ function ClientPicker({ clients, value, onChange }) {
 
   const selected  = clients.find((c) => c.id === value);
   const filtered  = query.trim()
-    ? clients.filter((c) => c.fullName.toLowerCase().includes(query.toLowerCase()))
+    ? clients.filter((c) => String(c?.fullName || "").toLowerCase().includes(query.trim().toLowerCase()))
     : clients;
 
   // Close on outside click

@@ -2,6 +2,7 @@ import { Outlet, useLocation } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import Sidebar from "./Sidebar";
 import Topbar from "./Topbar";
+import ErrorBoundary from "../common/ErrorBoundary";
 
 export default function AppLayout() {
   const [open, setOpen] = useState(false);
@@ -57,7 +58,12 @@ export default function AppLayout() {
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden md:ml-56">
         <Topbar onMenuClick={() => setOpen(true)} />
         <main ref={mainRef} id="app-main-scroll" className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8">
-          <Outlet />
+          {/* A crash inside one page must not blank the whole app: the shell,
+              sidebar and top bar stay up and the page area shows the error.
+              Keyed by route so leaving the page clears it. */}
+          <ErrorBoundary key={routeKey} source="page">
+            <Outlet />
+          </ErrorBoundary>
         </main>
       </div>
     </div>

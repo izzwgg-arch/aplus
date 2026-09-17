@@ -9,6 +9,7 @@ import { getOrCreateClinicSettings } from "../services/settingsService.js";
 import { writeAuditLog } from "../services/auditLogService.js";
 import { syncClientToQuickbooks } from "../services/integrations/quickbooks/quickbooksService.js";
 import { ensureClientDefaultFolders } from "../services/documentRootsService.js";
+import { buildClientSearchWhere } from "../services/clientSearch.js";
 
 const router = express.Router();
 router.use(requireAuth);
@@ -455,12 +456,11 @@ router.get("/", requirePermission("aplus.clients.view"), async (req, res) => {
 
     const where = {};
     if (search) {
-      where.OR = [
-        { fullName:  { contains: search, mode: "insensitive" } },
-        { phone:     { contains: search, mode: "insensitive" } },
-        { insurance: { contains: search, mode: "insensitive" } },
-        { email:     { contains: search, mode: "insensitive" } },
-      ];
+      // Word-by-word matching across name / phone / email / insurance, with
+      // digit words also matched against unformatted phone numbers.
+      // See services/clientSearch.js.
+      const searchWhere = await buildClientSearchWhere(search);
+      if (searchWhere) Object.assign(where, searchWhere);
     }
     if (req.query.defaultDobOnly === "true") {
       where.dob = new Date("2000-01-01T00:00:00.000Z");

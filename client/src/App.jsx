@@ -2,6 +2,7 @@ import { Suspense, lazy } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import ProtectedRoute from "./components/common/ProtectedRoute";
 import { RequirePermission } from "./components/common/PermissionRoute";
+import ErrorBoundary from "./components/common/ErrorBoundary";
 import { ClientsListProvider } from "./context/ClientsListContext";
 
 const AppLayout = lazy(() => import("./components/layout/AppLayout"));
@@ -43,6 +44,7 @@ function PageLoader() {
 
 export default function App() {
   return (
+    <ErrorBoundary source="App">
     <Suspense fallback={<PageLoader />}>
       <Routes>
         {/* Public legal pages — no authentication required */}
@@ -83,5 +85,6 @@ export default function App() {
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </Suspense>
+    </ErrorBoundary>
   );
 }

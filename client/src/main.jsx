@@ -6,6 +6,9 @@ import "./index.css";
 import { AuthProvider } from "./context/AuthContext";
 import { ToastProvider } from "./context/ToastContext";
 import { PermissionsProvider } from "./context/PermissionsContext";
+import { installGlobalErrorReporting } from "./lib/errorReporting";
+
+installGlobalErrorReporting();
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>

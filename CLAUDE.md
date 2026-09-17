@@ -963,13 +963,19 @@ In `AppointmentModal` (`client/src/pages/aplus/AppointmentsPage.jsx`):
   exist on `Service` (the column is `durationMinutes`), so the duration hint
   never rendered at all.
 
-**This change had NOT reached production as of 2026-09-17.** It was committed
+**This change did NOT reach production until 2026-09-17.** It was committed
 on 2026-08-27, but `/opt/aba` is a manual deploy (Rule 5) and the copy never
 happened: the server had no `serviceDuration.js` and the pre-change
 `AppointmentsPage.jsx`, so every phone appointment still opened at an hour
 (reported 2026-09-17; 8 of the 59 live phone appointments had been booked as a
-full hour). When a "fixed" scheduling behavior is reported again, hash the
-server's files against the repo before reading the code.
+full hour). Deployed 2026-09-17 per the Rule 5 recipe (backup
+`/root/aba-dist-backup-20260917-171711.tar.gz`; `serviceDuration.js` is now
+its own shared chunk imported by both the appointments and waitlist pages).
+When a "fixed" scheduling behavior is reported again, hash the server's files
+against the repo before reading the code.
+**The SSH host drops rapid back-to-back connections** (scp after scp fails
+with "Connection closed"): space the calls out, or pipe a file through ONE
+ssh session with `base64 -w0 file | ssh … 'base64 -d > target'`.
 
 - **The waitlist "Schedule Appointment" form follows the service too**
   (2026-09-17, `ScheduleModal` in `client/src/pages/aplus/WaitlistPage.jsx`):
@@ -1064,6 +1070,71 @@ their note.
   per-session line carries "(supervision 3:30 PM – 4:30 PM (1 hr))".
 - The session card chip tooltip and the snapshot's Supervision fact show the
   window in 12-hour form via `formatClockRange12h`.
+
+## A+ Scheduling "page goes blank" — error boundary + error log (2026-09-17)
+
+Reported as "a lot of times when searching stuff the page goes blank". The
+API side was clean: every `/api/clients?search=` request in two weeks of nginx
+logs answered 200/304, and the rows on the pages that blanked (page 3 of the
+directory, several search result pages) have no null names or bad dates. What
+the logs DO show is the user reloading the same page over and over
+(`/aplus/clients?page=3` fourteen times, even across a re-login) — the
+signature of a client-side render crash, which in React 18 unmounts the whole
+tree and leaves a white page. **There was no error boundary anywhere and no
+error logging, so nothing was ever recorded.** Root cause therefore NOT yet
+confirmed; the fix makes the next occurrence visible and self-reporting:
+
+- `client/src/components/common/ErrorBoundary.jsx` wraps the routed page
+  (`AppLayout`, keyed by route so navigating away resets it) and the whole
+  `App`. A crash now shows "Something went wrong on this page" with the error
+  message and Reload / Try again / Go back buttons, while the sidebar and top
+  bar stay up. A stale lazy-route chunk after a deploy (`Failed to fetch
+  dynamically imported module`) reloads the page automatically, once.
+- `client/src/lib/errorReporting.js` POSTs every uncaught error (boundary,
+  `window.onerror`, `unhandledrejection`) to **`POST /api/client-errors`**
+  (`server/src/routes/clientErrors.routes.js`, auth required, 5/min per tab),
+  which writes it to the app log. **Next time it blanks, read
+  `/home/aba/.pm2/logs/aba-app-error.log` and grep `[client-error]`** — the
+  message, stack, component stack, URL and browser are all there.
+- Crash candidates found by reading and fixed anyway: the directory `Avatar`
+  threw on a null/blank name (`name.charCodeAt`); the details drawer's "View
+  Client" navigated to `/aplus/clients/undefined` when an appointment carried
+  no `clientId`; the Payments client picker called `.toLowerCase()` on a null
+  name; the directory's anchor-row restore used `scrollIntoView`, which also
+  scrolls the overflow-hidden app shell (it now scrolls `#app-main-scroll`
+  only); `load()` now tolerates an unexpected response shape.
+
+**Search itself was also made better** (same commit):
+
+- **Server (`server/src/services/clientSearch.js`)**: every whitespace-separated
+  word must match somewhere (AND across words, OR across fullName / firstName /
+  lastName / email / insurance / the three phone fields). `fullName` is stored
+  "Last First", so "Libby Schiff" used to find nothing. A digits word is also
+  matched against the phone fields with formatting stripped (raw
+  `regexp_replace` id lookup), so "7185551234" finds "(718) 555-1234".
+- **Clients page**: responses are sequence-numbered and a stale one is dropped
+  (with three keystrokes in flight the slowest reply used to win); the search
+  box now FOLLOWS the URL when the change came from outside it (sidebar
+  "Clients" link, back button) — before, the debounce wrote the old text back
+  into the URL, so a search could not be cleared by leaving the page; the text
+  is trimmed before it hits the URL; there is a clear (×) button and Esc
+  clears; placeholder says what is searchable.
+- **Invoices page**: the search is debounced (300 ms) with the same stale-reply
+  guard, and the 1.3 MB full client list for the pickers is fetched once on
+  mount instead of on every keystroke.
+
+## Git line endings on this machine (2026-09-17)
+
+The system gitconfig has `core.autocrlf=true` but `.git/config` sets it to
+`false`, and the working tree was checked out under the old setting: most
+files are LF in the index (`git ls-files --eol` → 384 `i/lf`, 22 `i/crlf`) but
+CRLF on disk, and git only notices when the file is touched. The Edit tool
+preserves CRLF, so editing such a file and committing rewrites EVERY line
+(this happened to `WaitlistPage.jsx` in commit `1b52f4c`; restored to LF in
+the next commit). **Before committing, normalize each touched file to its
+INDEX ending** (`git ls-files --eol <file>`; `i/lf` → `sed -i 's/\r$//'`),
+and write new files as LF. `git diff --stat` showing a whole file changed is
+the tell.
 
 ## Rule 5: Deploy (step 3 of the Rule 0 end-of-task sequence)
 

@@ -614,24 +614,42 @@ export default function InvoicesPage() {
   const [generatingLink, setGeneratingLink] = useState(false);
   const [acting, setActing]         = useState(false);
 
+  // The search box is debounced: every keystroke used to fire a request, and
+  // with several in flight the SLOWEST reply won — not the newest — so the
+  // list could show results for "sm" after the user had typed "smith".
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+  const requestSeqRef = useRef(0);
+
+  // The full client list (1.3 MB, decrypted server-side) is needed once for
+  // the pickers, not once per keystroke.
+  useEffect(() => {
+    api.get("/clients")
+      .then((r) => setClients(Array.isArray(r.data) ? r.data : []))
+      .catch(() => {});
+  }, []);
+
   const load = async () => {
+    const seq = ++requestSeqRef.current;
     setIsLoading(true);
     try {
-      const [invRes, clRes] = await Promise.all([
-        api.get(`/invoices?search=${encodeURIComponent(search)}&status=${encodeURIComponent(statusFilter)}`),
-        api.get("/clients")
-      ]);
-      setInvoices(invRes.data);
-      setClients(clRes.data);
-      if (!selectedId && invRes.data.length) setSelectedId(invRes.data[0].id);
+      const invRes = await api.get(`/invoices?search=${encodeURIComponent(debouncedSearch)}&status=${encodeURIComponent(statusFilter)}`);
+      if (seq !== requestSeqRef.current) return; // superseded by a newer search
+      const rows = Array.isArray(invRes.data) ? invRes.data : [];
+      setInvoices(rows);
+      if (!selectedId && rows.length) setSelectedId(rows[0].id);
     } catch {
+      if (seq !== requestSeqRef.current) return;
       toast?.error("Failed to load invoices.");
     } finally {
-      setIsLoading(false);
+      if (seq === requestSeqRef.current) setIsLoading(false);
     }
   };
 
-  useEffect(() => { load(); }, [search, statusFilter]);
+  useEffect(() => { load(); }, [debouncedSearch, statusFilter]);
 
   // Load activity log whenever selected invoice changes
   useEffect(() => {

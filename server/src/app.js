@@ -32,6 +32,7 @@ import reminderRoutes from "./routes/reminder.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
 import roleRoutes from "./routes/role.routes.js";
 import permissionRoutes from "./routes/permission.routes.js";
+import clientErrorRoutes from "./routes/clientErrors.routes.js";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -100,6 +101,7 @@ app.use("/api/webhooks", webhooksRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/roles", roleRoutes);
 app.use("/api/permissions", permissionRoutes);
+app.use("/api/client-errors", clientErrorRoutes);
 
 if (process.env.NODE_ENV === "production") {
   // Hashed assets (JS/CSS chunks) can be cached forever — their filenames change on every build.
