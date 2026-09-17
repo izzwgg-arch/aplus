@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import api from "../../lib/api";
 import { useToast } from "../../context/ToastContext";
+import { serviceDurationMinutes, serviceDurationOrDefault } from "../../lib/serviceDuration";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -727,14 +728,44 @@ function ScheduleModal({ entry, services, providers, onSave, onClose }) {
     entry.service?.name ? `— ${entry.service.name}` : "",
   ].filter(Boolean).join(" ");
 
+  /* The length follows the SERVICE, exactly as the calendar's appointment modal
+     does: a waitlist entry for a Phone Appointment opens at 15 min, not the flat
+     hour.  Once the Duration select is changed by hand it is never recomputed. */
+  const durationTouched = useRef(false);
+  const serviceById = (id) => services.find((s) => s.id === id);
+
   const [form, setForm] = useState({
     title:          defaultTitle,
     startsAt:       "",
-    durationMinutes: 60,
+    durationMinutes: serviceDurationOrDefault(serviceById(entry.serviceId)),
     serviceId:      entry.serviceId  ?? "",
     providerId:     entry.providerId ?? "",
     notes:          "",
   });
+
+  function handleServiceChange(serviceId) {
+    setForm((f) => {
+      const next = { ...f, serviceId };
+      if (durationTouched.current) return next;
+      const mins = serviceDurationMinutes(serviceById(serviceId));
+      if (mins) next.durationMinutes = mins;
+      return next;
+    });
+  }
+
+  function handleDurationChange(value) {
+    durationTouched.current = true;
+    setForm((f) => ({ ...f, durationMinutes: value }));
+  }
+
+  // A service length that is not one of the preset choices (a 20-minute
+  // service, say) must still be selectable, or the select would show the
+  // wrong value.
+  const durationOptions = useMemo(() => {
+    const current = Number(form.durationMinutes);
+    if (!current || DURATIONS.includes(current)) return DURATIONS;
+    return [...DURATIONS, current].sort((a, b) => a - b);
+  }, [form.durationMinutes]);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -787,16 +818,19 @@ function ScheduleModal({ entry, services, providers, onSave, onClose }) {
             />
           </FormRow>
           <FormRow label="Duration">
-            <select className="saas-input" value={form.durationMinutes} onChange={(e) => setForm({ ...form, durationMinutes: e.target.value })}>
-              {DURATIONS.map((d) => <option key={d} value={d}>{d} min</option>)}
+            <select className="saas-input" value={form.durationMinutes} onChange={(e) => handleDurationChange(e.target.value)}>
+              {durationOptions.map((d) => <option key={d} value={d}>{d} min</option>)}
             </select>
           </FormRow>
         </div>
 
         <FormRow label="Service">
-          <select className="saas-input" value={form.serviceId} onChange={(e) => setForm({ ...form, serviceId: e.target.value })}>
+          <select className="saas-input" value={form.serviceId} onChange={(e) => handleServiceChange(e.target.value)}>
             <option value="">None</option>
-            {services.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            {services.map((s) => {
+              const mins = serviceDurationMinutes(s);
+              return <option key={s.id} value={s.id}>{s.name}{mins ? ` · ${mins} min` : ""}</option>;
+            })}
           </select>
         </FormRow>
         <FormRow label="Provider">

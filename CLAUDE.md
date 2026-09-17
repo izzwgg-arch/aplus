@@ -963,6 +963,34 @@ In `AppointmentModal` (`client/src/pages/aplus/AppointmentsPage.jsx`):
   exist on `Service` (the column is `durationMinutes`), so the duration hint
   never rendered at all.
 
+**This change had NOT reached production as of 2026-09-17.** It was committed
+on 2026-08-27, but `/opt/aba` is a manual deploy (Rule 5) and the copy never
+happened: the server had no `serviceDuration.js` and the pre-change
+`AppointmentsPage.jsx`, so every phone appointment still opened at an hour
+(reported 2026-09-17; 8 of the 59 live phone appointments had been booked as a
+full hour). When a "fixed" scheduling behavior is reported again, hash the
+server's files against the repo before reading the code.
+
+- **The waitlist "Schedule Appointment" form follows the service too**
+  (2026-09-17, `ScheduleModal` in `client/src/pages/aplus/WaitlistPage.jsx`):
+  the Duration select opens at the entry's service length and re-follows the
+  Service dropdown until the Duration is changed by hand (`durationTouched`,
+  the same rule as the calendar modal's `endTouched`). A service length outside
+  the preset list is added as an option so the select never shows a wrong value.
+- **`Appointment.durationMinutes` is BILLING time, not the calendar span.** The
+  details drawer's invoice line editor writes line-item quantity × 60 back onto
+  the appointment (`PUT /invoices/:id`, then the drawer's follow-up appointment
+  PUT) without moving `endsAt`, and `sync-billing-to-amount` derives it from
+  amount ÷ rate. That is why 11 live phone appointments carry a 15-minute
+  calendar span with `durationMinutes` 60 (or 64 / 72 / 92 …). The calendar
+  card, the edit modal and drag move/resize all read `startsAt` / `endsAt`, so
+  this is not the calendar bug. Do not "fix" it by snapping `endsAt` to
+  `durationMinutes` on update — that would stretch a 15-minute phone call to an
+  hour on the grid whenever it is billed as one unit.
+- `POST /appointments/:id/reschedule` still defaults a missing
+  `durationMinutes` to 60 instead of the appointment's own length. Nothing in
+  the client calls it, so it was left alone.
+
 ## Tracker sessions record SUPERVISION, and DSU notes require it (2026-08-27)
 
 A direct-supervision note documents supervision that actually happened. Before
