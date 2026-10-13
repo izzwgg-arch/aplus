@@ -8,6 +8,7 @@ import {
   serviceDurationOrDefault,
   formatMinutes,
 } from "../../lib/serviceDuration";
+import { SearchableClientSelect } from "../../components/common/SearchableClientSelect";
 import AppointmentDetailsModal, { STATUS_CONFIG } from "./AppointmentDetailsDrawer";
 
 /* ─── Layout constants ──────────────────────────────────────────────────────── */
@@ -1283,12 +1284,11 @@ function AppointmentModal({ modal, onClose, onSaved, onDeleted, clients, service
               {(isEdit || clientMode === "existing") && (
                 <div className="grid grid-cols-2 gap-3">
                   <FieldLabel label="Client *">
-                    <select className="saas-input w-full" value={form.clientId} onChange={(e) => set("clientId", e.target.value)}>
-                      <option value="">Select…</option>
-                      {clients.map((c) => (
-                        <option key={c.id} value={c.id}>{c.fullName}</option>
-                      ))}
-                    </select>
+                    <SearchableClientSelect
+                      clients={clients}
+                      value={form.clientId}
+                      onChange={(clientId) => set("clientId", clientId)}
+                    />
                   </FieldLabel>
                   <FieldLabel label="Provider">
                     <select className="saas-input w-full" value={form.providerId} onChange={(e) => set("providerId", e.target.value)}>

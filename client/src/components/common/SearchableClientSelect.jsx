@@ -1,0 +1,116 @@
+import { useState, useEffect, useRef } from "react";
+
+/**
+ * A searchable dropdown for selecting clients by typing their full name,
+ * first name, or last name. Filters client list as the user types.
+ */
+export function SearchableClientSelect({ clients, value, onChange, disabled }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchText, setSearchText] = useState("");
+  const [filteredClients, setFilteredClients] = useState(clients);
+  const inputRef = useRef(null);
+  const containerRef = useRef(null);
+
+  // Filter clients based on search text
+  useEffect(() => {
+    if (!searchText.trim()) {
+      setFilteredClients(clients);
+      return;
+    }
+
+    const search = searchText.toLowerCase();
+    const filtered = clients.filter((client) => {
+      const fullName = client.fullName?.toLowerCase() || "";
+      const firstName = client.firstName?.toLowerCase() || "";
+      const lastName = client.lastName?.toLowerCase() || "";
+      
+      // Match if any word of the full name matches any word the user typed
+      const searchWords = search.split(/\s+/).filter(Boolean);
+      return searchWords.every(
+        (word) =>
+          fullName.includes(word) ||
+          firstName.includes(word) ||
+          lastName.includes(word)
+      );
+    });
+    
+    setFilteredClients(filtered);
+  }, [searchText, clients]);
+
+  // Get the selected client's display name
+  const selectedClient = clients.find((c) => c.id === value);
+  const displayValue = selectedClient?.fullName || "";
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Focus search input when dropdown opens
+  useEffect(() => {
+    if (isOpen) {
+      setTimeout(() => inputRef.current?.focus(), 0);
+    }
+  }, [isOpen]);
+
+  return (
+    <div ref={containerRef} className="relative w-full">
+      <div
+        className="saas-input cursor-pointer flex items-center justify-between"
+        onClick={() => !disabled && setIsOpen(!isOpen)}
+      >
+        <span className={displayValue ? "text-slate-900" : "text-slate-400"}>
+          {displayValue || "Select…"}
+        </span>
+        <span className="text-slate-400">▼</span>
+      </div>
+
+      {isOpen && (
+        <div className="absolute top-full left-0 right-0 z-20 mt-1 border border-slate-200 rounded-lg bg-white shadow-lg">
+          {/* Search input */}
+          <input
+            ref={inputRef}
+            type="text"
+            placeholder="Type to search…"
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            className="w-full border-b border-slate-100 px-3 py-2 text-sm outline-none"
+          />
+
+          {/* Client list */}
+          <div className="max-h-48 overflow-y-auto">
+            {filteredClients.length === 0 ? (
+              <div className="px-3 py-2 text-sm text-slate-500 italic">
+                No clients found
+              </div>
+            ) : (
+              filteredClients.map((client) => (
+                <div
+                  key={client.id}
+                  onClick={() => {
+                    onChange(client.id);
+                    setIsOpen(false);
+                    setSearchText("");
+                  }}
+                  className={`cursor-pointer px-3 py-2 text-sm transition-colors ${
+                    value === client.id
+                      ? "bg-indigo-50 text-indigo-700 font-medium"
+                      : "text-slate-700 hover:bg-slate-50"
+                  }`}
+                >
+                  {client.fullName}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
