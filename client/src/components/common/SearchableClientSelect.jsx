@@ -61,29 +61,68 @@ export function SearchableClientSelect({ clients, value, onChange, disabled }) {
 
   return (
     <div ref={containerRef} className="relative w-full">
-      <div
-        className="saas-input cursor-pointer flex items-center justify-between"
-        onClick={() => !disabled && setIsOpen(!isOpen)}
-      >
-        <span className={displayValue ? "text-slate-900" : "text-slate-400"}>
-          {displayValue || "Select…"}
-        </span>
-        <span className="text-slate-400">▼</span>
-      </div>
-
-      {isOpen && (
-        <div className="absolute top-full left-0 right-0 z-20 mt-1 border border-slate-200 rounded-lg bg-white shadow-lg">
-          {/* Search input */}
+      {/* When a client is selected and dropdown is closed, show the selection as a chip */}
+      {displayValue && !isOpen ? (
+        <div
+          className="saas-input cursor-pointer flex items-center justify-between gap-2"
+          onClick={() => !disabled && setIsOpen(true)}
+        >
+          <span className="truncate text-sm text-slate-800">{displayValue}</span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onChange("");
+              setSearchText("");
+              setIsOpen(false);
+            }}
+            className="shrink-0 text-slate-400 hover:text-slate-600 transition"
+            aria-label="Clear"
+          >
+            ✕
+          </button>
+        </div>
+      ) : (
+        /* Search input - always editable when open or no selection */
+        <div className="relative">
+          <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400">
+            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <circle cx="11" cy="11" r="8"/><path strokeLinecap="round" d="m21 21-4.35-4.35"/>
+            </svg>
+          </span>
           <input
             ref={inputRef}
             type="text"
-            placeholder="Type to search…"
+            className="saas-input pl-8 text-sm"
+            placeholder="Search client by name…"
             value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
-            className="w-full border-b border-slate-100 px-3 py-2 text-sm outline-none"
+            onFocus={() => !disabled && setIsOpen(true)}
+            onChange={(e) => {
+              setSearchText(e.target.value);
+              setIsOpen(true);
+            }}
+            autoComplete="off"
+            disabled={disabled}
           />
+          {searchText && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setSearchText("");
+                inputRef.current?.focus();
+              }}
+              className="absolute inset-y-0 right-2 flex items-center text-slate-400 hover:text-slate-600"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      )}
 
-          {/* Client list */}
+      {/* Dropdown list */}
+      {isOpen && (
+        <div className="absolute top-full left-0 right-0 z-20 mt-1 border border-slate-200 rounded-lg bg-white shadow-lg">
           <div className="max-h-48 overflow-y-auto">
             {filteredClients.length === 0 ? (
               <div className="px-3 py-2 text-sm text-slate-500 italic">
