@@ -1144,6 +1144,21 @@ INDEX ending** (`git ls-files --eol <file>`; `i/lf` → `sed -i 's/\r$//'`),
 and write new files as LF. `git diff --stat` showing a whole file changed is
 the tell.
 
+## A+ Scheduling appointment modal client picker is now searchable (2026-10-13)
+
+The client selection dropdown in the appointment modal now allows typing to
+search for clients by full name, first name, or last name, instead of scrolling
+through a plain `<select>` list. The new `SearchableClientSelect` component
+filters clients as you type, matching any word in the name (handles flexible
+name order like "Libby Schiff" or "Schiff Libby").
+
+- `client/src/components/common/SearchableClientSelect.jsx` — reusable
+  component with a search input and filtered dropdown list.
+- `client/src/pages/aplus/AppointmentsPage.jsx` — updated the appointment
+  modal to use `SearchableClientSelect` instead of a plain `<select>` for the
+  Client field. Works identically to the `ClientSearchSelect` already in
+  `WaitlistPage.jsx`, which shares the same UX pattern.
+
 ## Rule 5: Deploy (step 3 of the Rule 0 end-of-task sequence)
 
 ### Smart Steps ABA Tracker (git-based, re-wired 2026-08-13)
