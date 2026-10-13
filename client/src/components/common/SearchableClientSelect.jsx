@@ -41,21 +41,33 @@ export function SearchableClientSelect({ clients, value, onChange, disabled }) {
   const selectedClient = clients.find((c) => c.id === value);
   const displayValue = selectedClient?.fullName || "";
 
-  // Close dropdown when clicking outside
+  // Close dropdown when clicking outside (but not on the input itself)
   useEffect(() => {
     function handleClickOutside(e) {
+      // Don't close if clicking the input or inside the container
       if (containerRef.current && !containerRef.current.contains(e.target)) {
         setIsOpen(false);
       }
     }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+
+    // Small delay to let focus events process first
+    const timeoutId = setTimeout(() => {
+      document.addEventListener("mousedown", handleClickOutside);
+    }, 0);
+
+    return () => {
+      clearTimeout(timeoutId);
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
   }, []);
 
-  // Focus search input when dropdown opens
+  // Always focus the input when dropdown opens
   useEffect(() => {
-    if (isOpen) {
-      setTimeout(() => inputRef.current?.focus(), 0);
+    if (isOpen && inputRef.current) {
+      // Use requestAnimationFrame to ensure the DOM has rendered
+      requestAnimationFrame(() => {
+        inputRef.current?.focus();
+      });
     }
   }, [isOpen]);
 
@@ -96,10 +108,18 @@ export function SearchableClientSelect({ clients, value, onChange, disabled }) {
             className="saas-input pl-8 text-sm"
             placeholder="Search client by name…"
             value={searchText}
-            onFocus={() => !disabled && setIsOpen(true)}
+            onFocus={() => {
+              if (!disabled) {
+                setIsOpen(true);
+              }
+            }}
             onChange={(e) => {
               setSearchText(e.target.value);
               setIsOpen(true);
+            }}
+            onBlur={() => {
+              // Don't close dropdown immediately - let click handler decide
+              // This prevents losing focus when clicking in the dropdown
             }}
             autoComplete="off"
             disabled={disabled}
