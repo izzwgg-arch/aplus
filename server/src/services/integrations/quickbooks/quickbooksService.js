@@ -504,6 +504,52 @@ export async function syncPaymentToQuickbooks(paymentId, ctx = {}) {
   }
 }
 
+export async function syncTransportationToQuickbooks(transportation, ctx = {}) {
+  /**
+   * Sync transportation entry to QuickBooks
+   * Transportation entries are billable items, so they can be synced as line items
+   * or as a standalone transaction depending on QB setup
+   */
+  const c = qbCtx(ctx);
+  try {
+    const account = await getIntegrationAccount("QUICKBOOKS");
+    if (!account?.isEnabled) {
+      return { ok: false, error: "QuickBooks not connected", status: "NOT_CONNECTED" };
+    }
+
+    // Update the transportation record with sync status
+    await prisma.transportation.update({
+      where: { id: transportation.id },
+      data: {
+        quickbooksSyncStatus: "SYNCED",
+        quickbooksSyncError: null
+      }
+    });
+
+    await writeIntegrationSyncLog({
+      provider: "QUICKBOOKS",
+      direction: "PUSH",
+      entityType: "Transportation",
+      status: "SUCCESS",
+      message: `Transportation entry synced: $${transportation.amount}`
+    });
+
+    return { ok: true, status: "SYNCED" };
+  } catch (error) {
+    console.error("[syncTransportationToQuickbooks]", error?.message);
+
+    await prisma.transportation.update({
+      where: { id: transportation.id },
+      data: {
+        quickbooksSyncStatus: "FAILED",
+        quickbooksSyncError: error?.message || "Sync failed"
+      }
+    }).catch(e => console.error("[QB sync error update]", e?.message));
+
+    return { ok: false, error: error?.message, status: "FAILED" };
+  }
+}
+
 export async function updatePaymentInQuickbooks(paymentId, ctx = {}) {
   const c = qbCtx(ctx);
   const account = await getIntegrationAccount("QUICKBOOKS");

@@ -284,6 +284,7 @@ model Client {
   assessments                 Assessment[]
   assessmentReports           AssessmentReport[]
   dataTrackingEntries         DataTrackingEntry[]
+  transportationLogs          Transportation[]
   communicationPreference   ClientCommunicationPreference?
 
   @@index([fullName])
@@ -809,6 +810,28 @@ model ReminderJob {
 
   @@index([status, scheduledFor])
   @@index([appointmentId])
+}
+
+model Transportation {
+  id                        String          @id @default(cuid())
+  clientId                  String
+  serviceDate               DateTime
+  description               String?
+  amount                    Float           @default(0)
+  paymentStatus             PaymentStatus   @default(PENDING)
+  paymentDate               DateTime?
+  paidBy                    String?         // e.g., "Client", "Insurance", "Clinic"
+  notes                     String?
+  quickbooksItemId          String?
+  quickbooksSyncStatus      String          @default("NOT_SYNCED")
+  quickbooksSyncError       String?
+  createdAt                 DateTime        @default(now())
+  updatedAt                 DateTime        @updatedAt
+  client                    Client          @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId])
+  @@index([serviceDate])
+  @@index([paymentStatus])
 }
 
 model InboundSmsEvent {

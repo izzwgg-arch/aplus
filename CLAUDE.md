@@ -1249,3 +1249,40 @@ new chunk is fetchable and the OLD chunk hash is gone, and checking
 answers 200 — it hits the SPA fallback and returns `index.html`, so check the
 BODY, not the status code. **Rollback:** untar the backup over
 `/opt/aba/client/dist`.
+
+## A+ Scheduling Transportation Log — separate billing tracker for ABA clients (2026-10-13)
+
+A dedicated **Transportation Log** page tracks transportation usage as a separate billable item for ABA clients, with weekly summary reporting and QuickBooks integration.
+
+- **Model**: `Transportation` (database table added via migration `20261013153200_transportation_log`)
+  - `clientId` — which ABA client
+  - `serviceDate` — date transportation was used
+  - `description` — optional note (e.g., "round-trip transportation")
+  - `amount` — billable amount
+  - `paymentStatus` — PENDING | AUTHORIZED | SUCCEEDED | FAILED (shared enum with payments)
+  - `paymentDate` — when payment was received
+  - `paidBy` — who paid (e.g., "Client", "Insurance", "Clinic")
+  - `quickbooksItemId` — QB sync ID
+  - `quickbooksSyncStatus` / `quickbooksSyncError` — sync state
+  - `createdAt`, `updatedAt` — timestamps
+
+- **Backend Routes** (`server/src/routes/transportation.routes.js`):
+  - `GET /api/transportation` — list logs with filters (`clientId`, `from`, `to`, `paymentStatus`)
+  - `POST /api/transportation` — create entry
+  - `PATCH /api/transportation/:id` — update entry
+  - `DELETE /api/transportation/:id` — delete entry
+  - `GET /api/transportation/weekly-summary` — summary grouped by client and payment status (current week Mon–Sun)
+  - `POST /api/transportation/:id/sync-quickbooks` — manually trigger QB sync
+
+- **Frontend Page** (`client/src/pages/aplus/TransportationLogPage.jsx`):
+  - **All Entries view**: filterable table by date, client, payment status, date range
+  - **Weekly Summary view**: summary by client with pending vs. paid breakdown
+  - **Add/Edit modal**: form to record a transportation entry
+  - **Delete**: soft confirmation before removal
+  - **Totals**: running total amount and entry count per view
+
+- **Navigation**: accessible from sidebar under "Transportation" (uses invoicing permission `aplus.billing.view_invoices` to control access, same as Payments page)
+
+- **QuickBooks sync**: `syncTransportationToQuickbooks()` in `quickbooksService.js` marks the entry as synced; actual QB line-item creation can be extended when QB account setup specifies the account codes for transportation charges.
+
+- **Audit logging**: all CRUD operations logged via `writeAuditLog()`.

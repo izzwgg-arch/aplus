@@ -85,6 +85,12 @@ The server process runs as PM2 app `aba-app` and serves:
 - `POST /api/reports/upload/:token`
 - `GET /api/reports/upload/:token` (secure upload page for BCBA)
 - `GET /api/invoices`, `POST /api/invoices/:id/send`, `POST /api/invoices/:id/pay`
+- `GET /api/transportation` (transportation logs with optional filters: `clientId`, `from`, `to`, `paymentStatus`, `limit`, `offset`)
+- `POST /api/transportation` (create transportation log entry)
+- `PATCH /api/transportation/:id` (update transportation log entry)
+- `DELETE /api/transportation/:id` (delete transportation log entry)
+- `GET /api/transportation/weekly-summary` (get weekly transportation summary by client and payment status)
+- `POST /api/transportation/:id/sync-quickbooks` (manually sync transportation to QuickBooks)
 - `GET /api/dashboard/stats` (overview KPIs, utilization, BCBA workload, trend + status breakdown; supports `rangePreset`, `startDate`, `endDate`)
 - `GET/POST /api/waitlist`
 - `GET /api/intake/pdf`
