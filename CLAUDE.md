@@ -1159,6 +1159,27 @@ name order like "Libby Schiff" or "Schiff Libby").
   Client field. Works identically to the `ClientSearchSelect` already in
   `WaitlistPage.jsx`, which shares the same UX pattern.
 
+## A+ Scheduling per-provider calendars to prevent double-booking (2026-10-13)
+
+Each provider (Goldy Silberman, therapists, and other staff) now has their own
+calendar view in the appointments scheduler. The calendar toolbar includes a
+provider dropdown that filters all visible appointments to show only the
+selected provider's schedule — making it easy to see when they are free and
+prevent scheduling conflicts.
+
+- Added `selectedProviderId` state to track which provider is being viewed.
+- Modified the `visibleAppts` filter to exclude appointments from other
+  providers when one is selected.
+- Added a provider dropdown to `CalendarToolbar`, alongside the view switcher
+  (day/week/month). Selecting a provider shows only their appointments; "All
+  Providers" shows the full calendar.
+- **Backend validation:** the server already rejects overlapping appointments
+  with a `409 Appointment conflict detected` error (see
+  `server/src/services/clinic/appointments/appointmentService.js`,
+  `hasProviderConflict`). The frontend could display this error in the modal
+  if a user tries to create an overlap (currently the API returns the error,
+  but the modal toast handling should display it).
+
 ## Rule 5: Deploy (step 3 of the Rule 0 end-of-task sequence)
 
 ### Smart Steps ABA Tracker (git-based, re-wired 2026-08-13)
