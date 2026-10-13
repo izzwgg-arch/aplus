@@ -1592,7 +1592,7 @@ function ViewSwitcher({ view, onChange }) {
 }
 
 /* ─── CalendarToolbar ───────────────────────────────────────────────────────── */
-function CalendarToolbar({ view, viewDate, weekStart, onPrev, onNext, onToday, onNew, onViewChange }) {
+function CalendarToolbar({ view, viewDate, weekStart, onPrev, onNext, onToday, onNew, onViewChange, providers, selectedProviderId, onProviderChange }) {
   let label;
   if (view === "day")   label = viewDate.toLocaleDateString("en-US", { weekday:"long", month:"long", day:"numeric", year:"numeric" });
   else if (view === "week") label = weekRangeLabel(weekStart);
@@ -1605,7 +1605,20 @@ function CalendarToolbar({ view, viewDate, weekStart, onPrev, onNext, onToday, o
         <p className="mt-0.5 text-sm text-slate-500">{label}</p>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
+        {/* Provider filter */}
+        <select
+          value={selectedProviderId || ""}
+          onChange={(e) => onProviderChange(e.target.value || null)}
+          className="saas-input text-sm"
+          style={{ height: 36 }}
+        >
+          <option value="">All Providers</option>
+          {providers.map((p) => (
+            <option key={p.id} value={p.id}>{p.fullName}</option>
+          ))}
+        </select>
+
         {/* View switcher */}
         <ViewSwitcher view={view} onChange={onViewChange} />
 
@@ -1639,16 +1652,17 @@ export default function AppointmentsPage() {
   const toast = useToast();
 
   // Calendar state
-  const [view,         setView]         = useState("week");
-  const [viewDate,     setViewDate]     = useState(() => new Date());
-  const [appointments, setAppointments] = useState([]);
-  const [services,     setServices]     = useState([]);
-  const [providers,    setProviders]    = useState([]);
-  const [clients,      setClients]      = useState([]);
-  const [loading,      setLoading]      = useState(true);
-  const [modal,        setModal]        = useState(null);
+  const [view,              setView]              = useState("week");
+  const [viewDate,          setViewDate]          = useState(() => new Date());
+  const [appointments,      setAppointments]      = useState([]);
+  const [services,          setServices]          = useState([]);
+  const [providers,         setProviders]         = useState([]);
+  const [clients,           setClients]           = useState([]);
+  const [loading,           setLoading]           = useState(true);
+  const [modal,             setModal]             = useState(null);
+  const [selectedProviderId, setSelectedProviderId] = useState(null);
   // Details drawer — stores the ID of the appointment to inspect
-  const [drawerApptId, setDrawerApptId] = useState(null);
+  const [drawerApptId,      setDrawerApptId]      = useState(null);
 
   /* ── Derived dates ── */
   const weekStart = useMemo(() => getWeekStart(viewDate), [viewDate]);
@@ -1665,22 +1679,29 @@ export default function AppointmentsPage() {
 
   /* ── Appointment filters ── */
   const visibleAppts = useMemo(() => {
+    let filtered = appointments;
+
+    // Filter by selected provider if one is chosen
+    if (selectedProviderId) {
+      filtered = filtered.filter((a) => a.providerId === selectedProviderId);
+    }
+
     if (view === "day") {
-      return appointments.filter((a) => isSameDay(new Date(a.startsAt), viewDate));
+      return filtered.filter((a) => isSameDay(new Date(a.startsAt), viewDate));
     }
     if (view === "week") {
       // Use isSameDay per weekday — avoids any UTC timestamp edge-cases at day boundaries
-      return appointments.filter((a) => {
+      return filtered.filter((a) => {
         const d = new Date(a.startsAt);
         return weekDates.some((wd) => isSameDay(d, wd));
       });
     }
     // month — include all dates in the 6-week grid
-    return appointments.filter((a) => {
+    return filtered.filter((a) => {
       const d = new Date(a.startsAt);
       return monthDates.some((md) => isSameDay(d, md));
     });
-  }, [appointments, view, viewDate, weekDates, monthDates]);
+  }, [appointments, view, viewDate, weekDates, monthDates, selectedProviderId]);
 
   /* ── Pre-compute holidays for all visible dates ── */
   const dayHolidays = useMemo(() => {
@@ -1879,6 +1900,9 @@ export default function AppointmentsPage() {
         onToday={goToday}
         onNew={handleNew}
         onViewChange={(v) => setView(v)}
+        providers={providers}
+        selectedProviderId={selectedProviderId}
+        onProviderChange={setSelectedProviderId}
       />
 
       {loading ? (
