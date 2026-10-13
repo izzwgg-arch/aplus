@@ -81,6 +81,11 @@ function RecordPaymentModal({ invoice, onClose, onSuccess }) {
     sendReceipt: true
   });
 
+  const formAmount = Number(form.amount) || 0;
+  const balanceDue = Number(invoice.balanceDue) || 0;
+  const isOverpayment = formAmount > balanceDue + 0.01;
+  const creditAmount = Math.max(0, formAmount - balanceDue);
+
   const submit = async (e) => {
     e.preventDefault();
     if (!form.amount || Number(form.amount) <= 0) return toast?.error("Enter a valid amount.");
@@ -94,7 +99,10 @@ function RecordPaymentModal({ invoice, onClose, onSuccess }) {
         notes: form.notes || undefined,
         sendReceipt: form.sendReceipt
       });
-      toast?.success(form.sendReceipt ? "Payment recorded. Receipt emailed." : "Payment recorded.");
+      const msg = isOverpayment
+        ? `Payment recorded (${money(creditAmount)} credit will sync to QuickBooks). Receipt emailed.`
+        : "Payment recorded.";
+      toast?.success(form.sendReceipt ? msg : msg.replace(" Receipt emailed.", ""));
       onSuccess();
     } catch (err) {
       toast?.error(err?.response?.data?.error || "Could not record payment.");
@@ -119,6 +127,11 @@ function RecordPaymentModal({ invoice, onClose, onSuccess }) {
           <div>
             <label style={{ fontSize: 12, fontWeight: 600, color: "#64748B", display: "block", marginBottom: 6 }}>Amount *</label>
             <input className="saas-input" type="number" min="0.01" step="0.01" value={form.amount} onChange={(e) => setForm((p) => ({ ...p, amount: e.target.value }))} />
+            {isOverpayment && (
+              <div style={{ marginTop: 8, padding: "8px 12px", background: "#EFF6FF", border: "1px solid #93C5FD", borderRadius: 6, fontSize: 12, color: "#1E40AF" }}>
+                ✓ Overpayment: <strong>{money(creditAmount)} will be credited</strong> to the client in QuickBooks
+              </div>
+            )}
           </div>
           <div>
             <label style={{ fontSize: 12, fontWeight: 600, color: "#64748B", display: "block", marginBottom: 6 }}>Payment Method *</label>
@@ -593,6 +606,90 @@ function EditInvoiceModal({ invoice, onClose, onSuccess }) {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────── */
+/* Edit Payment Modal — edit amount, date, method                              */
+/* ─────────────────────────────────────────────────────────────────────────── */
+function EditPaymentModal({ payment, invoice, onClose, onSuccess }) {
+  const toast = useToast();
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    amount: Number(payment.amount || 0).toFixed(2),
+    paymentMethod: payment.paymentMethod || "Cash",
+    paymentDate: payment.paymentDate ? new Date(payment.paymentDate).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
+    transactionReference: payment.description || ""
+  });
+
+  const formAmount = Number(form.amount) || 0;
+  const balanceDue = Number(invoice.balanceDue) || 0;
+  const isOverpayment = formAmount > balanceDue + 0.01;
+  const creditAmount = Math.max(0, formAmount - balanceDue);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!form.amount || Number(form.amount) <= 0) return toast?.error("Enter a valid amount.");
+    setSaving(true);
+    try {
+      await api.patch(`/invoices/${invoice.id}/payments/${payment.id}`, {
+        amount: Number(form.amount),
+        paymentMethod: form.paymentMethod,
+        paymentDate: form.paymentDate ? new Date(form.paymentDate).toISOString() : undefined,
+        transactionReference: form.transactionReference || undefined
+      });
+      toast?.success(isOverpayment ? `Payment updated. Credit of ${money(creditAmount)} will sync to QuickBooks.` : "Payment updated.");
+      onSuccess();
+    } catch (err) {
+      toast?.error(err?.response?.data?.error || "Could not update payment.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div style={{ padding: "24px 28px 0" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+            <div>
+              <p style={{ fontSize: 17, fontWeight: 700, color: "#0F172A" }}>Edit Payment</p>
+              <p style={{ fontSize: 13, color: "#94A3B8", marginTop: 2 }}>{invoice.invoiceNumber}</p>
+            </div>
+            <button onClick={onClose} style={{ background: "#F1F5F9", border: "none", borderRadius: 8, width: 32, height: 32, cursor: "pointer", fontSize: 18, color: "#64748B" }}>×</button>
+          </div>
+        </div>
+        <form onSubmit={submit} style={{ padding: "0 28px 28px", display: "flex", flexDirection: "column", gap: 14 }}>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "#64748B", display: "block", marginBottom: 6 }}>Amount *</label>
+            <input className="saas-input" type="number" min="0.01" step="0.01" value={form.amount} onChange={(e) => setForm((p) => ({ ...p, amount: e.target.value }))} />
+            {isOverpayment && (
+              <div style={{ marginTop: 8, padding: "8px 12px", background: "#EFF6FF", border: "1px solid #93C5FD", borderRadius: 6, fontSize: 12, color: "#1E40AF" }}>
+                ✓ Overpayment: <strong>{money(creditAmount)} will be credited</strong> to the client in QuickBooks
+              </div>
+            )}
+          </div>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "#64748B", display: "block", marginBottom: 6 }}>Payment Method *</label>
+            <select className="saas-input" value={form.paymentMethod} onChange={(e) => setForm((p) => ({ ...p, paymentMethod: e.target.value }))}>
+              {METHOD_LABELS.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "#64748B", display: "block", marginBottom: 6 }}>Payment Date</label>
+            <input className="saas-input" type="date" value={form.paymentDate} onChange={(e) => setForm((p) => ({ ...p, paymentDate: e.target.value }))} />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "#64748B", display: "block", marginBottom: 6 }}>Reference / Check # (optional)</label>
+            <input className="saas-input" placeholder="e.g. Check #1042" value={form.transactionReference} onChange={(e) => setForm((p) => ({ ...p, transactionReference: e.target.value }))} />
+          </div>
+          <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+            <button type="button" className="btn-secondary" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
+            <button className="btn-primary" style={{ flex: 1 }} disabled={saving}>{saving ? "Saving…" : "Save Payment"}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────── */
 /* Main Page                                                                    */
 /* ─────────────────────────────────────────────────────────────────────────── */
 export default function InvoicesPage() {
@@ -609,6 +706,7 @@ export default function InvoicesPage() {
   const [showEdit, setShowEdit]     = useState(false);
   const [showPay, setShowPay]       = useState(false);
   const [showCharge, setShowCharge] = useState(false);
+  const [editPayment, setEditPayment] = useState(null);
   const [syncing, setSyncing]       = useState(false);
   const [sending, setSending]       = useState(false);
   const [generatingLink, setGeneratingLink] = useState(false);
@@ -1035,14 +1133,24 @@ export default function InvoicesPage() {
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
                       <p style={{ fontSize: 14, fontWeight: 700, color: "#15803D" }}>{money(p.amount)}</p>
-                      {!p.receiptSentAt && p.status === "SUCCEEDED" && (
-                        <button
-                          onClick={() => doSendReceipt(selected.id, p.id)}
-                          style={{ fontSize: 11, padding: "3px 8px", background: "#EFF6FF", color: "#2563EB", border: "none", borderRadius: 6, cursor: "pointer" }}
-                        >
-                          Send Receipt
-                        </button>
-                      )}
+                      <div style={{ display: "flex", gap: 4 }}>
+                        {p.paymentSourceType === "MANUAL" && (
+                          <button
+                            onClick={() => setEditPayment(p)}
+                            style={{ fontSize: 11, padding: "3px 8px", background: "#F3E8FF", color: "#7C3AED", border: "none", borderRadius: 6, cursor: "pointer" }}
+                          >
+                            Edit
+                          </button>
+                        )}
+                        {!p.receiptSentAt && p.status === "SUCCEEDED" && (
+                          <button
+                            onClick={() => doSendReceipt(selected.id, p.id)}
+                            style={{ fontSize: 11, padding: "3px 8px", background: "#EFF6FF", color: "#2563EB", border: "none", borderRadius: 6, cursor: "pointer" }}
+                          >
+                            Send Receipt
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1111,6 +1219,10 @@ export default function InvoicesPage() {
       {showCharge && selected && (
         <ChargeCardModal invoice={selected} onClose={() => setShowCharge(false)}
           onSuccess={() => { setShowCharge(false); load(); api.get(`/invoices/${selected.id}/activity`).then(({ data }) => setActivities(data)).catch(() => {}); }} />
+      )}
+      {editPayment && selected && (
+        <EditPaymentModal payment={editPayment} invoice={selected} onClose={() => setEditPayment(null)}
+          onSuccess={() => { setEditPayment(null); load(); api.get(`/invoices/${selected.id}/activity`).then(({ data }) => setActivities(data)).catch(() => {}); }} />
       )}
     </div>
   );

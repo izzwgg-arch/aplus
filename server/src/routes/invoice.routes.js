@@ -292,7 +292,8 @@ router.post("/:id/pay", requirePermission("aplus.billing.record_cash"), async (r
 
   const amount = req.body?.amount !== undefined ? asNumber(req.body.amount, "amount") : invoice.balanceDue;
   if (amount <= 0) return res.status(400).json({ error: "Payment amount must be greater than 0" });
-  if (amount > invoice.balanceDue + 0.01) return res.status(400).json({ error: "Amount exceeds balance due" });
+  // Allow overpayments — they will create credits in QuickBooks
+  const isOverpayment = amount > invoice.balanceDue + 0.01;
 
   const paymentMethod         = asOptionalString(req.body?.paymentMethod) || "Other";
   const transactionReference  = asOptionalString(req.body?.transactionReference);
@@ -309,10 +310,11 @@ router.post("/:id/pay", requirePermission("aplus.billing.record_cash"), async (r
       amount,
       currency:       "USD",
       paymentDate:    req.body?.paymentDate ? asDate(req.body.paymentDate, "paymentDate") : new Date(),
-      description:    descriptionParts.join(" — ") || "Manual invoice payment",
+      description:    descriptionParts.join(" — ") || (isOverpayment ? `Manual overpayment (creates credit)` : "Manual invoice payment"),
       status:         "SUCCEEDED",
       paymentMethod,
-      paymentSourceType: "MANUAL"
+      paymentSourceType: "MANUAL",
+      metadata:       isOverpayment ? { isOverpayment: true, creditAmount: Number((amount - invoice.balanceDue).toFixed(2)) } : {}
     }
   });
 
@@ -395,15 +397,37 @@ router.patch("/:id/payments/:paymentId", requirePermission("aplus.billing.edit_i
   const paymentDate = req.body?.paymentDate ? asDate(req.body.paymentDate, "paymentDate") : undefined;
   const transactionReference = asOptionalString(req.body?.transactionReference);
   const notes = asOptionalString(req.body?.notes);
+
+  // Allow editing payment amount to support overpayments and corrections
+  let updateData = {
+    paymentMethod,
+    paymentDate,
+    description: undefined,
+    metadata: payment.metadata || {}
+  };
+
+  if (req.body?.amount !== undefined) {
+    const newAmount = asNumber(req.body.amount, "amount");
+    if (newAmount <= 0) return res.status(400).json({ error: "Payment amount must be greater than 0" });
+    updateData.amount = newAmount;
+
+    // Track if this is an overpayment
+    const isOverpayment = newAmount > invoice.balanceDue + 0.01;
+    if (isOverpayment) {
+      updateData.metadata = {
+        ...updateData.metadata,
+        isOverpayment: true,
+        creditAmount: Number((newAmount - invoice.balanceDue).toFixed(2))
+      };
+    }
+  }
+
   const descriptionParts = [paymentMethod, transactionReference, notes].filter(Boolean);
+  updateData.description = descriptionParts.length ? descriptionParts.join(" — ") : payment.description;
 
   const updated = await prisma.payment.update({
     where: { id: payment.id },
-    data: {
-      paymentMethod,
-      paymentDate,
-      description: descriptionParts.length ? descriptionParts.join(" — ") : payment.description
-    }
+    data: updateData
   });
 
   await writeAuditLog(req, {
