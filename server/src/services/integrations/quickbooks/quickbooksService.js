@@ -626,26 +626,19 @@ function buildQBInvoicePayload(invoice, qbCustomerId, qbInvoiceId, syncToken) {
     TxnDate: new Date(invoice.issueDate).toISOString().slice(0, 10),
     DueDate: invoice.dueDate ? new Date(invoice.dueDate).toISOString().slice(0, 10) : undefined,
     Line: (invoice.lineItems || []).map((li) => ({
-      DetailType: "SalesItemLineDetail",
+      DetailType: "DescriptionOnlyLineDetail",
       Amount: Number(li.amount),
       Description: li.description || undefined,
-      SalesItemLineDetail: {
-        Qty: Number(li.quantity),
-        UnitPrice: Number(li.unitPrice),
-        ItemRef: { value: "1", name: "Services" }
-      }
+      DescriptionOnlyLineDetail: {}
     }))
   };
 
   if (!payload.Line.length) {
     payload.Line = [{
-      DetailType: "SalesItemLineDetail",
+      DetailType: "DescriptionOnlyLineDetail",
       Amount: Number(invoice.total),
-      SalesItemLineDetail: {
-        Qty: 1,
-        UnitPrice: Number(invoice.total),
-        ItemRef: { value: "1", name: "Services" }
-      }
+      Description: "Services",
+      DescriptionOnlyLineDetail: {}
     }];
   }
 
