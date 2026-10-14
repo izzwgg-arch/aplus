@@ -36,9 +36,12 @@ function StatusPill({ status }) {
 function TransportationModal({ entry, clients, onClose, onSave }) {
   const toast = useToast();
   const [saving, setSaving] = useState(false);
+  const [clientSearch, setClientSearch] = useState("");
+  const [showClientDropdown, setShowClientDropdown] = useState(false);
   const [form, setForm] = useState(
     entry || {
       clientId: "",
+      clientName: "",
       serviceDate: new Date().toISOString().split("T")[0],
       description: "",
       amount: "",
@@ -47,6 +50,18 @@ function TransportationModal({ entry, clients, onClose, onSave }) {
       notes: ""
     }
   );
+
+  const filteredClients = clients.filter(c =>
+    c.fullName.toLowerCase().includes(clientSearch.toLowerCase()) ||
+    c.firstName?.toLowerCase().includes(clientSearch.toLowerCase()) ||
+    c.lastName?.toLowerCase().includes(clientSearch.toLowerCase())
+  );
+
+  const handleSelectClient = (client) => {
+    setForm({ ...form, clientId: client.id, clientName: client.fullName });
+    setClientSearch("");
+    setShowClientDropdown(false);
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -86,18 +101,35 @@ function TransportationModal({ entry, clients, onClose, onSave }) {
       <div style={{ background: "white", borderRadius: 12, padding: 24, maxWidth: 500, width: "90%" }}>
         <h2 style={{ margin: 0, marginBottom: 16, fontSize: 18 }}>{entry ? "Edit Transportation" : "Add Transportation"}</h2>
         <form onSubmit={submit}>
-          <div style={{ marginBottom: 12 }}>
+          <div style={{ marginBottom: 12, position: "relative" }}>
             <label style={{ display: "block", fontSize: 12, fontWeight: 500, marginBottom: 4 }}>Client *</label>
-            <select
-              value={form.clientId}
-              onChange={(e) => setForm({ ...form, clientId: e.target.value })}
-              style={{ width: "100%", padding: 8, border: "1px solid #ddd", borderRadius: 6, fontSize: 13 }}
-            >
-              <option value="">— Select Client —</option>
-              {clients.map(c => (
-                <option key={c.id} value={c.id}>{c.fullName}</option>
-              ))}
-            </select>
+            <input
+              type="text"
+              value={clientSearch || form.clientName}
+              onChange={(e) => { setClientSearch(e.target.value); setShowClientDropdown(true); }}
+              onFocus={() => setShowClientDropdown(true)}
+              placeholder="Search client..."
+              style={{ width: "100%", padding: 8, border: "1px solid #ddd", borderRadius: 6, fontSize: 13, boxSizing: "border-box" }}
+            />
+            {showClientDropdown && (
+              <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "white", border: "1px solid #ddd", borderTop: "none", borderRadius: "0 0 6px 6px", maxHeight: 200, overflowY: "auto", zIndex: 100 }}>
+                {filteredClients.length === 0 ? (
+                  <div style={{ padding: 12, fontSize: 13, color: "#999" }}>No clients found</div>
+                ) : (
+                  filteredClients.map(c => (
+                    <div
+                      key={c.id}
+                      onClick={() => handleSelectClient(c)}
+                      style={{ padding: "8px 12px", borderBottom: "1px solid #f0f0f0", cursor: "pointer", fontSize: 13 }}
+                      onMouseEnter={(e) => e.target.style.background = "#f9fafb"}
+                      onMouseLeave={(e) => e.target.style.background = "white"}
+                    >
+                      {c.fullName}
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
           </div>
           <div style={{ marginBottom: 12 }}>
             <label style={{ display: "block", fontSize: 12, fontWeight: 500, marginBottom: 4 }}>Service Date *</label>
