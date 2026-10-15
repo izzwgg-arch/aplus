@@ -321,26 +321,31 @@ export async function syncInvoiceToQuickbooks(invoiceId, ctx = {}) {
     let qbInvoiceId = invoice.quickbooksInvoiceId;
 
     if (qbInvoiceId) {
-      const existing = await qbAccountingApiRequest({
-        path: `/invoice/${qbInvoiceId}?minorversion=65`,
-        method: "GET",
-        account,
-        feature: "invoice_read",
-        triggerType: c.triggerType,
-        userId: c.userId
-      }).catch(() => null);
-      if (existing?.Invoice) {
-        const syncVersion = existing.Invoice.SyncToken;
-        await qbAccountingApiRequest({
-          path: `/invoice?minorversion=65`,
-          method: "POST",
-          body: buildQBInvoicePayload(invoice, qbCustomerId, qbInvoiceId, syncVersion),
+      try {
+        const existing = await qbAccountingApiRequest({
+          path: `/invoice/${qbInvoiceId}?minorversion=65`,
+          method: "GET",
           account,
-          feature: "invoice_update",
+          feature: "invoice_read",
           triggerType: c.triggerType,
           userId: c.userId
         });
-      } else {
+        if (existing?.Invoice) {
+          const syncVersion = existing.Invoice.SyncToken;
+          await qbAccountingApiRequest({
+            path: `/invoice?minorversion=65`,
+            method: "POST",
+            body: buildQBInvoicePayload(invoice, qbCustomerId, qbInvoiceId, syncVersion),
+            account,
+            feature: "invoice_update",
+            triggerType: c.triggerType,
+            userId: c.userId
+          });
+        } else {
+          qbInvoiceId = null;
+        }
+      } catch (err) {
+        console.error(`[QB] Failed to update invoice ${qbInvoiceId}: ${err?.message}. Creating new invoice instead.`);
         qbInvoiceId = null;
       }
     }
@@ -375,9 +380,14 @@ export async function syncInvoiceToQuickbooks(invoiceId, ctx = {}) {
     await upsertIntegrationAccount("QUICKBOOKS", { lastSyncAt: new Date(), syncStatus: "SUCCESS", syncError: null });
     return updated;
   } catch (error) {
+    const isReferenceError = error?.message?.includes("Invalid Reference Id");
     await prisma.invoice.update({
       where: { id: invoiceId },
-      data: { qbSyncStatus: "FAILED", qbSyncError: error.message || "Sync failed" }
+      data: {
+        qbSyncStatus: "FAILED",
+        qbSyncError: error.message || "Sync failed",
+        quickbooksInvoiceId: isReferenceError ? null : undefined
+      }
     }).catch(() => {});
     await writeIntegrationSyncLog({
       provider: "QUICKBOOKS",
