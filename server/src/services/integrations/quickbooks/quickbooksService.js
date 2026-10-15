@@ -252,6 +252,9 @@ async function ensureQBCustomer(client, account, ctx = {}) {
     const allCustomers = data?.QueryResponse?.Customer || [];
     const nameParts = client.fullName.toLowerCase().trim().split(/\s+/);
 
+    console.error(`[QB DEBUG] Searching ${allCustomers.length} customers for: "${client.fullName}" (parts: ${nameParts.join(", ")})`);
+    allCustomers.slice(0, 10).forEach(c => console.error(`[QB DEBUG]   Customer: "${c.DisplayName}" (ID: ${c.Id})`));
+
     // Look for customer whose name contains all the same parts (in any order)
     existing = allCustomers.find((cust) => {
       const custParts = (cust.DisplayName || "").toLowerCase().trim().split(/\s+/);
@@ -259,9 +262,11 @@ async function ensureQBCustomer(client, account, ctx = {}) {
     });
 
     if (existing) {
+      console.error(`[QB DEBUG] FOUND MATCH: "${existing.DisplayName}" (ID: ${existing.Id})`);
       await prisma.client.update({ where: { id: client.id }, data: { quickbooksCustomerId: existing.Id } }).catch(() => {});
       return existing.Id;
     }
+    console.error(`[QB DEBUG] NO MATCH FOUND - will create new customer`);
   } catch (err) {
     // Fall through to create new customer
   }
