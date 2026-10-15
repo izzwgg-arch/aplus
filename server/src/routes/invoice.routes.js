@@ -286,74 +286,80 @@ router.post("/:id/send", requirePermission("aplus.billing.edit_invoices"), async
 
 // ── Record manual payment ────────────────────────────────────────────────────
 router.post("/:id/pay", requirePermission("aplus.billing.record_cash"), async (req, res) => {
-  const invoice = await prisma.invoice.findUnique({ where: { id: req.params.id }, include: { client: true } });
-  if (!invoice) return res.status(404).json({ error: "Invoice not found" });
-  if (invoice.status === "VOID") return res.status(400).json({ error: "Cannot pay a void invoice" });
+  try {
+    const invoice = await prisma.invoice.findUnique({ where: { id: req.params.id }, include: { client: true } });
+    if (!invoice) return res.status(404).json({ error: "Invoice not found" });
+    if (invoice.status === "VOID") return res.status(400).json({ error: "Cannot pay a void invoice" });
 
-  const amount = req.body?.amount !== undefined ? asNumber(req.body.amount, "amount") : invoice.balanceDue;
-  if (amount <= 0) return res.status(400).json({ error: "Payment amount must be greater than 0" });
-  // Allow overpayments — they will create credits in QuickBooks
-  const isOverpayment = amount > invoice.balanceDue + 0.01;
+    const amount = req.body?.amount !== undefined ? asNumber(req.body.amount, "amount") : invoice.balanceDue;
+    if (amount <= 0) return res.status(400).json({ error: "Payment amount must be greater than 0" });
+    // Allow partial payments and overpayments — they will create credits in QuickBooks
+    const isOverpayment = amount > invoice.balanceDue + 0.01;
+    const isPartial = amount < invoice.balanceDue - 0.01;
 
-  const paymentMethod         = asOptionalString(req.body?.paymentMethod) || "Other";
-  const transactionReference  = asOptionalString(req.body?.transactionReference);
-  const notes                 = asOptionalString(req.body?.notes);
-  const sendReceipt           = req.body?.sendReceipt !== false; // default true
-  const descriptionParts = [paymentMethod, transactionReference, notes].filter(Boolean);
+    const paymentMethod         = asOptionalString(req.body?.paymentMethod) || "Other";
+    const transactionReference  = asOptionalString(req.body?.transactionReference);
+    const notes                 = asOptionalString(req.body?.notes);
+    const sendReceipt           = req.body?.sendReceipt !== false; // default true
+    const descriptionParts = [paymentMethod, transactionReference, notes].filter(Boolean);
 
-  const payment = await prisma.payment.create({
-    data: {
-      clientId:       invoice.clientId,
-      invoiceId:      invoice.id,
-      processor:      "PAYMENT_HUB",
-      externalPaymentId: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      amount,
-      currency:       "USD",
-      paymentDate:    req.body?.paymentDate ? asDate(req.body.paymentDate, "paymentDate") : new Date(),
-      description:    descriptionParts.join(" — ") || (isOverpayment ? `Manual overpayment (creates credit)` : "Manual invoice payment"),
-      status:         "SUCCEEDED",
-      paymentMethod,
-      paymentSourceType: "MANUAL",
-      metadata:       isOverpayment ? { isOverpayment: true, creditAmount: Number((amount - invoice.balanceDue).toFixed(2)) } : {}
+    const payment = await prisma.payment.create({
+      data: {
+        clientId:       invoice.clientId,
+        invoiceId:      invoice.id,
+        processor:      "PAYMENT_HUB",
+        externalPaymentId: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        amount,
+        currency:       "USD",
+        paymentDate:    req.body?.paymentDate ? asDate(req.body.paymentDate, "paymentDate") : new Date(),
+        description:    descriptionParts.join(" — ") || (isOverpayment ? `Manual overpayment (creates credit)` : isPartial ? "Partial payment" : "Manual invoice payment"),
+        status:         "SUCCEEDED",
+        paymentMethod,
+        paymentSourceType: "MANUAL",
+        metadata:       isOverpayment ? { isOverpayment: true, creditAmount: Number((amount - invoice.balanceDue).toFixed(2)) } : isPartial ? { isPartial: true } : {}
+      }
+    });
+
+    const updatedInvoice = await recalculateInvoiceBalance(invoice.id);
+
+    await writeAuditLog(req, {
+      action: "PAYMENT_RECORDED",
+      entityType: "Payment",
+      entityId: payment.id,
+      detailsJson: { invoiceId: invoice.id, amount, paymentMethod }
+    });
+
+    logActivity({
+      invoiceId: invoice.id,
+      type: "MANUAL_PAYMENT",
+      message: `Manual payment of ${amount.toFixed(2)} recorded via ${paymentMethod}${isPartial ? " (partial)" : isOverpayment ? " (overpayment)" : ""}`,
+      actorType: "USER",
+      actorId: req.user?.id,
+      metadata: { amount, paymentMethod, transactionReference, paymentId: payment.id }
+    }).catch(() => {});
+
+    // Send receipt email (non-blocking)
+    if (sendReceipt && invoice.client?.email) {
+      const settings = await getOrCreateClinicSettings();
+      sendReceiptEmail({ invoice: { ...updatedInvoice, client: invoice.client }, payment, settings })
+        .then(async () => {
+          await prisma.payment.update({ where: { id: payment.id }, data: { receiptSentAt: new Date() } });
+          logActivity({ invoiceId: invoice.id, type: "RECEIPT_SENT", message: `Receipt emailed to ${invoice.client.email}`, metadata: { to: invoice.client.email, paymentId: payment.id } }).catch(() => {});
+        })
+        .catch((err) => console.error("[receipt-email]", err?.message));
     }
-  });
 
-  const updatedInvoice = await recalculateInvoiceBalance(invoice.id);
+    // Non-blocking QB sync (don't fail the payment if QB fails)
+    syncPaymentToQuickbooks(payment.id, { userId: req.user?.id, triggerType: "user" }).catch((err) => {
+      console.error("[qb-sync] Payment sync failed for", payment.id, err?.message);
+      logActivity({ invoiceId: invoice.id, type: "QB_FAILED", message: `QuickBooks sync failed: ${err?.message}`, metadata: { paymentId: payment.id } }).catch(() => {});
+    });
 
-  await writeAuditLog(req, {
-    action: "PAYMENT_RECORDED",
-    entityType: "Payment",
-    entityId: payment.id,
-    detailsJson: { invoiceId: invoice.id, amount, paymentMethod }
-  });
-
-  logActivity({
-    invoiceId: invoice.id,
-    type: "MANUAL_PAYMENT",
-    message: `Manual payment of ${amount.toFixed(2)} recorded via ${paymentMethod}`,
-    actorType: "USER",
-    actorId: req.user?.id,
-    metadata: { amount, paymentMethod, transactionReference, paymentId: payment.id }
-  }).catch(() => {});
-
-  // Send receipt email (non-blocking)
-  if (sendReceipt && invoice.client?.email) {
-    const settings = await getOrCreateClinicSettings();
-    sendReceiptEmail({ invoice: { ...updatedInvoice, client: invoice.client }, payment, settings })
-      .then(async () => {
-        await prisma.payment.update({ where: { id: payment.id }, data: { receiptSentAt: new Date() } });
-        logActivity({ invoiceId: invoice.id, type: "RECEIPT_SENT", message: `Receipt emailed to ${invoice.client.email}`, metadata: { to: invoice.client.email, paymentId: payment.id } }).catch(() => {});
-      })
-      .catch((err) => console.error("[receipt-email]", err?.message));
+    return res.json({ payment, invoice: updatedInvoice });
+  } catch (error) {
+    console.error("[payment-record]", error?.message, error?.stack);
+    return res.status(error.status || 500).json({ error: error.message || "Could not record payment" });
   }
-
-  // Non-blocking QB sync
-  syncPaymentToQuickbooks(payment.id, { userId: req.user?.id, triggerType: "user" }).catch((err) => {
-    console.error("[qb-sync] Payment sync failed for", payment.id, err?.message);
-    logActivity({ invoiceId: invoice.id, type: "QB_FAILED", message: `QuickBooks sync failed: ${err?.message}`, metadata: { paymentId: payment.id } }).catch(() => {});
-  });
-
-  return res.json({ payment, invoice: updatedInvoice });
 });
 
 // ── Send receipt email for a specific payment ────────────────────────────────
