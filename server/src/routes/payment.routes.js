@@ -482,6 +482,62 @@ router.get("/:id/refunds", requirePermission("aplus.billing.view_payment_history
   return res.json(refunds);
 });
 
+// ── Update payment (edit amount, date, method, notes) ──────────────────────
+router.patch("/:id", requirePermission("aplus.billing.edit_invoices"), async (req, res) => {
+  try {
+    const body = req.body || {};
+    const payment = await prisma.payment.findUnique({
+      where: { id: req.params.id },
+      include: { invoice: { include: { client: true } } }
+    });
+    if (!payment) return res.status(404).json({ error: "Payment not found" });
+
+    const amount = body.amount !== undefined ? asNumber(body.amount, "amount") : undefined;
+    if (amount !== undefined && amount <= 0) return res.status(400).json({ error: "Amount must be greater than 0" });
+
+    const paymentDate = body.paymentDate ? new Date(String(body.paymentDate)) : undefined;
+    const paymentMethod = body.paymentMethod !== undefined ? asOptionalString(body.paymentMethod) : undefined;
+    const notes = body.notes !== undefined ? asOptionalString(body.notes) : undefined;
+
+    const updated = await prisma.payment.update({
+      where: { id: req.params.id },
+      data: {
+        ...(amount !== undefined && { amount }),
+        ...(paymentDate !== undefined && { paymentDate }),
+        ...(paymentMethod !== undefined && { paymentMethod }),
+        ...(notes !== undefined && { notes })
+      },
+      include: { client: true, invoice: true, refunds: { orderBy: { createdAt: "desc" } } }
+    });
+
+    // Recalculate invoice balance if amount changed
+    if (amount !== undefined && payment.invoiceId) {
+      await recalculateInvoiceBalance(payment.invoiceId);
+    }
+
+    await writeAuditLog(req, {
+      action:     "PAYMENT_UPDATED",
+      entityType: "Payment",
+      entityId:   req.params.id,
+      detailsJson: { amountChanged: amount !== undefined, dateChanged: paymentDate !== undefined, methodChanged: paymentMethod !== undefined }
+    });
+
+    logActivity({
+      invoiceId: payment.invoiceId,
+      type:      "NOTE",
+      message:   `Payment updated: ${amount !== undefined ? `amount $${Number(amount).toFixed(2)}` : ""}${paymentDate !== undefined ? `, date ${paymentDate.toLocaleDateString()}` : ""}${paymentMethod !== undefined ? `, method ${paymentMethod}` : ""}`,
+      actorType: "USER",
+      actorId:   req.user?.id,
+      metadata:  { paymentId: req.params.id }
+    }).catch(() => {});
+
+    return res.json(updated);
+  } catch (error) {
+    console.error("[PATCH /payment/:id]", error?.message);
+    return res.status(error.status || 500).json({ error: error.message || "Payment update failed" });
+  }
+});
+
 router.post("/:id/refresh-status", requirePermission("aplus.billing.view_payment_history"), async (req, res) => {
   try {
     const updated = await refreshProcessorPaymentStatus(req.params.id);
