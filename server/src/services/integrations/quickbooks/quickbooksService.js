@@ -238,35 +238,50 @@ async function ensureQBCustomer(client, account, ctx = {}) {
       return existing.Id;
     }
 
-    // If not found, try searching all customers and match by parts
-    query = encodeURIComponent(`SELECT * FROM Customer MAXRESULTS 1000`);
-    data = await qbAccountingApiRequest({
-      path: `/query?query=${query}&minorversion=65`,
+    // If not found, try alternative name order (reversed) first
+    const nameParts = client.fullName.toLowerCase().trim().split(/\s+/);
+    const reversedName = nameParts.reverse().join(" ");
+    let altQuery = encodeURIComponent(`SELECT * FROM Customer WHERE DisplayName = '${reversedName.replace(/'/g, "\\'")}'`);
+    let altData = await qbAccountingApiRequest({
+      path: `/query?query=${altQuery}&minorversion=65`,
       method: "GET",
       account,
-      feature: "customer_query_all",
+      feature: "customer_query_alt",
       triggerType: c.triggerType,
       userId: c.userId
     }).catch(() => null);
-
-    const allCustomers = data?.QueryResponse?.Customer || [];
-    const nameParts = client.fullName.toLowerCase().trim().split(/\s+/);
-
-    console.error(`[QB DEBUG] Searching ${allCustomers.length} customers for: "${client.fullName}" (parts: ${nameParts.join(", ")})`);
-    allCustomers.slice(0, 10).forEach(c => console.error(`[QB DEBUG]   Customer: "${c.DisplayName}" (ID: ${c.Id})`));
-
-    // Look for customer whose name contains all the same parts (in any order)
-    existing = allCustomers.find((cust) => {
-      const custParts = (cust.DisplayName || "").toLowerCase().trim().split(/\s+/);
-      return nameParts.length > 0 && nameParts.every(p => custParts.includes(p)) && custParts.every(p => nameParts.includes(p));
-    });
-
-    if (existing) {
-      console.error(`[QB DEBUG] FOUND MATCH: "${existing.DisplayName}" (ID: ${existing.Id})`);
-      await prisma.client.update({ where: { id: client.id }, data: { quickbooksCustomerId: existing.Id } }).catch(() => {});
-      return existing.Id;
+    let altExisting = altData?.QueryResponse?.Customer?.[0];
+    if (altExisting) {
+      console.error(`[QB DEBUG] Found customer with reversed name: "${altExisting.DisplayName}" (ID: ${altExisting.Id})`);
+      await prisma.client.update({ where: { id: client.id }, data: { quickbooksCustomerId: altExisting.Id } }).catch(() => {});
+      return altExisting.Id;
     }
-    console.error(`[QB DEBUG] NO MATCH FOUND - will create new customer`);
+
+    // Last resort: try case variations
+    const caseVariations = [
+      client.fullName.toUpperCase(),
+      client.fullName.toLowerCase(),
+      client.fullName.charAt(0).toUpperCase() + client.fullName.slice(1).toLowerCase()
+    ];
+    for (const variation of caseVariations) {
+      if (variation === client.fullName) continue; // skip already tried
+      let caseQuery = encodeURIComponent(`SELECT * FROM Customer WHERE DisplayName = '${variation.replace(/'/g, "\\'")}'`);
+      let caseData = await qbAccountingApiRequest({
+        path: `/query?query=${caseQuery}&minorversion=65`,
+        method: "GET",
+        account,
+        feature: "customer_query_case",
+        triggerType: c.triggerType,
+        userId: c.userId
+      }).catch(() => null);
+      let caseExisting = caseData?.QueryResponse?.Customer?.[0];
+      if (caseExisting) {
+        console.error(`[QB DEBUG] Found customer with variation: "${caseExisting.DisplayName}" (ID: ${caseExisting.Id})`);
+        await prisma.client.update({ where: { id: client.id }, data: { quickbooksCustomerId: caseExisting.Id } }).catch(() => {});
+        return caseExisting.Id;
+      }
+    }
+    console.error(`[QB DEBUG] Customer not found for: "${client.fullName}" - will create new`);
   } catch (err) {
     // Fall through to create new customer
   }
