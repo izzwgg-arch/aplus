@@ -217,30 +217,53 @@ export async function disconnectQuickbooks() {
 async function ensureQBCustomer(client, account, ctx = {}) {
   const c = qbCtx(ctx);
   if (client.quickbooksCustomerId) {
-    console.log(`[QB] Using stored customer ID for ${client.fullName}: ${client.quickbooksCustomerId}`);
     return client.quickbooksCustomerId;
   }
 
   try {
-    const query = encodeURIComponent(`SELECT * FROM Customer WHERE DisplayName = '${client.fullName.replace(/'/g, "\\'")}'`);
-    console.log(`[QB] Querying for customer: ${client.fullName}`);
-    const data = await qbAccountingApiRequest({
+    // Try exact match first
+    let query = encodeURIComponent(`SELECT * FROM Customer WHERE DisplayName = '${client.fullName.replace(/'/g, "\\'")}'`);
+    let data = await qbAccountingApiRequest({
       path: `/query?query=${query}&minorversion=65`,
       method: "GET",
       account,
       feature: "customer_query",
       triggerType: c.triggerType,
       userId: c.userId
-    });
-    const existing = data?.QueryResponse?.Customer?.[0];
+    }).catch(() => null);
+
+    let existing = data?.QueryResponse?.Customer?.[0];
     if (existing) {
-      console.log(`[QB] Found existing customer ${existing.Id} for ${client.fullName}`);
       await prisma.client.update({ where: { id: client.id }, data: { quickbooksCustomerId: existing.Id } }).catch(() => {});
       return existing.Id;
     }
-    console.log(`[QB] No existing customer found for ${client.fullName}, will create new`);
+
+    // If not found, try searching all customers and match by parts
+    query = encodeURIComponent(`SELECT * FROM Customer MAXRESULTS 1000`);
+    data = await qbAccountingApiRequest({
+      path: `/query?query=${query}&minorversion=65`,
+      method: "GET",
+      account,
+      feature: "customer_query_all",
+      triggerType: c.triggerType,
+      userId: c.userId
+    }).catch(() => null);
+
+    const allCustomers = data?.QueryResponse?.Customer || [];
+    const nameParts = client.fullName.toLowerCase().trim().split(/\s+/);
+
+    // Look for customer whose name contains all the same parts (in any order)
+    existing = allCustomers.find((cust) => {
+      const custParts = (cust.DisplayName || "").toLowerCase().trim().split(/\s+/);
+      return nameParts.length > 0 && nameParts.every(p => custParts.includes(p)) && custParts.every(p => nameParts.includes(p));
+    });
+
+    if (existing) {
+      await prisma.client.update({ where: { id: client.id }, data: { quickbooksCustomerId: existing.Id } }).catch(() => {});
+      return existing.Id;
+    }
   } catch (err) {
-    console.error(`[QB] Customer query error for ${client.fullName}:`, err?.message);
+    // Fall through to create new customer
   }
 
   const payload = {
