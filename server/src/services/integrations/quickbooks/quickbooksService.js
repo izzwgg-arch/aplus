@@ -622,23 +622,33 @@ export async function updatePaymentInQuickbooks(paymentId, ctx = {}) {
 function buildQBInvoicePayload(invoice, qbCustomerId, qbInvoiceId, syncToken) {
   const payload = {
     CustomerRef: { value: qbCustomerId },
-    DocNumber: invoice.invoiceNumber || undefined,
     TxnDate: new Date(invoice.issueDate).toISOString().slice(0, 10),
-    DueDate: invoice.dueDate ? new Date(invoice.dueDate).toISOString().slice(0, 10) : undefined,
-    Line: (invoice.lineItems || []).map((li) => ({
-      DetailType: "DescriptionOnlyLineDetail",
-      Amount: Number(li.amount),
-      Description: li.description || undefined,
-      DescriptionOnlyLineDetail: {}
-    }))
+    Line: (invoice.lineItems || []).map((li) => {
+      const line = {
+        Amount: Number(li.amount),
+        DetailType: "SalesItemLineDetail",
+        SalesItemLineDetail: {
+          Qty: Number(li.quantity),
+          UnitPrice: Number(li.unitPrice)
+        }
+      };
+      if (li.description) line.Description = li.description;
+      return line;
+    })
   };
+
+  if (invoice.invoiceNumber) payload.DocNumber = invoice.invoiceNumber;
+  if (invoice.dueDate) payload.DueDate = new Date(invoice.dueDate).toISOString().slice(0, 10);
 
   if (!payload.Line.length) {
     payload.Line = [{
-      DetailType: "DescriptionOnlyLineDetail",
       Amount: Number(invoice.total),
+      DetailType: "SalesItemLineDetail",
       Description: "Services",
-      DescriptionOnlyLineDetail: {}
+      SalesItemLineDetail: {
+        Qty: 1,
+        UnitPrice: Number(invoice.total)
+      }
     }];
   }
 
