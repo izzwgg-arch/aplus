@@ -217,11 +217,13 @@ export async function disconnectQuickbooks() {
 async function ensureQBCustomer(client, account, ctx = {}) {
   const c = qbCtx(ctx);
   if (client.quickbooksCustomerId) {
+    console.log(`[QB] Using stored customer ID for ${client.fullName}: ${client.quickbooksCustomerId}`);
     return client.quickbooksCustomerId;
   }
 
   try {
     const query = encodeURIComponent(`SELECT * FROM Customer WHERE DisplayName = '${client.fullName.replace(/'/g, "\\'")}'`);
+    console.log(`[QB] Querying for customer: ${client.fullName}`);
     const data = await qbAccountingApiRequest({
       path: `/query?query=${query}&minorversion=65`,
       method: "GET",
@@ -232,10 +234,14 @@ async function ensureQBCustomer(client, account, ctx = {}) {
     });
     const existing = data?.QueryResponse?.Customer?.[0];
     if (existing) {
+      console.log(`[QB] Found existing customer ${existing.Id} for ${client.fullName}`);
       await prisma.client.update({ where: { id: client.id }, data: { quickbooksCustomerId: existing.Id } }).catch(() => {});
       return existing.Id;
     }
-  } catch {}
+    console.log(`[QB] No existing customer found for ${client.fullName}, will create new`);
+  } catch (err) {
+    console.error(`[QB] Customer query error for ${client.fullName}:`, err?.message);
+  }
 
   const payload = {
     DisplayName: client.fullName,
@@ -317,6 +323,7 @@ export async function syncInvoiceToQuickbooks(invoiceId, ctx = {}) {
     await prisma.invoice.update({ where: { id: invoice.id }, data: { qbSyncStatus: "PENDING", qbSyncError: null } });
 
     const qbCustomerId = await ensureQBCustomer(invoice.client, account, c);
+    console.log(`[QB] Syncing invoice ${invoice.invoiceNumber} for customer ID: ${qbCustomerId}`);
 
     let qbInvoiceId = invoice.quickbooksInvoiceId;
 
