@@ -322,11 +322,11 @@ export async function syncInvoiceToQuickbooks(invoiceId, ctx = {}) {
 
     await prisma.invoice.update({ where: { id: invoice.id }, data: { qbSyncStatus: "PENDING", qbSyncError: null } });
 
-    const qbCustomerId = await ensureQBCustomer(invoice.client, account, c);
-    console.log(`[QB] Syncing invoice ${invoice.invoiceNumber} for customer ID: ${qbCustomerId}`);
-
+    let qbCustomerId = await ensureQBCustomer(invoice.client, account, c);
     let qbInvoiceId = invoice.quickbooksInvoiceId;
+    let lastError = null;
 
+    // Try with existing customer ID if we have one
     if (qbInvoiceId) {
       try {
         const existing = await qbAccountingApiRequest({
@@ -348,26 +348,53 @@ export async function syncInvoiceToQuickbooks(invoiceId, ctx = {}) {
             triggerType: c.triggerType,
             userId: c.userId
           });
+          qbInvoiceId = existing.Invoice.Id;
         } else {
           qbInvoiceId = null;
         }
       } catch (err) {
-        console.error(`[QB] Failed to update invoice ${qbInvoiceId}: ${err?.message}. Creating new invoice instead.`);
+        lastError = err;
         qbInvoiceId = null;
       }
     }
 
+    // Try creating a new invoice with the customer ID we have
     if (!qbInvoiceId) {
-      const result = await qbAccountingApiRequest({
-        path: `/invoice?minorversion=65`,
-        method: "POST",
-        body: buildQBInvoicePayload(invoice, qbCustomerId, null, null),
-        account,
-        feature: "invoice_create",
-        triggerType: c.triggerType,
-        userId: c.userId
-      });
-      qbInvoiceId = result?.Invoice?.Id;
+      try {
+        const result = await qbAccountingApiRequest({
+          path: `/invoice?minorversion=65`,
+          method: "POST",
+          body: buildQBInvoicePayload(invoice, qbCustomerId, null, null),
+          account,
+          feature: "invoice_create",
+          triggerType: c.triggerType,
+          userId: c.userId
+        });
+        qbInvoiceId = result?.Invoice?.Id;
+      } catch (err) {
+        // If we got a "Invalid Reference Id" error, the customer might be bad. Clear it and try again.
+        if (err?.message?.includes("Invalid Reference Id") && invoice.client.quickbooksCustomerId) {
+          await prisma.client.update({
+            where: { id: invoice.client.id },
+            data: { quickbooksCustomerId: null }
+          }).catch(() => {});
+          // Retry customer lookup
+          qbCustomerId = await ensureQBCustomer(invoice.client, account, c);
+          // Try invoice creation again with fresh customer
+          const result = await qbAccountingApiRequest({
+            path: `/invoice?minorversion=65`,
+            method: "POST",
+            body: buildQBInvoicePayload(invoice, qbCustomerId, null, null),
+            account,
+            feature: "invoice_create",
+            triggerType: c.triggerType,
+            userId: c.userId
+          });
+          qbInvoiceId = result?.Invoice?.Id;
+        } else {
+          throw err;
+        }
+      }
     }
 
     const updated = await prisma.invoice.update({
