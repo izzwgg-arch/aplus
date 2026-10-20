@@ -315,8 +315,7 @@ router.post("/:id/pay", requirePermission("aplus.billing.record_cash"), async (r
         description:    descriptionParts.join(" — ") || (isOverpayment ? `Manual overpayment (creates credit)` : isPartial ? "Partial payment" : "Manual invoice payment"),
         status:         "SUCCEEDED",
         paymentMethod,
-        paymentSourceType: "MANUAL",
-        metadata:       isOverpayment ? { isOverpayment: true, creditAmount: Number((amount - invoice.balanceDue).toFixed(2)) } : isPartial ? { isPartial: true } : {}
+        paymentSourceType: "MANUAL"
       }
     });
 
@@ -404,51 +403,52 @@ router.patch("/:id/payments/:paymentId", requirePermission("aplus.billing.edit_i
   const transactionReference = asOptionalString(req.body?.transactionReference);
   const notes = asOptionalString(req.body?.notes);
 
-  // Allow editing payment amount to support overpayments and corrections
-  let updateData = {
-    paymentMethod,
-    paymentDate,
-    description: undefined,
-    metadata: payment.metadata || {}
-  };
+  const updateData = { paymentMethod, paymentDate };
 
   if (req.body?.amount !== undefined) {
     const newAmount = asNumber(req.body.amount, "amount");
     if (newAmount <= 0) return res.status(400).json({ error: "Payment amount must be greater than 0" });
     updateData.amount = newAmount;
-
-    // Track if this is an overpayment
-    const isOverpayment = newAmount > invoice.balanceDue + 0.01;
-    if (isOverpayment) {
-      updateData.metadata = {
-        ...updateData.metadata,
-        isOverpayment: true,
-        creditAmount: Number((newAmount - invoice.balanceDue).toFixed(2))
-      };
-    }
   }
 
-  const descriptionParts = [paymentMethod, transactionReference, notes].filter(Boolean);
+  // The edit modal sends the existing description back as the reference, so strip a
+  // method prefix the pay route already added — otherwise every save re-prepends it.
+  const stripMethodPrefix = (text) => {
+    let t = text || "";
+    for (const m of [paymentMethod, payment.paymentMethod]) {
+      if (!m) continue;
+      if (t.toLowerCase() === m.toLowerCase()) return "";
+      if (t.toLowerCase().startsWith(`${m.toLowerCase()} — `)) t = t.slice(m.length + 3);
+    }
+    return t;
+  };
+  const descriptionParts = [paymentMethod, stripMethodPrefix(transactionReference), notes].filter(Boolean);
   updateData.description = descriptionParts.length ? descriptionParts.join(" — ") : payment.description;
 
   const updated = await prisma.payment.update({
     where: { id: payment.id },
     data: updateData
   });
+  await recalculateInvoiceBalance(invoice.id);
+
+  const changes = [];
+  if (updateData.amount !== undefined && updateData.amount !== payment.amount) changes.push(`amount ${Number(payment.amount).toFixed(2)} → ${updateData.amount.toFixed(2)}`);
+  if (paymentMethod !== payment.paymentMethod) changes.push(`method ${payment.paymentMethod || "Other"} → ${paymentMethod || "Other"}`);
+  if (paymentDate && paymentDate.getTime() !== new Date(payment.paymentDate).getTime()) changes.push(`date ${paymentDate.toISOString().slice(0, 10)}`);
 
   await writeAuditLog(req, {
     action: "PAYMENT_UPDATED",
     entityType: "Payment",
     entityId: payment.id,
-    detailsJson: { invoiceId: invoice.id, paymentMethod }
+    detailsJson: { invoiceId: invoice.id, paymentMethod, amount: updateData.amount }
   });
   logActivity({
     invoiceId: invoice.id,
     type: "NOTE",
-    message: `Payment method updated to ${paymentMethod || "Other"}; QuickBooks payment update queued`,
+    message: `Payment updated${changes.length ? ` (${changes.join(", ")})` : ""}; QuickBooks payment update queued`,
     actorType: "USER",
     actorId: req.user?.id,
-    metadata: { paymentId: payment.id, paymentMethod }
+    metadata: { paymentId: payment.id, paymentMethod, amount: updateData.amount }
   }).catch(() => {});
 
   updatePaymentInQuickbooks(payment.id, { userId: req.user?.id, triggerType: "user" })

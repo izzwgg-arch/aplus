@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../../lib/api";
 import { useToast } from "../../context/ToastContext";
@@ -36,12 +36,14 @@ function StatusPill({ status }) {
 function TransportationModal({ entry, clients, onClose, onSave }) {
   const toast = useToast();
   const [saving, setSaving] = useState(false);
-  const [clientSearch, setClientSearch] = useState("");
+  const [clientSearch, setClientSearch] = useState(entry?.client?.fullName || "");
   const [showClientDropdown, setShowClientDropdown] = useState(false);
+  const dropdownRef = useRef(null);
+  const inputRef = useRef(null);
+
   const [form, setForm] = useState(
     entry || {
       clientId: "",
-      clientName: "",
       serviceDate: new Date().toISOString().split("T")[0],
       description: "",
       amount: "",
@@ -52,16 +54,29 @@ function TransportationModal({ entry, clients, onClose, onSave }) {
   );
 
   const filteredClients = clients.filter(c =>
+    !clientSearch ||
     c.fullName.toLowerCase().includes(clientSearch.toLowerCase()) ||
     c.firstName?.toLowerCase().includes(clientSearch.toLowerCase()) ||
     c.lastName?.toLowerCase().includes(clientSearch.toLowerCase())
   );
 
   const handleSelectClient = (client) => {
-    setForm({ ...form, clientId: client.id, clientName: client.fullName });
-    setClientSearch("");
+    setForm({ ...form, clientId: client.id });
+    setClientSearch(client.fullName);
     setShowClientDropdown(false);
   };
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target) &&
+          inputRef.current && !inputRef.current.contains(event.target)) {
+        setShowClientDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -102,32 +117,50 @@ function TransportationModal({ entry, clients, onClose, onSave }) {
         <h2 style={{ margin: 0, marginBottom: 16, fontSize: 18 }}>{entry ? "Edit Transportation" : "Add Transportation"}</h2>
         <form onSubmit={submit}>
           <div style={{ marginBottom: 12, position: "relative" }}>
-            <label style={{ display: "block", fontSize: 12, fontWeight: 500, marginBottom: 4 }}>Client *</label>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 500, marginBottom: 4 }}>Client * {form.clientId && <span style={{ fontSize: 11, color: "#666" }}>✓</span>}</label>
             <input
+              ref={inputRef}
               type="text"
-              value={clientSearch || form.clientName}
+              value={clientSearch}
               onChange={(e) => { setClientSearch(e.target.value); setShowClientDropdown(true); }}
               onFocus={() => setShowClientDropdown(true)}
-              placeholder="Search client..."
-              style={{ width: "100%", padding: 8, border: "1px solid #ddd", borderRadius: 6, fontSize: 13, boxSizing: "border-box" }}
+              placeholder="Type client name..."
+              style={{ width: "100%", padding: 8, border: form.clientId ? "1px solid #10b981" : "1px solid #ddd", borderRadius: 6, fontSize: 13, boxSizing: "border-box" }}
             />
-            {showClientDropdown && (
-              <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "white", border: "1px solid #ddd", borderTop: "none", borderRadius: "0 0 6px 6px", maxHeight: 200, overflowY: "auto", zIndex: 100 }}>
-                {filteredClients.length === 0 ? (
-                  <div style={{ padding: 12, fontSize: 13, color: "#999" }}>No clients found</div>
-                ) : (
-                  filteredClients.map(c => (
-                    <div
-                      key={c.id}
-                      onClick={() => handleSelectClient(c)}
-                      style={{ padding: "8px 12px", borderBottom: "1px solid #f0f0f0", cursor: "pointer", fontSize: 13 }}
-                      onMouseEnter={(e) => e.target.style.background = "#f9fafb"}
-                      onMouseLeave={(e) => e.target.style.background = "white"}
-                    >
-                      {c.fullName}
-                    </div>
-                  ))
-                )}
+            {showClientDropdown && filteredClients.length > 0 && (
+              <div
+                ref={dropdownRef}
+                style={{
+                  position: "absolute",
+                  top: "calc(100% + 4px)",
+                  left: 0,
+                  right: 0,
+                  background: "white",
+                  border: "1px solid #ddd",
+                  borderRadius: 6,
+                  maxHeight: 250,
+                  overflowY: "auto",
+                  zIndex: 1000,
+                  boxShadow: "0 4px 6px rgba(0,0,0,0.1)"
+                }}
+              >
+                {filteredClients.map((c, idx) => (
+                  <div
+                    key={c.id}
+                    onMouseDown={() => handleSelectClient(c)}
+                    style={{
+                      padding: "10px 12px",
+                      borderBottom: idx < filteredClients.length - 1 ? "1px solid #f0f0f0" : "none",
+                      cursor: "pointer",
+                      fontSize: 13,
+                      background: form.clientId === c.id ? "#e0f2fe" : "white"
+                    }}
+                    onMouseEnter={(e) => { if (form.clientId !== c.id) e.target.style.background = "#f9fafb"; }}
+                    onMouseLeave={(e) => { if (form.clientId !== c.id) e.target.style.background = "white"; }}
+                  >
+                    {c.fullName} {form.clientId === c.id && "✓"}
+                  </div>
+                ))}
               </div>
             )}
           </div>
