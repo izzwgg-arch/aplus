@@ -845,9 +845,13 @@ export function ProgramsTab({
       .then((r) => r.ok ? r.json() : null)
       .then((data: { groups?: Array<{ groupId: string; groupLabel: string; groupType: string; targets: Array<{ id: string; definition: string; targetType: string; phase: string }> }> } | null) => {
         if (!data?.groups) return;
-        const storeTargets = useABAStore.getState().targets;
         for (const group of data.groups) {
           for (const st of group.targets) {
+            // Fresh read per iteration. A snapshot taken once before the loop
+            // cannot see this loop's own setTargetServerId/addTarget writes, so
+            // two server rows with the same definition both matched the same
+            // unsynced local row, and a row added here was added again below.
+            const storeTargets = useABAStore.getState().targets;
             if (storeTargets.some((t) => t.serverId === st.id)) continue;
             const match = storeTargets.find(
               (t) => t.clientId === clientId && !t.serverId &&
@@ -1121,6 +1125,10 @@ export function ProgramsTab({
     addTarget({
       ...goal,
       id,
+      // The spread carries the ORIGINAL's serverId, which would make the copy
+      // claim to be the same server record — it is a brand-new unsynced row
+      // until the POST below returns its own id.
+      serverId: undefined,
       title: cloneTitle,
       synced: false,
       createdAt: now,

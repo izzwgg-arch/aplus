@@ -1125,11 +1125,13 @@ confirmed; the fix makes the next occurrence visible and self-reporting:
 
 Deployed 2026-09-17 (client rebuild + `pm2 startOrReload` of `aba-app`;
 backups `/root/aba-dist-backup-20260917-174847.tar.gz` and
-`/root/aba-src-backup-20260917-174848.tar.gz`). **`InvoicesPage.jsx` on the
-server is NOT the repo file**: the repo copy carries an `EditInvoiceModal`
-that production never received (the 2026-08-13 audit's "repo is newer"), so
-only this task's search hunk was applied to the server's copy with `patch`.
-A future full copy of that file would ship the modal — decide that on purpose.
+`/root/aba-src-backup-20260917-174848.tar.gz`). At the time `InvoicesPage.jsx`
+on the server was NOT the repo file (the repo copy carried an
+`EditInvoiceModal` production had not received), so only this task's search
+hunk was applied to the server's copy with `patch`. **That gap has since
+closed**: as of 2026-10-20 the server's `InvoicesPage.jsx`,
+`invoice.routes.js`, `payment.routes.js` and `quickbooksService.js` all
+hash-match the repo, and the invoice/payment edit modals are live.
 
 ## Git line endings on this machine (2026-09-17)
 
@@ -1179,6 +1181,159 @@ prevent scheduling conflicts.
   `hasProviderConflict`). The frontend could display this error in the modal
   if a user tries to create an overlap (currently the API returns the error,
   but the modal toast handling should display it).
+
+## A+ Scheduling payments — `Payment` has NO `metadata` / `notes` column (fixed 2026-10-20)
+
+Reported as "could not record payment" (cash for less than the invoice) and
+"editing a payment doesn't save". Both were ONE defect: `POST
+/invoices/:id/pay` and `PATCH /invoices/:id/payments/:paymentId` wrote a
+`metadata` object onto `Payment`, a column that does not exist — verified
+against production `information_schema.columns` (schema and DB agree; no
+migration is missing). That code arrived in commit `b4315bb` ("invoice and
+payment editing with overpayment support", 2026-10-13), which never reached
+`/opt/aba` until the whole route file was copied on 2026-10-15, so the
+overpayment feature had never actually run in production.
+
+- **Prisma names the WRONG field.** With an unknown key in `data`, Prisma
+  cannot choose between its checked input (`client: { connect }`) and
+  unchecked input (`clientId`) types and reports against the checked one:
+  `Unknown argument clientId. Did you mean client?`. `clientId` was always
+  valid; the real offender (`metadata`) shows up further down the same error.
+  On that message, look for a field that is not in the schema — do not
+  regenerate the client or rewrite the FK as a nested `connect`.
+- Overpayment/partial state was read NOWHERE (no consumer in server or
+  client), so it is simply not stored: `description` carries "Partial
+  payment" / "Manual overpayment (creates credit)" and the activity log
+  carries the amounts. A real `metadata` column is a migration — add it on
+  purpose, not as a side effect.
+- **Partial payments are allowed**: the pay route rejects only `amount <= 0`.
+- **The payment editor is `EditPaymentModal` -> `PATCH
+  /invoices/:id/payments/:paymentId`** (`invoice.routes.js`), MANUAL payments
+  only. It now also calls `recalculateInvoiceBalance()` (an amount edit used
+  to leave `balanceDue`/status stale) and strips a leading "<method> — " from
+  the reference the modal sends back (the modal pre-fills that field with the
+  whole existing description, so every save used to prepend the method
+  again). A second `PATCH /payments/:id` added to `payment.routes.js` on
+  2026-10-15 was unused dead code (and wrote a nonexistent `notes` field); it
+  was removed — do not re-add a parallel edit endpoint.
+- Verify without writing: a `prisma.$transaction` that creates and updates a
+  Payment and then throws rolls back cleanly (used 2026-10-20, 0 rows left).
+  `cd /opt/aba && node --env-file=.env probe.mjs` resolves both
+  `@prisma/client` and `DATABASE_URL`.
+
+**`/opt/aba` deploy lessons from the same incident:**
+
+- `prisma generate` must run as `npm run prisma:generate` from `/opt/aba` (it
+  resolves `server/prisma/schema.prisma` through the workspace). A bare
+  `npx prisma generate` in `/opt/aba` fails "Could not find Prisma Schema";
+  the schema is NOT missing. `/opt/aba/deploy.sh` runs the full sequence.
+- `rm -rf node_modules && npm install` as root leaves `node_modules`
+  root-owned; restore with `chown -R aba:aba /opt/aba/node_modules`.
+- A server-only change needs `pm2 startOrReload` as `aba` — no `npm run
+  build` (that only builds the client).
+- The server rebooted ~2026-10-18; `pm2-aba.service` brought `aba-app` back
+  from the saved dump, which is why its restart counter reset.
+
+## A+ Scheduling QuickBooks — customer lookup matches names in ANY word order (fixed 2026-10-15)
+
+Reported for Shevy Zoldan: `Invalid Reference Id : Names element id 1407 not
+found`. The QB customer is "Shevy Zoldan"; the app stores "Zoldan Shevy".
+`ensureQBCustomer()` queried QB for the app's exact name, found nothing,
+created a duplicate customer, and the invoice then referenced an id QB
+refused. It now tries the exact name, the REVERSED word order, then case
+variations before creating — the reversed lookup is what matched. A
+"fetch every customer and match parts" pass (`SELECT * FROM Customer
+MAXRESULTS 1000`) returned no rows in production with the error swallowed, so
+do not go back to that. Invoice lines are `SalesItemLineDetail` WITHOUT an
+`ItemRef`: the hardcoded `{ value: "1", name: "Services" }` item does not
+exist in this QB company, and QB accepts `Qty` + `UnitPrice` alone.
+`[QB DEBUG]` lines in `quickbooksService.js` print to `aba-app-error-0.log`
+and were left in deliberately for the next lookup mystery.
+
+## Tracker goals listed TWICE in session data entry (fixed 2026-10-20)
+
+Reported for client Libby Weiner: goals appeared twice when entering session
+data but only once in Goals & Targets. Her SERVER data is clean — 20 targets in
+the goal hierarchy, 0 program-direct, each returned exactly once — so the
+duplication was entirely in the persisted Zustand store (localStorage).
+
+**Three effects hydrate that one shared store from the server, concurrently,
+across two components**: `ProgramsTab`'s serverId sync, `ProgramsTab`'s
+cross-device hydration, and `DataEntryTab`'s serverId sync. Both serverId syncs
+read a single `useABAStore.getState()` snapshot BEFORE their loop and tested
+"is this row already in the store?" against that stale copy, while `addTarget`
+was a blind `[...s.targets, row]` push with no guard. Two of them racing both
+concluded the row was missing and both appended it.
+
+Why it showed in data entry but NOT in Goals & Targets: the two paths write
+**different parent links for the same goal**. The serverId syncs set `programId`
+to the server `ParentGoal` id; hydration sets it to the LOCAL skill-area id. The
+drill-down filters `goal.programId === selectedSkill.id` on the local id, so the
+extra copy matched no skill area and dropped out of the drill-down — while the
+data-entry lists are flat and showed both.
+
+`DataEntryTab`'s sync additionally had the two fields **inverted**
+(`programId: groupType === "program" ? groupId : ""`), so a goal-hierarchy
+target it added got `programId: ""` and a program target got the Program id in
+`programId` — neither matches a skill area. It is now identical to the
+ProgramsTab copy; keep them that way.
+
+Fixes, outermost first:
+
+- **`src/lib/storeDedupe.ts`** is the single source of truth for row identity:
+  a row's identity is its `serverId` when it has one, else its local id (so a
+  locally-created row that has since synced IS the server record, and a
+  never-synced row can never collide with one).
+- **The store's `addCategory` / `addProgram` / `addTarget` ignore a row it
+  already holds.** The guard has to live in the store — the racing callers
+  cannot see each other's writes.
+- **`persist`'s `merge` dedupes on rehydrate**, so a browser whose localStorage
+  already holds doubled rows heals on the next page load rather than needing a
+  cache clear.
+- **Both serverId syncs re-read `getState()` per iteration** (the same stale-
+  snapshot fix the hydration effect got on 2026-08-27).
+- **The render paths dedupe too** — `allGoals` in DataEntryTab and the store
+  half of the `session/new` picker merge. That merge deduped the SERVER list
+  against the store but never the store against itself, so two rows mapping to
+  one effective id both came through.
+- **`cloneGoal()` no longer inherits the original's `serverId`.** The spread
+  `addTarget({ ...goal, id, … })` carried it, so the copy claimed to be the same
+  server record — harmless before, but it would have been swallowed by the new
+  add guard. A clone is an unsynced row until its own POST returns.
+
+**`POST /api/targets` is now idempotent on (parent, definition)**: re-creating a
+goal that already exists under the same sub-goal / parent goal / program returns
+the EXISTING row with `duplicate: true` instead of a second copy, mirroring
+`goal-library-import`. Scoped to the same parent, so two children — or two skill
+areas — may legitimately share wording; an orphan target with no parent is not
+scopable and is always created.
+
+**Real duplicate rows found in production** (a different problem — these are in
+the database, not the cache). Created 13-60 s apart, which is too slow for a
+double-click and is the signature of someone saving a goal, not seeing it appear
+because of the drill-down bugs above, and typing it again:
+
+| Client | Goal | Ids |
+| --- | --- | --- |
+| Aron Wertzberger | "…select appropriate utensils…" | `cmt1r8vsi00ktkq004umjojh3`, `cmt1ra68r00kvkq00aqre2nas` |
+| Yisrol Zev Wallach | "…read a 3 word sentence…" | `cmtvvn5c1002qkqghkq3sye9g`, `cmtvvnfhd002skqghhpyosfhf` |
+| Yisrol Zev Wallach | "…use a betty crocker safely v/p" | `cmuctvs8f003okqgh5uub9m5g`, `cmuctw74s003qkqghk51unyi2` |
+| Yossi Brim | "…does not have to get aggressive…" | `cmpzssgq9003lkqejxsaokx6q`, `cmpzssshg003nkqejn8crp9o2` |
+
+All eight rows have **zero trials, zero session links, zero annotations**, so
+either copy of each pair is removable without losing data. Left in place pending
+the user's decision — deactivating one is what the app's own Delete Goal does
+(`isActive: false`, reversible).
+
+**Izzy Weinstock has 3 program-direct targets** (`parentGoalId` and `subGoalId`
+both null, attached straight to a `Program`): `gdfygfhgkh` (junk, 0 trials),
+"izzy will learn to follow a mand…" (4 trials), "will learn not to scream"
+(0 trials). `GET /api/clients/[id]/goals` does not return program-direct
+targets, so they never hydrate into the store and are **invisible in Goals &
+Targets**, while `GET /api/clients/[id]/targets` does return them, so they DO
+appear in session data entry. No other client has any. These are legacy
+(March 2026) and also await a decision — re-parent them under a skill area to
+make them visible, or deactivate.
 
 ## Rule 5: Deploy (step 3 of the Rule 0 end-of-task sequence)
 

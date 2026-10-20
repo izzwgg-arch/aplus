@@ -36,6 +36,7 @@ import {
 } from "@/store/abaStore";
 import { formatSessionHours } from "@/lib/formatDuration";
 import { isOpenForDataEntry } from "@/lib/targetVisibility";
+import { dedupeStoreRows } from "@/lib/storeDedupe";
 import { SessionSnapshotDrawer } from "./SessionSnapshotDrawer";
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
@@ -529,7 +530,11 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
   // they are left out of every data-entry list (isOpenForDataEntry). Filtering
   // here rather than at the render keeps the category/skill pill counts and the
   // "no active goals" notice in step with the cards actually shown.
-  const allGoals           = useMemo(() => (rawTargets ?? []).filter((t) => t.clientId === clientId && (t.isActive ?? true) && isOpenForDataEntry(t)), [rawTargets, clientId]);
+  // dedupeStoreRows collapses two store rows that are the same server record, so
+  // a goal is never listed (or counted) twice here. The store guards and the
+  // rehydrate clean-up prevent new duplicates; this keeps the render correct for
+  // a browser whose localStorage already holds some.
+  const allGoals           = useMemo(() => dedupeStoreRows(rawTargets ?? []).filter((t) => t.clientId === clientId && (t.isActive ?? true) && isOpenForDataEntry(t)), [rawTargets, clientId]);
 
   /* ── Past sessions (paginated — reaches the COMPLETE history via "Load more") ── */
   const SESSIONS_PAGE_SIZE = 50;
@@ -602,11 +607,16 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
   useEffect(() => {
     if (!serverTargetData?.groups) return;
 
-    // Snapshot current store state + grab actions imperatively (no subscription)
-    const { targets: storeTargets, addTarget, setTargetServerId } = useABAStore.getState();
+    // Grab actions imperatively (no subscription). The store rows themselves are
+    // re-read per iteration below.
+    const { addTarget, setTargetServerId } = useABAStore.getState();
 
     for (const group of serverTargetData.groups) {
       for (const st of group.targets) {
+        // Fresh read per iteration — a snapshot taken once before the loop cannot
+        // see this loop's own writes, so two server rows sharing a definition both
+        // matched the same unsynced local row and an added row was added twice.
+        const storeTargets = useABAStore.getState().targets;
         // Already linked — skip
         if (storeTargets.some((t) => t.serverId === st.id)) continue;
 
@@ -631,9 +641,18 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
             operationalDefinition: st.definition,
             targetType: st.targetType as LocalTarget["targetType"],
             phase: st.phase as LocalTarget["phase"],
-            status: (st.phase === "MASTERED" ? "mastered" : "active") as LocalTarget["status"],
-            categoryId: "",
-            programId: group.groupType === "program" ? group.groupId : "",
+            status: (
+              st.phase === "MASTERED" ? "mastered" : st.phase === "NEW" ? "new" : "active"
+            ) as LocalTarget["status"],
+            // groupId is the ParentGoal id on a "goal" group (the local skill-area
+            // id, i.e. programId) and the Program id on a "program" group (the
+            // local categoryId). These two were INVERTED here: a goal-hierarchy
+            // target was stored with programId "" and a program target put the
+            // Program id in programId, so neither matched a skill area in the
+            // Goals & Targets drill-down while both still listed in data entry.
+            // Keep this identical to the same sync in ProgramsTab.
+            categoryId: group.groupType === "program" ? group.groupId : "",
+            programId: group.groupType === "goal" ? group.groupId : "",
             masteryCriteria: defaultMastery(),
             promptLevels: defaultPromptLevels(),
             isActive: true,

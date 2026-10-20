@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { ArrowLeft, Pause, Play, Timer, Plus, Minus, RefreshCcw, Save, CloudOff, ChevronDown, AlertTriangle } from "lucide-react";
 import { useABAStore, resolveSessionStart, type ActiveSession } from "@/store/abaStore";
 import { isOpenForDataEntry } from "@/lib/targetVisibility";
+import { dedupeStoreRows } from "@/lib/storeDedupe";
 import { useSession as useAuthSession } from "next-auth/react";
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
@@ -103,8 +104,12 @@ export default function SessionNewPage() {
   // Mastered goals are finished work and are not offered for data entry — the
   // server list is filtered by `excludeMastered=1` below and the local store is
   // filtered here, so the merged picker only ever shows open goals.
+  // dedupeStoreRows collapses two store rows that are the same server record.
+  // Without it the merge below mapped both to the same effective id and the
+  // picker listed the goal twice — the server list is deduped against the store,
+  // but the store half was never deduped against itself.
   const storeTargets = useMemo(
-    () => rawStoreTargets.filter((t) => t.clientId === clientId && t.isActive && isOpenForDataEntry(t)),
+    () => dedupeStoreRows(rawStoreTargets).filter((t) => t.clientId === clientId && t.isActive && isOpenForDataEntry(t)),
     [rawStoreTargets, clientId],
   );
   const [storeLocalSessionId, setStoreLocalSessionId] = useState<string | null>(null);

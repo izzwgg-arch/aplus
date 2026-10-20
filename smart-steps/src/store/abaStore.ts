@@ -8,6 +8,7 @@
 
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
+import { containsRow, dedupeStoreRows } from "@/lib/storeDedupe";
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 
@@ -334,8 +335,11 @@ export const useABAStore = create<ABAStore>()(
       activeSession: null,
 
       /* ─ Category ─ */
+      // The add actions IGNORE a row the store already holds. Several effects
+      // hydrate this store from the server concurrently and none of them can see
+      // the others' writes, so the guard has to live here — see @/lib/storeDedupe.
       addCategory: (cat) =>
-        set((s) => ({ categories: [...s.categories, cat] })),
+        set((s) => (containsRow(s.categories, cat) ? s : { categories: [...s.categories, cat] })),
       updateCategory: (id, patch) =>
         set((s) => ({
           categories: s.categories.map((c) =>
@@ -353,7 +357,7 @@ export const useABAStore = create<ABAStore>()(
 
       /* ─ Program ─ */
       addProgram: (prog) =>
-        set((s) => ({ programs: [...s.programs, prog] })),
+        set((s) => (containsRow(s.programs, prog) ? s : { programs: [...s.programs, prog] })),
       updateProgram: (id, patch) =>
         set((s) => ({
           programs: s.programs.map((p) =>
@@ -371,7 +375,7 @@ export const useABAStore = create<ABAStore>()(
 
       /* ─ Target ─ */
       addTarget: (target) =>
-        set((s) => ({ targets: [...s.targets, target] })),
+        set((s) => (containsRow(s.targets, target) ? s : { targets: [...s.targets, target] })),
       updateTarget: (id, patch) =>
         set((s) => ({
           targets: s.targets.map((t) =>
@@ -501,6 +505,20 @@ export const useABAStore = create<ABAStore>()(
         targets: state.targets,
         activeSession: state.activeSession,
       }),
+      // Collapse duplicates that a previous build already wrote to localStorage.
+      // The add guards above stop new ones, but a browser that has been used
+      // since before them keeps its doubled rows until they are cleaned here —
+      // and the user sees them as goals listed twice in session data entry.
+      merge: (persisted, current) => {
+        const saved = (persisted ?? {}) as Partial<ABAStore>;
+        return {
+          ...current,
+          ...saved,
+          categories: dedupeStoreRows(saved.categories ?? current.categories),
+          programs: dedupeStoreRows(saved.programs ?? current.programs),
+          targets: dedupeStoreRows(saved.targets ?? current.targets),
+        };
+      },
     }
   )
 );
