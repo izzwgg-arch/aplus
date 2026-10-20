@@ -1325,6 +1325,26 @@ either copy of each pair is removable without losing data. Left in place pending
 the user's decision — deactivating one is what the app's own Delete Goal does
 (`isActive: false`, reversible).
 
+**The four duplicate pairs were cleaned up in the prod DB on 2026-10-20.** In
+every pair NEITHER copy had data (0 trials, 0 session links, 0 annotations), so
+the rule applied was: keep the copy that has data; if none has data keep the
+EARLIEST-created one; never touch a row that has data, and never both members of
+a pair. Deactivated (`isActive: false`, the same soft delete the app's Delete
+Goal performs — the rows and any future history survive and clearing the flag
+restores them):
+
+- `cmt1ra68r00kvkq00aqre2nas` (Aron Wertzberger) — kept `cmt1r8vsi00ktkq004umjojh3`
+- `cmtvvnfhd002skqghhpyosfhf` (Yisrol Zev Wallach) — kept `cmtvvn5c1002qkqghkq3sye9g`
+- `cmuctw74s003qkqghk51unyi2` (Yisrol Zev Wallach) — kept `cmuctvs8f003okqgh5uub9m5g`
+- `cmpzssshg003nkqejn8crp9o2` (Yossi Brim) — kept `cmpzssgq9003lkqejxsaokx6q`
+
+A re-scan afterwards found zero duplicate groups clinic-wide (379 active / 18
+inactive targets). The duplicate test is scoped to the same parent, so the same
+wording under two different skill areas is not treated as a duplicate.
+
+**Izzy Weinstock's 3 program-direct targets are still outstanding** — no
+decision taken, nothing changed.
+
 **Izzy Weinstock has 3 program-direct targets** (`parentGoalId` and `subGoalId`
 both null, attached straight to a `Program`): `gdfygfhgkh` (junk, 0 trials),
 "izzy will learn to follow a mand…" (4 trials), "will learn not to scream"
