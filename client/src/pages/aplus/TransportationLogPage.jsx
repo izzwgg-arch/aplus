@@ -85,6 +85,8 @@ function TransportationModal({ entry, clients, onClose, onSave }) {
 
   const submit = async (e) => {
     e.preventDefault();
+    console.log("Form data:", form);
+
     if (!form.clientId) return toast?.error("Select a client.");
     if (!form.serviceDate) return toast?.error("Enter service date.");
     if (!form.amount || Number(form.amount) <= 0) return toast?.error("Enter a valid amount.");
@@ -100,6 +102,7 @@ function TransportationModal({ entry, clients, onClose, onSave }) {
         paidBy: form.paidBy || undefined,
         notes: form.notes || undefined
       };
+      console.log("Sending payload:", payload);
 
       if (entry) {
         await api.patch(`/transportation/${entry.id}`, payload);
