@@ -1480,6 +1480,48 @@ and delete it.
 `scripts/mergeDuplicateUsers.mjs` does NOT catch this: it groups by duplicate
 EMAIL, and here the two rows have different emails. Same person, two addresses.
 
+## Tracker service worker v4 — every response path returns a real Response (fixed 2026-10-21)
+
+Reported minutes after the registration-path fix above went live:
+
+```
+The FetchEvent for ".../smart-steps/clients/<id>?tab=programs" resulted in a
+network error response: the promise was rejected.
+sw.js:1 Uncaught (in promise) TypeError: Failed to convert value to 'Response'.
+```
+
+**This was a regression introduced BY that fix.** `sw.js` had carried two bugs
+since v3, but `register("/sw.js")` resolved to the A+ Scheduling SPA, so the
+worker had never registered in production and neither bug could fire. Correcting
+the path activated both at once:
+
+1. **The offline fallback could resolve to `undefined`.** The handler ended
+   `.catch(() => caches.open(CACHE_NAME).then((cache) => cache.match(request)))`,
+   and `cache.match` resolves to `undefined` on a miss. `respondWith(undefined)`
+   throws "Failed to convert value to 'Response'", and the browser shows a
+   network error instead of the page — a blank page on ANY fetch failure for a
+   URL outside the precache list, which is every client page. Every path now
+   ends in a Response; a miss falls back to a small styled offline notice
+   (503) that says entered data is kept, with a Try again button.
+2. **`PRECACHE` listed root paths** — `/`, `/login`, `/dashboard` — which nginx
+   routes to A+ Scheduling on :4000, so install cached the WRONG app's HTML
+   under those keys. They now carry the `/smart-steps` prefix, and entries are
+   cached individually with `cache.add(...).catch(() => {})` because a single
+   `addAll()` rejection aborts the whole install.
+
+Also hardened: cross-origin and unparseable URLs are skipped, the hashed-asset
+branch has its own `.catch`, `res.ok` is checked before caching, and
+`cache.put` failures cannot reject the response.
+
+`CACHE_NAME` is bumped to `smart-steps-v4`, so `activate` deletes the v3 cache
+(including any Scheduling HTML it had stored under `/`). With `skipWaiting()` +
+`clients.claim()` already in place, clients pick up v4 on their next load.
+
+**Lesson for this file: a service worker is the one place where a dormant bug
+can take the whole app down the moment registration starts working. Any
+`event.respondWith()` must be given a promise that CANNOT resolve to anything
+but a Response.**
+
 ## Rule 5: Deploy (step 3 of the Rule 0 end-of-task sequence)
 
 ### Smart Steps ABA Tracker (git-based, re-wired 2026-08-13)
