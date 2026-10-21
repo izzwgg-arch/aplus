@@ -110,7 +110,9 @@ function TransportationModal({ entry, clients, onClose, onSave }) {
       }
       onSave();
     } catch (err) {
-      toast?.error(err?.response?.data?.error || "Failed to save.");
+      console.error("Transportation save error:", err);
+      const errorMsg = err?.response?.data?.error || err?.message || "Failed to save.";
+      toast?.error(errorMsg);
     } finally {
       setSaving(false);
     }
