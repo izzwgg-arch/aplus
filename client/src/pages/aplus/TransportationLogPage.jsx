@@ -36,10 +36,12 @@ function StatusPill({ status }) {
 function TransportationModal({ entry, clients, onClose, onSave }) {
   const toast = useToast();
   const [saving, setSaving] = useState(false);
-  const [clientSearch, setClientSearch] = useState(entry?.client?.fullName || "");
+  const [clientSearch, setClientSearch] = useState("");
   const [showClientDropdown, setShowClientDropdown] = useState(false);
   const dropdownRef = useRef(null);
   const inputRef = useRef(null);
+
+  const selectedClientName = form.clientId ? clients.find(c => c.id === form.clientId)?.fullName : "";
 
   const [form, setForm] = useState(
     entry || {
@@ -53,16 +55,19 @@ function TransportationModal({ entry, clients, onClose, onSave }) {
     }
   );
 
-  const filteredClients = clients.filter(c =>
-    !clientSearch ||
-    c.fullName.toLowerCase().includes(clientSearch.toLowerCase()) ||
-    c.firstName?.toLowerCase().includes(clientSearch.toLowerCase()) ||
-    c.lastName?.toLowerCase().includes(clientSearch.toLowerCase())
-  );
+  const filteredClients = useMemo(() => {
+    if (!clientSearch.trim()) return clients;
+    const search = clientSearch.toLowerCase();
+    return clients.filter(c =>
+      c.fullName.toLowerCase().includes(search) ||
+      (c.firstName && c.firstName.toLowerCase().includes(search)) ||
+      (c.lastName && c.lastName.toLowerCase().includes(search))
+    );
+  }, [clientSearch, clients]);
 
   const handleSelectClient = (client) => {
     setForm({ ...form, clientId: client.id });
-    setClientSearch(client.fullName);
+    setClientSearch("");
     setShowClientDropdown(false);
   };
 
@@ -117,17 +122,25 @@ function TransportationModal({ entry, clients, onClose, onSave }) {
         <h2 style={{ margin: 0, marginBottom: 16, fontSize: 18 }}>{entry ? "Edit Transportation" : "Add Transportation"}</h2>
         <form onSubmit={submit}>
           <div style={{ marginBottom: 12, position: "relative" }}>
-            <label style={{ display: "block", fontSize: 12, fontWeight: 500, marginBottom: 4 }}>Client * {form.clientId && <span style={{ fontSize: 11, color: "#666" }}>✓</span>}</label>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 500, marginBottom: 4 }}>Client * {form.clientId && <span style={{ fontSize: 11, color: "#10b981", fontWeight: "bold" }}>✓ Selected</span>}</label>
             <input
               ref={inputRef}
               type="text"
-              value={clientSearch}
+              value={clientSearch || selectedClientName}
               onChange={(e) => { setClientSearch(e.target.value); setShowClientDropdown(true); }}
               onFocus={() => setShowClientDropdown(true)}
-              placeholder="Type client name..."
-              style={{ width: "100%", padding: 8, border: form.clientId ? "1px solid #10b981" : "1px solid #ddd", borderRadius: 6, fontSize: 13, boxSizing: "border-box" }}
+              placeholder={form.clientId ? "Click to change..." : "Type to search clients..."}
+              style={{
+                width: "100%",
+                padding: 8,
+                border: form.clientId ? "2px solid #10b981" : "1px solid #ddd",
+                borderRadius: 6,
+                fontSize: 13,
+                boxSizing: "border-box",
+                background: form.clientId ? "#f0fdf4" : "white"
+              }}
             />
-            {showClientDropdown && filteredClients.length > 0 && (
+            {showClientDropdown && (
               <div
                 ref={dropdownRef}
                 style={{
@@ -138,29 +151,37 @@ function TransportationModal({ entry, clients, onClose, onSave }) {
                   background: "white",
                   border: "1px solid #ddd",
                   borderRadius: 6,
-                  maxHeight: 250,
+                  maxHeight: 300,
                   overflowY: "auto",
                   zIndex: 1000,
-                  boxShadow: "0 4px 6px rgba(0,0,0,0.1)"
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.15)"
                 }}
               >
-                {filteredClients.map((c, idx) => (
-                  <div
-                    key={c.id}
-                    onMouseDown={() => handleSelectClient(c)}
-                    style={{
-                      padding: "10px 12px",
-                      borderBottom: idx < filteredClients.length - 1 ? "1px solid #f0f0f0" : "none",
-                      cursor: "pointer",
-                      fontSize: 13,
-                      background: form.clientId === c.id ? "#e0f2fe" : "white"
-                    }}
-                    onMouseEnter={(e) => { if (form.clientId !== c.id) e.target.style.background = "#f9fafb"; }}
-                    onMouseLeave={(e) => { if (form.clientId !== c.id) e.target.style.background = "white"; }}
-                  >
-                    {c.fullName} {form.clientId === c.id && "✓"}
-                  </div>
-                ))}
+                {filteredClients.length === 0 ? (
+                  <div style={{ padding: 12, fontSize: 13, color: "#999" }}>No clients found</div>
+                ) : (
+                  filteredClients.map((c) => (
+                    <div
+                      key={c.id}
+                      onMouseDown={(e) => { e.preventDefault(); handleSelectClient(c); }}
+                      style={{
+                        padding: "10px 12px",
+                        cursor: "pointer",
+                        fontSize: 13,
+                        background: form.clientId === c.id ? "#dcfce7" : "white",
+                        borderBottom: "1px solid #f0f0f0",
+                        transition: "background 0.2s"
+                      }}
+                      onMouseEnter={(e) => { if (form.clientId !== c.id) e.currentTarget.style.background = "#f3f4f6"; }}
+                      onMouseLeave={(e) => { if (form.clientId !== c.id) e.currentTarget.style.background = "white"; }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span>{c.fullName}</span>
+                        {form.clientId === c.id && <span style={{ fontSize: 12, color: "#10b981", fontWeight: "bold" }}>✓</span>}
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             )}
           </div>
