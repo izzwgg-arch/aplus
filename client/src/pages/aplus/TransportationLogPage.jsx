@@ -210,7 +210,7 @@ export default function TransportationLogPage() {
     const load = async () => {
       try {
         const res = await api.get(`/clients?limit=1000`);
-        setClients(res.data.clients || []);
+        setClients(res.data.data || []);
       } catch (err) {
         console.error("Failed to load clients:", err?.message);
       }
