@@ -41,8 +41,6 @@ function TransportationModal({ entry, clients, onClose, onSave }) {
   const dropdownRef = useRef(null);
   const inputRef = useRef(null);
 
-  const selectedClientName = form.clientId ? clients.find(c => c.id === form.clientId)?.fullName : "";
-
   const [form, setForm] = useState(
     entry || {
       clientId: "",
