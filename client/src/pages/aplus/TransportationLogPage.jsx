@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../../lib/api";
 import { useToast } from "../../context/ToastContext";
@@ -30,16 +30,9 @@ function StatusPill({ status }) {
   );
 }
 
-/**
- * Add/Edit Transportation Modal
- */
 function TransportationModal({ entry, clients, onClose, onSave }) {
   const toast = useToast();
   const [saving, setSaving] = useState(false);
-  const [clientSearch, setClientSearch] = useState("");
-  const [showClientDropdown, setShowClientDropdown] = useState(false);
-  const dropdownRef = useRef(null);
-  const inputRef = useRef(null);
 
   const [form, setForm] = useState(
     entry || {
@@ -53,41 +46,9 @@ function TransportationModal({ entry, clients, onClose, onSave }) {
     }
   );
 
-  const selectedClientName = form.clientId ? (clients.find(c => c.id === form.clientId)?.fullName || "") : "";
-
-  const filteredClients = clients.filter(c => {
-    if (!clientSearch.trim()) return true;
-    const search = clientSearch.toLowerCase();
-    return (
-      c.fullName.toLowerCase().includes(search) ||
-      (c.firstName && c.firstName.toLowerCase().includes(search)) ||
-      (c.lastName && c.lastName.toLowerCase().includes(search))
-    );
-  });
-
-  const handleSelectClient = (client) => {
-    setForm({ ...form, clientId: client.id });
-    setClientSearch("");
-    setShowClientDropdown(false);
-  };
-
-  // Close dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target) &&
-          inputRef.current && !inputRef.current.contains(event.target)) {
-        setShowClientDropdown(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
   const submit = async (e) => {
     e.preventDefault();
-    console.log("Form data:", form);
-
-    if (!form.clientId) return toast?.error("Select a client.");
+    if (!form.clientId) return toast?.error("Select a customer.");
     if (!form.serviceDate) return toast?.error("Enter service date.");
     if (!form.amount || Number(form.amount) <= 0) return toast?.error("Enter a valid amount.");
 
@@ -102,7 +63,6 @@ function TransportationModal({ entry, clients, onClose, onSave }) {
         paidBy: form.paidBy || undefined,
         notes: form.notes || undefined
       };
-      console.log("Sending payload:", payload);
 
       if (entry) {
         await api.patch(`/transportation/${entry.id}`, payload);
@@ -126,69 +86,18 @@ function TransportationModal({ entry, clients, onClose, onSave }) {
       <div style={{ background: "white", borderRadius: 12, padding: 24, maxWidth: 500, width: "90%" }}>
         <h2 style={{ margin: 0, marginBottom: 16, fontSize: 18 }}>{entry ? "Edit Transportation" : "Add Transportation"}</h2>
         <form onSubmit={submit}>
-          <div style={{ marginBottom: 12, position: "relative" }}>
-            <label style={{ display: "block", fontSize: 12, fontWeight: 500, marginBottom: 4 }}>Client * {form.clientId && <span style={{ fontSize: 11, color: "#10b981", fontWeight: "bold" }}>✓ Selected</span>}</label>
-            <input
-              ref={inputRef}
-              type="text"
-              value={clientSearch || selectedClientName}
-              onChange={(e) => { setClientSearch(e.target.value); setShowClientDropdown(true); }}
-              onFocus={() => setShowClientDropdown(true)}
-              placeholder={form.clientId ? "Click to change..." : "Type to search clients..."}
-              style={{
-                width: "100%",
-                padding: 8,
-                border: form.clientId ? "2px solid #10b981" : "1px solid #ddd",
-                borderRadius: 6,
-                fontSize: 13,
-                boxSizing: "border-box",
-                background: form.clientId ? "#f0fdf4" : "white"
-              }}
-            />
-            {showClientDropdown && (
-              <div
-                ref={dropdownRef}
-                style={{
-                  position: "absolute",
-                  top: "calc(100% + 4px)",
-                  left: 0,
-                  right: 0,
-                  background: "white",
-                  border: "1px solid #ddd",
-                  borderRadius: 6,
-                  maxHeight: 300,
-                  overflowY: "auto",
-                  zIndex: 1000,
-                  boxShadow: "0 4px 12px rgba(0,0,0,0.15)"
-                }}
-              >
-                {filteredClients.length === 0 ? (
-                  <div style={{ padding: 12, fontSize: 13, color: "#999" }}>No clients found</div>
-                ) : (
-                  filteredClients.map((c) => (
-                    <div
-                      key={c.id}
-                      onMouseDown={(e) => { e.preventDefault(); handleSelectClient(c); }}
-                      style={{
-                        padding: "10px 12px",
-                        cursor: "pointer",
-                        fontSize: 13,
-                        background: form.clientId === c.id ? "#dcfce7" : "white",
-                        borderBottom: "1px solid #f0f0f0",
-                        transition: "background 0.2s"
-                      }}
-                      onMouseEnter={(e) => { if (form.clientId !== c.id) e.currentTarget.style.background = "#f3f4f6"; }}
-                      onMouseLeave={(e) => { if (form.clientId !== c.id) e.currentTarget.style.background = "white"; }}
-                    >
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <span>{c.fullName}</span>
-                        {form.clientId === c.id && <span style={{ fontSize: 12, color: "#10b981", fontWeight: "bold" }}>✓</span>}
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 500, marginBottom: 4 }}>Customer *</label>
+            <select
+              value={form.clientId}
+              onChange={(e) => setForm({ ...form, clientId: e.target.value })}
+              style={{ width: "100%", padding: 8, border: "1px solid #ddd", borderRadius: 6, fontSize: 13 }}
+            >
+              <option value="">— Select Customer —</option>
+              {clients.map(c => (
+                <option key={c.id} value={c.id}>{c.fullName}</option>
+              ))}
+            </select>
           </div>
           <div style={{ marginBottom: 12 }}>
             <label style={{ display: "block", fontSize: 12, fontWeight: 500, marginBottom: 4 }}>Service Date *</label>
@@ -365,7 +274,7 @@ export default function TransportationLogPage() {
     setFilters({ ...filters });
   };
 
-  const totalAmount = useMemo(() => logs.reduce((sum, l) => sum + (l.amount || 0), 0), [logs]);
+  const totalAmount = logs.reduce((sum, l) => sum + (l.amount || 0), 0);
 
   if (view === "weekly" && weeklySummary) {
     return (
@@ -460,13 +369,13 @@ export default function TransportationLogPage() {
       {/* Filters */}
       <div style={{ background: "white", borderRadius: 12, padding: 16, marginBottom: 24, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
         <div>
-          <label style={{ display: "block", fontSize: 12, fontWeight: 500, marginBottom: 4 }}>Client</label>
+          <label style={{ display: "block", fontSize: 12, fontWeight: 500, marginBottom: 4 }}>Customer</label>
           <select
             value={filters.clientId}
             onChange={(e) => setFilters({ ...filters, clientId: e.target.value })}
             style={{ width: "100%", padding: 8, border: "1px solid #ddd", borderRadius: 6, fontSize: 13 }}
           >
-            <option value="">All Clients</option>
+            <option value="">All Customers</option>
             {clients.map(c => (
               <option key={c.id} value={c.id}>{c.fullName}</option>
             ))}
@@ -529,7 +438,7 @@ export default function TransportationLogPage() {
             <thead style={{ background: "#f9fafb", borderBottom: "1px solid #ddd" }}>
               <tr>
                 <th style={{ textAlign: "left", padding: 12, fontWeight: 600, fontSize: 12 }}>Date</th>
-                <th style={{ textAlign: "left", padding: 12, fontWeight: 600, fontSize: 12 }}>Client</th>
+                <th style={{ textAlign: "left", padding: 12, fontWeight: 600, fontSize: 12 }}>Customer</th>
                 <th style={{ textAlign: "left", padding: 12, fontWeight: 600, fontSize: 12 }}>Description</th>
                 <th style={{ textAlign: "right", padding: 12, fontWeight: 600, fontSize: 12 }}>Amount</th>
                 <th style={{ textAlign: "center", padding: 12, fontWeight: 600, fontSize: 12 }}>Status</th>
