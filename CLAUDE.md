@@ -1522,6 +1522,54 @@ can take the whole app down the moment registration starts working. Any
 `event.respondWith()` must be given a promise that CANNOT resolve to anything
 but a Response.**
 
+## Staff merge — same person under two different emails (2026-10-21)
+
+Rivka Ruchy Gottlieb had two rows. Reconstructed from timestamps: at 17:34 she
+was added again under her work email (invite sent), and at 17:39 someone tried
+to move her REAL record onto that address and hit the 409 above.
+
+- kept `cmrwd4t28065kkqwnqd5j8ek3` — 213 sessions, 1 client, 5 audit entries
+- dropped `cmvie69tu0001kqqj7okkdqxx` — created 17:34, already `isActive:false`,
+  0 clients / sessions / notes, 1 invite token (cascades on delete)
+- the surviving record now carries `rivkarg@apluscenterinc.org`
+
+**Changing her email was safe to do because she has no A+ Scheduling account**
+(`aplus_sched."User"` has no row for either address or for the name), so there
+was no SSO identity to break — she authenticates through the Tracker invite
+flow. Check that before changing any staff email: `ensureUser()` resolves by id
+first and then by EMAIL, so renaming a row that an SSO login matches by email
+sends that person to a fresh orphan row — the original "assigned clients don't
+appear" bug. Both apps share database `aba_db`; the Tracker is schema `public`
+and Scheduling is `aplus_sched`, so one connection can check both.
+
+### `scripts/mergeDuplicateUsers.mjs` was STALE and is now fixed
+
+It re-pointed only the relations that existed when it was written. Two added
+later were silently left behind, and a merge would have **stripped the
+supervising BCBA off every session the duplicate supervised and orphaned the
+goals they attached by hand**:
+
+- `Session.supervisorId` (migration `20260827000000_session_supervision`)
+- `SessionTarget.addedById` (`20260820000000_session_added_goals`)
+
+Both are re-pointed now. The transaction body was extracted into
+`mergeInto(tx, keeper, dupe)` so the two entry points share one implementation
+and cannot drift again. **When adding a relation to `User`, add it there.**
+
+It also gained an explicit-pair mode, because grouping by lowercased email
+cannot see one person under two addresses:
+
+```
+node --env-file=.env.local scripts/mergeDuplicateUsers.mjs \
+  --keep <keeperId> --drop <dupeId> [--email new@addr] --apply
+```
+
+Dry run by default. It **refuses to drop a row that has clients, sessions or
+notes** — getting the direction wrong is the one mistake here that destroys
+clinical data, and that guard was verified by running the Rivka merge backwards
+first (correctly refused, naming the 213 sessions). It writes a `USER_MERGED`
+audit entry recording the dropped id, its email, and the new address.
+
 ## Rule 5: Deploy (step 3 of the Rule 0 end-of-task sequence)
 
 ### Smart Steps ABA Tracker (git-based, re-wired 2026-08-13)
