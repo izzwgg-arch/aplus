@@ -55,15 +55,17 @@ function TransportationModal({ entry, clients, onClose, onSave }) {
     }
   );
 
-  const filteredClients = useMemo(() => {
-    if (!clientSearch.trim()) return clients;
+  const selectedClientName = form.clientId ? (clients.find(c => c.id === form.clientId)?.fullName || "") : "";
+
+  const filteredClients = clients.filter(c => {
+    if (!clientSearch.trim()) return true;
     const search = clientSearch.toLowerCase();
-    return clients.filter(c =>
+    return (
       c.fullName.toLowerCase().includes(search) ||
       (c.firstName && c.firstName.toLowerCase().includes(search)) ||
       (c.lastName && c.lastName.toLowerCase().includes(search))
     );
-  }, [clientSearch, clients]);
+  });
 
   const handleSelectClient = (client) => {
     setForm({ ...form, clientId: client.id });

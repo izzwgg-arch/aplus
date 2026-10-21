@@ -36,7 +36,7 @@ import {
 } from "@/store/abaStore";
 import { formatSessionHours } from "@/lib/formatDuration";
 import { isOpenForDataEntry } from "@/lib/targetVisibility";
-import { dedupeTargetRows, normalizeLabel } from "@/lib/storeDedupe";
+import { dedupeTargetRows, normalizeLabel, staleServerRowIds } from "@/lib/storeDedupe";
 import { SessionSnapshotDrawer } from "./SessionSnapshotDrawer";
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
@@ -566,11 +566,14 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
       groupType: "goal" | "program";
       targets: Array<{ id: string; definition: string; targetType: string; phase: string }>;
     }>;
-  }>({
+  } | null>({
     queryKey: ["server-targets-sync", clientId],
     queryFn: async () => {
       const res = await fetch(`/smart-steps/api/clients/${clientId}/targets`);
-      if (!res.ok) return { groups: [] };
+      // null, NOT an empty group list: the pruning below treats the response as
+      // the authoritative set of the client's goals, and an empty list from a
+      // FAILED request would prune the client's entire local cache.
+      if (!res.ok) return null;
       return res.json();
     },
     enabled: !!clientId,
@@ -663,6 +666,13 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
         }
       }
     }
+
+    // The server is authoritative for which goals this client has. Drop any
+    // store row claiming a serverId the server did not return, which clears a
+    // stale or duplicated cache without needing to know how it got that way.
+    const serverIds = new Set(serverTargetData.groups.flatMap((g) => g.targets.map((t) => t.id)));
+    const { targets: afterSync, removeTarget } = useABAStore.getState();
+    for (const staleId of staleServerRowIds(afterSync, clientId, serverIds)) removeTarget(staleId);
     // Only re-run when the server data or client changes.
     // Actions come from getState() so they don't need to be deps.
     // eslint-disable-next-line react-hooks/exhaustive-deps

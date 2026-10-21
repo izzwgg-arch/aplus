@@ -121,10 +121,52 @@ export interface LabelledRow extends IdentifiableRow {
 export function dedupeTargetRows<T extends LabelledRow>(rows: readonly T[] | undefined | null): T[] {
   const byIdentity = dedupeStoreRows(rows);
   const labelKey = (row: T) => `${row.clientId ?? ""}::${normalizeLabel(row.title)}`;
-  const syncedLabels = new Set(byIdentity.filter((row) => row.serverId).map(labelKey));
-  return byIdentity.filter((row) => {
-    if (row.serverId) return true;
-    if (!normalizeLabel(row.title)) return true;
-    return !syncedLabels.has(labelKey(row));
-  });
+  // Labels already represented by a server-backed row.
+  const taken = new Set(byIdentity.filter((row) => row.serverId).map(labelKey));
+  const kept: T[] = [];
+  for (const row of byIdentity) {
+    // A server-backed row is authoritative and is always kept.
+    if (row.serverId) {
+      kept.push(row);
+      continue;
+    }
+    const label = normalizeLabel(row.title);
+    // Nothing to match on — keep it rather than guess.
+    if (!label) {
+      kept.push(row);
+      continue;
+    }
+    // Drop an unsynced row that repeats a label already held by a synced row OR
+    // by an earlier unsynced row, so two local copies of one goal collapse too.
+    if (taken.has(labelKey(row))) continue;
+    taken.add(labelKey(row));
+    kept.push(row);
+  }
+  return kept;
+}
+
+/**
+ * Ids of store rows for `clientId` that claim a `serverId` the server did not
+ * return — stale rows: a goal deleted or archived elsewhere, or a duplicate
+ * pointing at a record that no longer exists.
+ *
+ * The server is authoritative for which goals a client has, so pruning against
+ * its list heals a bad local cache WITHOUT having to know how the bad row got
+ * there. Unsynced rows are never pruned: they are work that has not reached the
+ * server yet, and `dedupeTargetRows` handles the leftovers among those.
+ *
+ * ONLY call this with the full active target list for the client — the response
+ * of `GET /api/clients/[clientId]/targets` with no filters. Passing a filtered
+ * list (`excludeMastered=1`, say) would prune every goal the filter removed, and
+ * passing an empty list because a fetch FAILED would prune the client's whole
+ * cache. The callers bail out unless the request actually succeeded.
+ */
+export function staleServerRowIds<T extends LabelledRow>(
+  rows: readonly T[],
+  clientId: string,
+  serverIds: ReadonlySet<string>,
+): string[] {
+  return rows
+    .filter((row) => row.clientId === clientId && !!row.serverId && !serverIds.has(row.serverId))
+    .map((row) => row.id);
 }

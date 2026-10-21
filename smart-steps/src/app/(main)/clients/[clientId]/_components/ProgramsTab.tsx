@@ -25,7 +25,7 @@ import {
 import { toast } from "sonner";
 import { printGoals, type GoalStatusFilter, type PrintableGoal, type PrintableTarget } from "@/lib/printGoals";
 import { usePermissions } from "@/hooks/usePermissions";
-import { normalizeLabel } from "@/lib/storeDedupe";
+import { normalizeLabel, staleServerRowIds } from "@/lib/storeDedupe";
 import {
   useABAStore,
   defaultMastery,
@@ -887,6 +887,16 @@ export function ProgramsTab({
             }
           }
         }
+
+        // The server is authoritative for which goals this client has. Drop any
+        // store row claiming a serverId the server did not return, which clears
+        // a stale or duplicated cache without needing to know how it got that
+        // way. `data.groups` is the UNFILTERED target list, so this must not be
+        // pointed at a filtered endpoint; a failed request returns null above
+        // and never reaches here.
+        const serverIds = new Set(data.groups.flatMap((g) => g.targets.map((t) => t.id)));
+        const { targets: afterSync, removeTarget } = useABAStore.getState();
+        for (const staleId of staleServerRowIds(afterSync, clientId, serverIds)) removeTarget(staleId);
       })
       .catch(() => {});
   }, [clientId, setTargetServerId, addTarget]);

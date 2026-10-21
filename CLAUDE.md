@@ -1348,6 +1348,36 @@ Re-run it if this logic is touched.
 the `smart-steps-aba` localStorage key — the store is a cache, the server is
 authoritative, and the only thing lost is session data not yet synced.
 
+**Follow-up (2026-10-21, second): the store now PRUNES against the server
+instead of relying on matching the duplicate's shape.** Two rounds of
+de-duplication keyed on guesses about how the duplicate row looked (identity,
+then label). Rather than guess a third time, both serverId syncs now treat the
+server's list as authoritative:
+
+- `staleServerRowIds()` returns store rows for the client that claim a
+  `serverId` the server did NOT return. Those are removed. That clears a stale
+  or duplicated cache **without needing to know how the bad row got there**, and
+  also clears goals deleted or archived on another device.
+- **Unsynced rows are never pruned** — they are work that has not reached the
+  server yet. Leftovers among those are handled by `dedupeTargetRows`, which now
+  also collapses two UNSYNCED copies of one goal (previously it only dropped an
+  unsynced row that duplicated a SYNCED one).
+
+Two guards make pruning safe, and both must hold for any future caller:
+
+- **Only the UNFILTERED list may drive it.** Both syncs fetch
+  `GET /api/clients/[clientId]/targets` with no query flags, which returns every
+  active target including MASTERED and program-direct ones. Pointing this at
+  `excludeMastered=1` would prune every goal the filter removed.
+- **A failed request must not look like "this client has no goals."**
+  DataEntryTab's query returned `{ groups: [] }` on a non-OK response, which
+  passes an `if (!data?.groups) return` guard and would have pruned the client's
+  entire cache on any fetch failure. It now returns `null`.
+
+The `tsx` harness covers 13 cases, including the three pruning safety
+properties (never prune an unsynced row, never prune another client's rows,
+prune nothing when the server has everything).
+
 **Real duplicate rows found in production** (a different problem — these are in
 the database, not the cache). Created 13-60 s apart, which is too slow for a
 double-click and is the signature of someone saving a goal, not seeing it appear
