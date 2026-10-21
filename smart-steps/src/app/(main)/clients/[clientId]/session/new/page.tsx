@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { ArrowLeft, Pause, Play, Timer, Plus, Minus, RefreshCcw, Save, CloudOff, ChevronDown, AlertTriangle } from "lucide-react";
 import { useABAStore, resolveSessionStart, type ActiveSession } from "@/store/abaStore";
 import { isOpenForDataEntry } from "@/lib/targetVisibility";
-import { dedupeStoreRows } from "@/lib/storeDedupe";
+import { dedupeTargetRows } from "@/lib/storeDedupe";
 import { useSession as useAuthSession } from "next-auth/react";
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
@@ -109,7 +109,7 @@ export default function SessionNewPage() {
   // picker listed the goal twice — the server list is deduped against the store,
   // but the store half was never deduped against itself.
   const storeTargets = useMemo(
-    () => dedupeStoreRows(rawStoreTargets).filter((t) => t.clientId === clientId && t.isActive && isOpenForDataEntry(t)),
+    () => dedupeTargetRows(rawStoreTargets).filter((t) => t.clientId === clientId && t.isActive && isOpenForDataEntry(t)),
     [rawStoreTargets, clientId],
   );
   const [storeLocalSessionId, setStoreLocalSessionId] = useState<string | null>(null);

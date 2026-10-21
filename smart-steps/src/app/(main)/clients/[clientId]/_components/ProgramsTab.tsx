@@ -25,6 +25,7 @@ import {
 import { toast } from "sonner";
 import { printGoals, type GoalStatusFilter, type PrintableGoal, type PrintableTarget } from "@/lib/printGoals";
 import { usePermissions } from "@/hooks/usePermissions";
+import { normalizeLabel } from "@/lib/storeDedupe";
 import {
   useABAStore,
   defaultMastery,
@@ -323,7 +324,7 @@ function SkillAreaModal({ clientId, category, skill, onClose }: { clientId: stri
             (c) =>
               c.serverId &&
               c.clientId === clientId &&
-              c.name.trim().toLowerCase() === category.name.trim().toLowerCase(),
+              normalizeLabel(c.name) === normalizeLabel(category.name),
           )?.serverId ??
         null;
       if (!resolvedCategoryServerId) {
@@ -855,7 +856,7 @@ export function ProgramsTab({
             if (storeTargets.some((t) => t.serverId === st.id)) continue;
             const match = storeTargets.find(
               (t) => t.clientId === clientId && !t.serverId &&
-                (t.title ?? "").trim().toLowerCase() === (st.definition ?? "").trim().toLowerCase(),
+                normalizeLabel(t.title) === normalizeLabel(st.definition),
             );
             if (match) {
               setTargetServerId(match.id, st.id);
@@ -940,7 +941,7 @@ export function ProgramsTab({
             (c) =>
               !c.serverId &&
               c.clientId === clientId &&
-              c.name.trim().toLowerCase() === p.name.trim().toLowerCase(),
+              normalizeLabel(c.name) === normalizeLabel(p.name),
           );
           if (unsyncedMatch) {
             setCategoryServerId(unsyncedMatch.id, p.id);

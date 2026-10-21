@@ -1308,6 +1308,46 @@ the EXISTING row with `duplicate: true` instead of a second copy, mirroring
 areas — may legitimately share wording; an orphan target with no parent is not
 scopable and is always created.
 
+**Follow-up (2026-10-21): identity de-duplication was not enough.** Doubles were
+still showing on Libby Weiner's file. Ruled out first: her server data is clean
+(20 targets, no duplicate wording even ignoring parents), the deployed bundle
+really does contain the fix, and `public/sw.js` is already v3 network-first for
+pages with cache-first only on hashed `_next/static/*`, so the browser was NOT
+serving a stale build.
+
+The gap was the de-duplication KEY. `dedupeStoreRows` collapses rows it can
+prove are the same record — `serverId`, else local id. A leftover **unsynced**
+row has no `serverId` at all, so its identity is its own local id and the pair
+survived.
+
+Those leftovers come from the serverId syncs' title matcher, which was
+`(t.title ?? "").trim().toLowerCase() === (st.definition ?? "").trim().toLowerCase()`
+— it never collapsed INTERNAL whitespace. A local title differing from the
+server definition by only a double space, a newline or a non-breaking space
+failed to match, so the sync fell through to `addTarget` and the store kept BOTH
+the unsynced local row and the server row.
+
+- **`normalizeLabel()`** (trim + lowercase + collapse whitespace runs) is now the
+  one comparison form, used by all four matchers — the two target syncs in
+  ProgramsTab/DataEntryTab and the two category matchers in ProgramsTab.
+- **`dedupeTargetRows()`** = identity de-duplication, then drop any UNSYNCED row
+  whose label already exists on a SYNCED row for the same client. Used by
+  `allGoals`, the `session/new` picker, and the persist `merge` so the store is
+  cleaned permanently on rehydrate.
+- **Two server-backed rows are never collapsed by label.** `POST /api/targets` is
+  idempotent only within one parent, so the same wording may legitimately exist
+  under two different skill areas; hiding one would be data loss, not a fix.
+
+Nine cases are covered by a throwaway `tsx` harness (same serverId, synced +
+whitespace-differing unsynced leftover, newline variant, genuinely-new unsynced
+row, two server rows sharing wording, same title across two clients, blank
+title, identity-only de-duplication for categories, and unsynced-row upgrade).
+Re-run it if this logic is touched.
+
+**If a browser still shows doubles after a reload**, the escape hatch is to clear
+the `smart-steps-aba` localStorage key — the store is a cache, the server is
+authoritative, and the only thing lost is session data not yet synced.
+
 **Real duplicate rows found in production** (a different problem — these are in
 the database, not the cache). Created 13-60 s apart, which is too slow for a
 double-click and is the signature of someone saving a goal, not seeing it appear

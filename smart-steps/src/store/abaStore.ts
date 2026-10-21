@@ -8,7 +8,7 @@
 
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import { containsRow, dedupeStoreRows } from "@/lib/storeDedupe";
+import { containsRow, dedupeStoreRows, dedupeTargetRows } from "@/lib/storeDedupe";
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 
@@ -516,7 +516,7 @@ export const useABAStore = create<ABAStore>()(
           ...saved,
           categories: dedupeStoreRows(saved.categories ?? current.categories),
           programs: dedupeStoreRows(saved.programs ?? current.programs),
-          targets: dedupeStoreRows(saved.targets ?? current.targets),
+          targets: dedupeTargetRows(saved.targets ?? current.targets),
         };
       },
     }

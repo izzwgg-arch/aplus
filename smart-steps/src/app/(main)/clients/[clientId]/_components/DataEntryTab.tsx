@@ -36,7 +36,7 @@ import {
 } from "@/store/abaStore";
 import { formatSessionHours } from "@/lib/formatDuration";
 import { isOpenForDataEntry } from "@/lib/targetVisibility";
-import { dedupeStoreRows } from "@/lib/storeDedupe";
+import { dedupeTargetRows, normalizeLabel } from "@/lib/storeDedupe";
 import { SessionSnapshotDrawer } from "./SessionSnapshotDrawer";
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
@@ -534,7 +534,7 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
   // a goal is never listed (or counted) twice here. The store guards and the
   // rehydrate clean-up prevent new duplicates; this keeps the render correct for
   // a browser whose localStorage already holds some.
-  const allGoals           = useMemo(() => dedupeStoreRows(rawTargets ?? []).filter((t) => t.clientId === clientId && (t.isActive ?? true) && isOpenForDataEntry(t)), [rawTargets, clientId]);
+  const allGoals           = useMemo(() => dedupeTargetRows(rawTargets ?? []).filter((t) => t.clientId === clientId && (t.isActive ?? true) && isOpenForDataEntry(t)), [rawTargets, clientId]);
 
   /* ── Past sessions (paginated — reaches the COMPLETE history via "Load more") ── */
   const SESSIONS_PAGE_SIZE = 50;
@@ -625,7 +625,7 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
           (t) =>
             t.clientId === clientId &&
             !t.serverId &&
-            (t.title ?? "").trim().toLowerCase() === (st.definition ?? "").trim().toLowerCase(),
+            normalizeLabel(t.title) === normalizeLabel(st.definition),
         );
 
         if (match) {
