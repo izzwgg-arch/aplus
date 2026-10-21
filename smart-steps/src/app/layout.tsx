@@ -17,7 +17,11 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Smart Steps ABA Tracker",
   description: "2026 ABA data collection — data doesn't sleep.",
-  manifest: "/manifest.json",
+  // basePath is NOT applied to metadata URLs, so this must carry it. Without
+  // it the browser requested /manifest.json, which nginx routes to A+
+  // Scheduling on :4000 — it answered 200 with that SPA's HTML and the
+  // browser logged "Manifest: Line: 1, column: 1, Syntax error."
+  manifest: "/smart-steps/manifest.json",
 };
 
 export const viewport = {

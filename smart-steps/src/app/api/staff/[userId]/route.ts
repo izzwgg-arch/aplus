@@ -106,8 +106,34 @@ export async function PATCH(req: Request, { params }: Params) {
       } else {
         const conflict = await prisma.user.findFirst({
           where: { email: normalized, NOT: { id: userId } },
+          select: {
+            id: true,
+            name: true,
+            _count: { select: { assignedClients: true, sessions: true, notes: true } },
+          },
         });
-        if (conflict) return NextResponse.json({ error: "Email already in use" }, { status: 409 });
+        // Name the record that holds the address. A bare "Email already in use"
+        // is unactionable: the holder is usually a second, empty record for the
+        // SAME person (someone adds the staff member again under their work
+        // email, then tries to move the original record onto it), and the admin
+        // has no way to tell which record to deal with. Say whether the blocking
+        // record has any history, since an empty one is safe to delete.
+        if (conflict) {
+          const c = conflict._count;
+          const isEmpty = c.assignedClients === 0 && c.sessions === 0 && c.notes === 0;
+          return NextResponse.json(
+            {
+              error:
+                `That email is already on another staff record — ${conflict.name ?? "unnamed"}` +
+                (isEmpty
+                  ? ", which has no clients, sessions or notes. If it is a duplicate of this person, delete it and then set this email again."
+                  : ` (${c.assignedClients} client(s), ${c.sessions} session(s), ${c.notes} note(s)). Change or clear the email on that record first.`),
+              conflictUserId: conflict.id,
+              conflictIsEmpty: isEmpty,
+            },
+            { status: 409 }
+          );
+        }
         data.email = normalized;
       }
     }

@@ -1395,6 +1395,61 @@ appear in session data entry. No other client has any. These are legacy
 (March 2026) and also await a decision — re-parent them under a skill area to
 make them visible, or deactivate.
 
+## Tracker PWA assets ignored basePath — manifest and service worker both broken (fixed 2026-10-21)
+
+Found in a browser console the user opened for an unrelated reason:
+`manifest.json:1 Manifest: Line: 1, column: 1, Syntax error.`, repeated.
+
+`next.config` sets `basePath: "/smart-steps"`, but **basePath is not applied to
+metadata URLs**, and `layout.tsx` declared `manifest: "/manifest.json"`. nginx
+routes `/` to A+ Scheduling on :4000, so the browser fetched the SCHEDULING
+SPA's `index.html`, got `200 text/html`, and failed to parse it as a manifest at
+line 1, column 1.
+
+`RegisterSW.tsx` had the identical bug: `navigator.serviceWorker.register("/sw.js")`
+also resolved to the Scheduling SPA. Registering HTML as a worker script always
+threw, and `.catch(() => {})` swallowed it — so **the Tracker's service worker
+had never registered in production at all**, despite sw.js being at v3. (Useful
+corollary: a stale service worker can be ruled out as a cause of users running
+old Tracker code.)
+
+Fixed together, since it is one defect:
+
+- `layout.tsx` -> `manifest: "/smart-steps/manifest.json"`.
+- `RegisterSW.tsx` -> `register("/smart-steps/sw.js", { scope: "/smart-steps/" })`.
+- **`middleware.ts` now excludes `manifest.json` and `sw.js`.** Both are
+  requested on the login page before any session exists, so the auth middleware
+  was answering a 302 to `/login` instead of the file — the right path alone
+  would still have failed. Neither file contains anything private.
+- `public/manifest.json`'s own app-absolute URLs needed the prefix too:
+  `start_url` was `/` (launching the installed app into A+ Scheduling) and the
+  icon was `/favicon.ico`. Its `background_color`/`theme_color` were `#0a0a0a`
+  while `viewport.themeColor` is the light `#f8fafc`; aligned to light.
+
+When adding any new file under `public/` that the BROWSER requests by absolute
+path, write the `/smart-steps` prefix explicitly and check the middleware
+matcher — neither is applied for you.
+
+## Tracker "Email already in use" now names the blocking record (2026-10-21)
+
+`PATCH /api/staff/[userId]` answered a bare `409 Email already in use`, which is
+unactionable: the holder is usually a second, EMPTY record for the same person.
+Live example — two rows for Rivka Ruchy Gottlieb:
+
+- `cmrwd4t28065kkqwnqd5j8ek3` — the real one, `albumsbyrivky@gmail.com`,
+  213 sessions, 1 assigned client.
+- `cmvie69tu0001kqqj7okkdqxx` — added later as `rivkarg@apluscenterinc.org`,
+  0 sessions, 0 clients, 0 notes, no password.
+
+Moving the real record onto the work email 409s because the new empty record
+already holds it. The error now names the conflicting record, reports whether it
+has any clients/sessions/notes, and returns `conflictUserId` /
+`conflictIsEmpty`, so an admin can see that the blocker is an empty duplicate
+and delete it.
+
+`scripts/mergeDuplicateUsers.mjs` does NOT catch this: it groups by duplicate
+EMAIL, and here the two rows have different emails. Same person, two addresses.
+
 ## Rule 5: Deploy (step 3 of the Rule 0 end-of-task sequence)
 
 ### Smart Steps ABA Tracker (git-based, re-wired 2026-08-13)
