@@ -458,6 +458,61 @@ The panel posts a batch to the existing `POST /api/trials`
   notes are point-in-time. The drawer's button reads "Generate Again" and
   confirms, since generating produces an ADDITIONAL note.
 
+## Tracker session/note date drift and duplicate notes (audited 2026-10-22)
+
+Reported as "sessions and notes used to change dates in the past and now don't
+match up". Audited across 1,170 notes and 925 live sessions with
+`smart-steps/scripts/auditSessionNotes.mjs` (read-only; it loads `.env.local`
+through dotenv itself, so run it plainly with `node` from `smart-steps/`).
+`scripts/repairSessionNotes.mjs` is the repair, dry-run by default with
+`--apply` to write and a full before-values backup written first.
+
+**The cause is not a bug.** `POST /api/sessions/[sessionId]/generate-note`
+stamps the note's `serviceDate` and title from the session's `startedAt` AT
+GENERATION TIME. When the session's date is corrected afterwards, the note keeps
+the old one. 17 notes across 3 clients had drifted this way.
+
+- **The SESSION is authoritative.** It holds the service window reports, graphs
+  and billing read, and it is what somebody deliberately corrected. The repair
+  realigns `serviceDate` and a generator-written title to it; a hand-written
+  title is left alone.
+- **The date is ALSO inside the narrative prose** ("session on Thursday,
+  July 23, 2026"). That is clinical text and is NOT rewritten — the script
+  lists those notes for review instead. The clean fix is "Generate Again" in the
+  app once the dates line up.
+- **A five-month gap looked like a wrong session link and was not.** One note
+  was titled five months after the session it pointed at, and three real
+  sessions existed on the title's own date. Its narrative reported 66 trials and
+  the linked session held exactly 66: the session had been created, mis-dated,
+  written up, then corrected a week later. **Match a suspicious note to its
+  session by TRIAL COUNT, not by date.**
+
+**Counting duplicate notes by "same client + same day + same type" is WRONG** —
+it reports 276 groups. Clients legitimately have two sessions in one day (an
+early-evening and a late-evening slot) and each gets its own note. Only notes
+sharing ONE `sessionId` can be duplicates: 90 sessions carry more than one note,
+of which 78 are a BT note plus a BCBA note (legitimate) and 12 hold
+byte-identical copies — 15 removable notes, the worst being four identical
+copies on a single session. The fingerprint compares type, subtype, content,
+recommendations and next steps; the EARLIEST copy is kept, and the script
+refuses to drop a copy carrying a therapist observation the kept one lacks.
+The pattern is someone pressing generate repeatedly, minutes apart.
+
+Also found, all clean: 0 notes on another client's session, 0 on a deleted
+session, 0 with no service date, 0 BT notes with no session link. 40 sessions
+have trial data and no note at all.
+
+**Neither repair has been applied.** Both were refused by the session's safety
+classifier, which does not permit writes to the shared production database.
+Before removing duplicate notes, consider giving `Note` a `deletedAt` and
+soft-deleting the way `Session` already does — `DELETE /api/notes/[noteId]` is
+currently a HARD delete, which for a clinical record is worth closing anyway.
+
+**Keep client names out of this file.** Earlier sections name children because
+they were written that way; new entries should describe the defect, not the
+patient. The audit scripts print names at run time, which is fine — their
+output stays on the server and is not committed.
+
 ## Tracker BT session notes require the therapist's own observation (2026-10-22)
 
 A generated note reports what was ENTERED: trials, percentages, prompt codes,
