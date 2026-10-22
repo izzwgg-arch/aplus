@@ -17,7 +17,20 @@
 /** Short enough that one honest sentence passes, long enough that "ok" does not. */
 export const MIN_BT_OBSERVATION_CHARS = 20;
 
+/** Used when the person filling it in is the one who ran the session. */
 export const BT_OBSERVATION_LABEL = "Your observations";
+
+/**
+ * Used everywhere else. The missing thing is the account of whoever ran the
+ * session, which is usually NOT the person reading the screen — most notes here
+ * are transcribed by office staff. Wording that says "your" turns a gap in the
+ * record into an accusation aimed at whoever happens to be looking at it, so
+ * nothing that flags the gap names a person.
+ */
+export const BT_OBSERVATION_LABEL_OTHER = "Therapist observations";
+
+/** The chip and filter wording — deliberately about the session, not a person. */
+export const BT_OBSERVATION_FLAG_LABEL = "Needs therapist observation";
 
 export const BT_OBSERVATION_HINT =
   "In your own words: how the session went, anything that affected it, anything the team should know. At least one sentence.";
@@ -68,6 +81,31 @@ export function btObservationRequired(args: {
   if (args.noteType !== "BT_SESSION") return false;
   if (!args.authorId || !args.sessionProviderId) return false;
   return args.authorId === args.sessionProviderId;
+}
+
+/**
+ * The save-time test, for every write path.
+ *
+ * `required` governs ONLY whether leaving it blank is acceptable. A value that
+ * IS supplied must always clear `MIN_BT_OBSERVATION_CHARS`, whoever is saving.
+ *
+ * That second half matters more than it looks: the "needs an observation" chip
+ * tests `isBtObservationComplete()` (shorter than the minimum counts as
+ * missing) while the `hasNote=needsObs` filter can only test null-or-empty —
+ * Prisma cannot filter on string length. The two agree only while a stored
+ * observation is "absent or long enough", which held when every BT note was
+ * required to have one. Once the field became optional for transcribers, a
+ * saved "ok" would be flagged by the chip and yet be invisible to the filter.
+ * Rejecting a too-short value on the way in restores the invariant instead of
+ * silently discarding what someone typed.
+ */
+export function btObservationSaveError(
+  value: string | null | undefined,
+  required: boolean,
+): string | null {
+  const text = (value ?? "").trim();
+  if (!required && text.length === 0) return null;
+  return btObservationError(value);
 }
 
 /** Shown under the field when the author did not run the session. */

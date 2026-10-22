@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
 import { requireAnyPermissionResponse, requirePermissionResponse } from "@/lib/permissions";
 import { prisma } from "@/lib/db";
-import { btObservationError, btObservationRequired } from "@/lib/btObservation";
+import { btObservationRequired, btObservationSaveError } from "@/lib/btObservation";
 
 type Params = { params: Promise<{ noteId: string }> };
 
@@ -90,8 +90,11 @@ export async function PATCH(req: Request, { params }: Params) {
         }))?.userId ?? null
       : null;
 
-    if (btObservationRequired({ noteType: nextType, authorId: existing.userId, sessionProviderId })) {
-      const err = btObservationError(nextObservation);
+    if (nextType === "BT_SESSION") {
+      const err = btObservationSaveError(
+        nextObservation,
+        btObservationRequired({ noteType: nextType, authorId: existing.userId, sessionProviderId }),
+      );
       if (err) return NextResponse.json({ error: err }, { status: 400 });
     }
 

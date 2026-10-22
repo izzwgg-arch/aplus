@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
 import { accessibleClientIds, requireClientAccessResponse, requirePermissionResponse } from "@/lib/permissions";
 import { prisma } from "@/lib/db";
-import { MIN_BT_OBSERVATION_CHARS, btObservationError, btObservationRequired } from "@/lib/btObservation";
+import { MIN_BT_OBSERVATION_CHARS, btObservationRequired, btObservationSaveError } from "@/lib/btObservation";
 
 export async function GET(req: Request) {
   const user = await requireSession();
@@ -147,8 +147,11 @@ export async function POST(req: Request) {
         }))?.userId ?? null
       : null;
 
-    if (btObservationRequired({ noteType: body.type, authorId: userId, sessionProviderId })) {
-      const err = btObservationError(body.btObservation);
+    if (body.type === "BT_SESSION") {
+      const err = btObservationSaveError(
+        body.btObservation,
+        btObservationRequired({ noteType: body.type, authorId: userId, sessionProviderId }),
+      );
       if (err) return NextResponse.json({ error: err }, { status: 400 });
     }
 

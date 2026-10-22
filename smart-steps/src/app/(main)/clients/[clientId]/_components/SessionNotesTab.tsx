@@ -13,7 +13,7 @@ import { NoteEditorModal, type NoteRecord } from "./NoteEditorModal";
 import { printSessionNotes, type PrintableNote } from "@/lib/printNotes";
 import { formatClockRange12h, formatClockRangeHours } from "@/lib/formatDuration";
 import { bcbaServiceLabel } from "@/lib/noteTypes";
-import { isBtObservationComplete } from "@/lib/btObservation";
+import { BT_OBSERVATION_FLAG_LABEL, isBtObservationComplete } from "@/lib/btObservation";
 
 /* ── Types ───────────────────────────────────────────────────────────────── */
 
@@ -443,10 +443,10 @@ export function SessionNotesTab({ clientId, clientName = "Client", userName = ""
                         not finished — say so on the card. */}
                     {note.type === "BT_SESSION" && !isBtObservationComplete(note.btObservation) && (
                       <span
-                        title="Open this note and add your own observations."
+                        title="No account from the therapist who ran this session yet. Whoever ran it can open the note and add one."
                         className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-400"
                       >
-                        needs your observations
+                        {BT_OBSERVATION_FLAG_LABEL.toLowerCase()}
                       </span>
                     )}
 

@@ -16,10 +16,10 @@ import { TimeInput12h } from "@/components/common/TimeInput12h";
 import {
   BT_OBSERVATION_HINT,
   BT_OBSERVATION_LABEL,
+  BT_OBSERVATION_LABEL_OTHER,
   BT_OBSERVATION_OPTIONAL_HINT,
-  btObservationError,
   btObservationRequired,
-  isBtObservationComplete,
+  btObservationSaveError,
 } from "@/lib/btObservation";
 
 /* ── Types ─────────────────────────────────────────────────────────────────── */
@@ -524,10 +524,11 @@ export function NoteEditorModal({
   async function handleSave() {
     if (!content.trim()) { toast.error("Note content is required."); return; }
     /* The generated narrative reports the data; this is the part only the
-       person who ran the session can write — so only they are required to.
+       person who ran the session can write — so only they are required to. An
+       observation that IS typed must still be a real sentence either way.
        Same rule the API enforces. */
-    if (observationRequired) {
-      const obsError = btObservationError(btObservation);
+    if (isBt) {
+      const obsError = btObservationSaveError(btObservation, observationRequired);
       if (obsError) { toast.error(obsError); return; }
     }
     if (type === "BT_SESSION" && supervised && supTimeIn && supTimeOut && supTimeOut <= supTimeIn) {
@@ -635,7 +636,6 @@ export function NoteEditorModal({
 
   const isBcba = type === "BCBA";
   const isBt   = type === "BT_SESSION";
-  const observationOk = isBtObservationComplete(btObservation);
 
   /* Only the therapist who ran the session owes the observation. The author is
      this note's own author when editing, and whoever is signed in when creating;
@@ -651,6 +651,9 @@ export function NoteEditorModal({
     authorId,
     sessionProviderId: linkedSessionProviderId,
   });
+  /* What Save would refuse, shown inline so the reason sits next to the field
+     rather than only in a toast. Null while the field is acceptable. */
+  const observationIssue = isBt ? btObservationSaveError(btObservation, observationRequired) : null;
 
   /** True while the narrative is still one of the generated service templates. */
   function isTemplateContent(text: string): boolean {
@@ -1034,7 +1037,7 @@ export function NoteEditorModal({
             {isBt && (
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-400 mb-2">
-                  {BT_OBSERVATION_LABEL}
+                  {observationRequired ? BT_OBSERVATION_LABEL : BT_OBSERVATION_LABEL_OTHER}
                   {observationRequired
                     ? <span className="ml-1.5 text-rose-400 normal-case font-medium">required</span>
                     : <span className="ml-1.5 text-zinc-500 normal-case font-medium">optional</span>}
@@ -1045,13 +1048,11 @@ export function NoteEditorModal({
                   rows={4}
                   placeholder="e.g. Came in tired after a long day at school and needed extra breaks. Did well once we moved to the floor. Mom mentioned he has been waking up early."
                   className={`field-input w-full resize-y text-sm ${
-                    observationRequired && !observationOk ? "border-rose-500/50 focus:border-rose-500/70" : ""
+                    observationIssue ? "border-rose-500/50 focus:border-rose-500/70" : ""
                   }`}
                 />
-                <p className={`text-[11px] mt-1 ${
-                  observationRequired && !observationOk ? "text-rose-400" : "text-zinc-600"
-                }`}>
-                  {observationRequired ? BT_OBSERVATION_HINT : BT_OBSERVATION_OPTIONAL_HINT}
+                <p className={`text-[11px] mt-1 ${observationIssue ? "text-rose-400" : "text-zinc-600"}`}>
+                  {observationIssue ?? (observationRequired ? BT_OBSERVATION_HINT : BT_OBSERVATION_OPTIONAL_HINT)}
                 </p>
               </div>
             )}

@@ -10,6 +10,7 @@ import {
 import { toast } from "sonner";
 import { usePermissions } from "@/hooks/usePermissions";
 import { formatSessionHours, formatClockRange12h } from "@/lib/formatDuration";
+import { BT_OBSERVATION_FLAG_LABEL } from "@/lib/btObservation";
 
 /** Local "HH:MM" for a timestamp — converted in the browser, which sits in the clinic's timezone. */
 function toClock(iso: string): string {
@@ -296,7 +297,7 @@ export function SessionsTab({
                   <option value="">Any</option>
                   <option value="1">Note written</option>
                   <option value="0">Needs a note</option>
-                  <option value="needsObs">Needs your observations</option>
+                  <option value="needsObs">{BT_OBSERVATION_FLAG_LABEL}</option>
                 </select>
               </div>
 
@@ -397,10 +398,10 @@ export function SessionsTab({
                     {(s.noteCount ?? 0) > 0 ? (
                       s.noteNeedsObservation ? (
                         <span
-                          title="The note has been generated, but your own observations are still missing. Open the note and add them."
+                          title="The note has been generated, but it carries no account from the therapist who ran this session. Whoever ran it can open the note and add one."
                           className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-400"
                         >
-                          <FilePlus2 className="h-3 w-3" /> Needs your observations
+                          <FilePlus2 className="h-3 w-3" /> {BT_OBSERVATION_FLAG_LABEL}
                         </span>
                       ) : (
                       <span
