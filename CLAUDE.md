@@ -626,14 +626,41 @@ the first time they are edited, which is the intended behavior.
 
 **The chip deliberately still flags EVERY note with no observation** —
 `noteNeedsObservation` and the `hasNote=needsObs` filter are unchanged, so most
-session cards show the amber "Needs your observations" chip rather than the
-green "Note generated" one (~847 of 892 notes). This was put to the user on
-2026-10-22 with the option to narrow it to `btObservationRequired()` or drop it;
-they chose to keep flagging, so that a missing therapist observation is always
-SEEN. **Do NOT quieten this chip or scope it to the requirement** to reduce
-noise — the volume is the point: it is the clinic's own measure of how much
-documentation still has no account from the person who was in the room. It
-shrinks when therapists add observations, not when the rule is narrowed.
+session cards show it rather than the green "Note generated" one (~847 of 892
+notes). This was put to the user on 2026-10-22 with the option to narrow it to
+`btObservationRequired()` or drop it; they chose to keep flagging, so that a
+missing therapist observation is always SEEN. **Do NOT quieten this chip or
+scope it to the requirement** to reduce noise — the volume is the point: it is
+the clinic's own measure of how much documentation has no account from the
+person who was in the room. It shrinks when therapists add observations, not
+when the rule is narrowed.
+
+**The flag names the GAP, never the person who typed the note.** It used to read
+"needs your observations", which pointed a missing clinical record at whoever
+happened to be looking — normally the office worker who transcribed it, who was
+never in the room. `BT_OBSERVATION_FLAG_LABEL` ("Needs therapist observation")
+is the one wording for the note-card chip, the session-card chip and the
+Sessions-tab filter option, and the tooltips say whoever ran the session can add
+one. Only the editor's own field is addressed to a person, and only when it
+has the right one: `BT_OBSERVATION_LABEL` ("Your observations") when the author
+ran the session, `BT_OBSERVATION_LABEL_OTHER` ("Therapist observations")
+otherwise. Keep it that way — a flag that accuses the wrong person gets
+dismissed as wrong, which is how a real gap stops being seen.
+
+**A SUPPLIED observation must always clear the minimum, whoever is saving**
+(`btObservationSaveError()`; `required` governs only whether BLANK is allowed).
+This is load-bearing, not politeness: the chips test
+`isBtObservationComplete()`, where shorter than `MIN_BT_OBSERVATION_CHARS`
+counts as missing, while `hasNote=needsObs` can only test null-or-empty because
+**Prisma cannot filter on string length**. The two agree only while a stored
+observation is "absent or long enough" — an invariant that held while every BT
+note required one, and that making the field optional for transcribers broke: a
+saved "ok" would carry the chip and be invisible to the filter. Rejecting the
+short value on the way in restores it rather than silently discarding what
+somebody typed. A throwaway `tsx` harness covered 16 cases, including that every
+storable value leaves chip and filter in agreement; re-run it if this is
+touched. **If a future change lets a short observation be stored, that filter
+silently stops catching it.**
 
 ## Tracker generated BT notes vary their PHRASING per session (2026-10-22)
 
