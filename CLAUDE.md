@@ -471,6 +471,27 @@ through dotenv itself, so run it plainly with `node` from `smart-steps/`).
 on — provider, client, date, session start/end and hours — so the correct
 service date can be established from an independent record instead of assumed.
 Those outputs name children, so keep them off the repo and off GitHub.
+`scripts/reconcileTimesheets.py` then decides each case against the clinic's own
+timesheets (`TIMESHEET_ROOT`, default `D:\ABA Doc\OneDrive\ABA Folder\Timesheets`;
+needs `openpyxl` and `pdfplumber`).
+
+**The session is NOT always the corrected record.** That was the working
+assumption until timesheets were checked, and it is wrong in 3 of the 7 cases
+evidence exists for: a pair of sessions carried a date one day later than the
+evening actually billed, and their notes were right. Verdicts are decided by
+matching the session's EXACT clock window against a timesheet line, because
+these children often have two one-hour slots back to back and hours alone cannot
+separate them; the supervision flag on a session corroborates an `SV` line.
+**Repair nothing on the assumption that one side wins.**
+
+Timesheet storage changes shape over time and the reader handles each: Excel
+workbooks per provider, child and half-month through December 2025 (December
+nests them in `Week 1`..`Week 4`, so the scan must recurse), PDFs from January
+2026, and from February 2026 only ABC data and BCBA notes are filed under the
+month, with no provider timesheets at all. Names come from cells `E3`/`I3` in a
+workbook but only from the FILENAME in a PDF, where the order is inconsistent,
+so a PDF pair is matched order-insensitively. Some PDFs embed a font with no
+character map and extract as glyph codes; those are reported, never guessed at.
 
 **The cause is not a bug.** `POST /api/sessions/[sessionId]/generate-note`
 stamps the note's `serviceDate` and title from the session's `startedAt` AT
