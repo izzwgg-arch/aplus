@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
 import { accessibleClientIds, requireClientAccessResponse, requirePermissionResponse } from "@/lib/permissions";
 import { prisma } from "@/lib/db";
-import { MIN_BT_OBSERVATION_CHARS, btObservationError } from "@/lib/btObservation";
+import { MIN_BT_OBSERVATION_CHARS, btObservationError, btObservationRequired } from "@/lib/btObservation";
 
 export async function GET(req: Request) {
   const user = await requireSession();
@@ -135,8 +135,19 @@ export async function POST(req: Request) {
        the session. The generated narrative only knows what was entered as
        data; it cannot know how the session actually went. Notes produced by
        "Generate BT Note" are written by the generate-note route directly, not
-       through here, so generation is unaffected by this check. */
-    if (body.type === "BT_SESSION") {
+       through here, so generation is unaffected by this check.
+
+       Only the person who RAN the session is asked for it — see
+       btObservationRequired(). Most notes here are transcribed by office staff
+       for somebody else's session, and they cannot honestly write one. */
+    const sessionProviderId = body.sessionId
+      ? (await prisma.session.findUnique({
+          where:  { id: body.sessionId },
+          select: { userId: true },
+        }))?.userId ?? null
+      : null;
+
+    if (btObservationRequired({ noteType: body.type, authorId: userId, sessionProviderId })) {
       const err = btObservationError(body.btObservation);
       if (err) return NextResponse.json({ error: err }, { status: 400 });
     }

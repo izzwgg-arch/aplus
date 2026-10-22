@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSession } from "next-auth/react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X, Save, FileText, User, Calendar, Clock, CheckCircle,
@@ -15,7 +16,9 @@ import { TimeInput12h } from "@/components/common/TimeInput12h";
 import {
   BT_OBSERVATION_HINT,
   BT_OBSERVATION_LABEL,
+  BT_OBSERVATION_OPTIONAL_HINT,
   btObservationError,
+  btObservationRequired,
   isBtObservationComplete,
 } from "@/lib/btObservation";
 
@@ -109,6 +112,8 @@ type SessionOnDate = {
   id:                   string;
   startedAt:            string;
   endedAt:              string | null;
+  /** Who ran it. Decides whether this note's author owes an observation. */
+  providerId:           string | null;
   therapistName:        string | null;
   trialCount:           number;
   supervised?:          boolean;
@@ -302,6 +307,10 @@ export function NoteEditorModal({
   onClose,
 }: Props) {
   const isEdit = !!note;
+  /* Who is at the keyboard — the author of a note being created. Used only to
+     decide whether this person ran the session and so owes an observation; the
+     server re-resolves the canonical id and applies the same test. */
+  const { data: authSession } = useSession();
 
   const [type,            setType]            = useState(note?.type            ?? defaultType);
   const [bcbaServiceType, setBcbaServiceType] = useState(note?.bcbaServiceType ?? "DSU");
@@ -515,8 +524,9 @@ export function NoteEditorModal({
   async function handleSave() {
     if (!content.trim()) { toast.error("Note content is required."); return; }
     /* The generated narrative reports the data; this is the part only the
-       person who ran the session can write. Same rule the API enforces. */
-    if (type === "BT_SESSION") {
+       person who ran the session can write — so only they are required to.
+       Same rule the API enforces. */
+    if (observationRequired) {
       const obsError = btObservationError(btObservation);
       if (obsError) { toast.error(obsError); return; }
     }
@@ -626,6 +636,21 @@ export function NoteEditorModal({
   const isBcba = type === "BCBA";
   const isBt   = type === "BT_SESSION";
   const observationOk = isBtObservationComplete(btObservation);
+
+  /* Only the therapist who ran the session owes the observation. The author is
+     this note's own author when editing, and whoever is signed in when creating;
+     the provider comes from the linked session. The server applies the same
+     test, so the form can never refuse a save the API would accept (or offer
+     one it would refuse). */
+  const authorId = note?.userId ?? authSession?.user?.id ?? null;
+  const linkedSessionProviderId =
+    sessionsOnDate.find((s) => s.id === linkedSessionId)?.providerId
+    ?? (note?.sessionId && note.sessionId === linkedSessionId ? note.session?.user?.id ?? null : null);
+  const observationRequired = btObservationRequired({
+    noteType: type,
+    authorId,
+    sessionProviderId: linkedSessionProviderId,
+  });
 
   /** True while the narrative is still one of the generated service templates. */
   function isTemplateContent(text: string): boolean {
@@ -1010,7 +1035,9 @@ export function NoteEditorModal({
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-400 mb-2">
                   {BT_OBSERVATION_LABEL}
-                  <span className="ml-1.5 text-rose-400 normal-case font-medium">required</span>
+                  {observationRequired
+                    ? <span className="ml-1.5 text-rose-400 normal-case font-medium">required</span>
+                    : <span className="ml-1.5 text-zinc-500 normal-case font-medium">optional</span>}
                 </label>
                 <textarea
                   value={btObservation}
@@ -1018,11 +1045,13 @@ export function NoteEditorModal({
                   rows={4}
                   placeholder="e.g. Came in tired after a long day at school and needed extra breaks. Did well once we moved to the floor. Mom mentioned he has been waking up early."
                   className={`field-input w-full resize-y text-sm ${
-                    observationOk ? "" : "border-rose-500/50 focus:border-rose-500/70"
+                    observationRequired && !observationOk ? "border-rose-500/50 focus:border-rose-500/70" : ""
                   }`}
                 />
-                <p className={`text-[11px] mt-1 ${observationOk ? "text-zinc-600" : "text-rose-400"}`}>
-                  {BT_OBSERVATION_HINT}
+                <p className={`text-[11px] mt-1 ${
+                  observationRequired && !observationOk ? "text-rose-400" : "text-zinc-600"
+                }`}>
+                  {observationRequired ? BT_OBSERVATION_HINT : BT_OBSERVATION_OPTIONAL_HINT}
                 </p>
               </div>
             )}

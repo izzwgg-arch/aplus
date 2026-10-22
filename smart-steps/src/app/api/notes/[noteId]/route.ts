@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
 import { requireAnyPermissionResponse, requirePermissionResponse } from "@/lib/permissions";
 import { prisma } from "@/lib/db";
-import { btObservationError } from "@/lib/btObservation";
+import { btObservationError, btObservationRequired } from "@/lib/btObservation";
 
 type Params = { params: Promise<{ noteId: string }> };
 
@@ -62,14 +62,19 @@ export async function PATCH(req: Request, { params }: Params) {
     if (body.bcbaServiceType && !VALID_BCBA.includes(body.bcbaServiceType))
       return NextResponse.json({ error: "Invalid BCBA service type" }, { status: 400 });
 
-    /* A BT session note must still carry the therapist's own observation after
-       the edit. The test runs against the note as it WILL BE, so neither a type
-       change into BT_SESSION nor an edit that blanks the field can leave a
-       session note without one. Notes predating the field are therefore asked
-       for an observation the first time they are edited — which is the point. */
+    /* A BT session note written by the therapist who RAN the session must still
+       carry their own observation after the edit. The test runs against the note
+       as it WILL BE — type, observation and session link all resolved to their
+       post-edit values — so neither a type change into BT_SESSION, an edit that
+       blanks the field, nor a re-link to one's own session can leave such a note
+       without one.
+
+       A note transcribed for another provider's session is never blocked; see
+       btObservationRequired(). That is the common case here, and the author was
+       not in the room. */
     const existing = await prisma.note.findUnique({
       where:  { id: noteId },
-      select: { type: true, btObservation: true },
+      select: { type: true, btObservation: true, userId: true, sessionId: true },
     });
     if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
@@ -77,7 +82,15 @@ export async function PATCH(req: Request, { params }: Params) {
     const nextObservation = body.btObservation !== undefined
       ? body.btObservation
       : existing.btObservation;
-    if (nextType === "BT_SESSION") {
+    const nextSessionId = body.sessionId !== undefined ? body.sessionId : existing.sessionId;
+    const sessionProviderId = nextSessionId
+      ? (await prisma.session.findUnique({
+          where:  { id: nextSessionId },
+          select: { userId: true },
+        }))?.userId ?? null
+      : null;
+
+    if (btObservationRequired({ noteType: nextType, authorId: existing.userId, sessionProviderId })) {
       const err = btObservationError(nextObservation);
       if (err) return NextResponse.json({ error: err }, { status: 400 });
     }

@@ -37,3 +37,39 @@ export function btObservationError(value: string | null | undefined): string | n
   }
   return null;
 }
+
+/**
+ * WHO has to supply the observation: the person who ran the session.
+ *
+ * This clinic writes most of its notes centrally — office staff transcribe
+ * write-ups for sessions other therapists ran. When this was added, 846 of 891
+ * BT session notes were authored by somebody who was NOT the session's
+ * provider. Demanding a first-person observation from whoever is at the
+ * keyboard therefore blocks the clinic's normal documentation workflow, and the
+ * only way to satisfy it would be to invent an account of a session the author
+ * never attended — which is exactly what this field exists to prevent. So a
+ * transcriber is never blocked.
+ *
+ * The observation is REQUIRED only when the note's author is the session's own
+ * provider: the one case where the author really was in the room. Otherwise the
+ * field stays available but optional, and the note still reports itself as
+ * needing an observation — the "needs your observations" chip on the session
+ * card and the `hasNote=needsObs` session filter both key off the stored value
+ * — so the provider's account can still be chased down.
+ *
+ * A note with no session link has no provider to compare against, so it is not
+ * blocked either.
+ */
+export function btObservationRequired(args: {
+  noteType:          string | null | undefined;
+  authorId:          string | null | undefined;
+  sessionProviderId: string | null | undefined;
+}): boolean {
+  if (args.noteType !== "BT_SESSION") return false;
+  if (!args.authorId || !args.sessionProviderId) return false;
+  return args.authorId === args.sessionProviderId;
+}
+
+/** Shown under the field when the author did not run the session. */
+export const BT_OBSERVATION_OPTIONAL_HINT =
+  "Optional here — this session was run by someone else. Record anything the therapist who ran it passed on; otherwise they can add it themselves.";
