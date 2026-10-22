@@ -624,13 +624,16 @@ here 95% of the time.
 The 45 notes whose author did run the session are still asked for an observation
 the first time they are edited, which is the intended behavior.
 
-**Still open, deliberately unchanged:** `noteNeedsObservation` and the
-`hasNote=needsObs` filter flag every BT note with no observation, which is now
-~847 of 892 — so most session cards show the amber "Needs your observations"
-chip instead of the green "Note generated" one. That is literally true (the
-therapist has not written one) but it is close to useless as a signal at that
-volume. Whether to key the chip on `btObservationRequired()` too, or drop it, is
-a clinic-process decision and was left to the user.
+**The chip deliberately still flags EVERY note with no observation** —
+`noteNeedsObservation` and the `hasNote=needsObs` filter are unchanged, so most
+session cards show the amber "Needs your observations" chip rather than the
+green "Note generated" one (~847 of 892 notes). This was put to the user on
+2026-10-22 with the option to narrow it to `btObservationRequired()` or drop it;
+they chose to keep flagging, so that a missing therapist observation is always
+SEEN. **Do NOT quieten this chip or scope it to the requirement** to reduce
+noise — the volume is the point: it is the clinic's own measure of how much
+documentation still has no account from the person who was in the room. It
+shrinks when therapists add observations, not when the rule is narrowed.
 
 ## Tracker generated BT notes vary their PHRASING per session (2026-10-22)
 
