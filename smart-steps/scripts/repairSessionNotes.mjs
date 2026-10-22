@@ -150,7 +150,7 @@ const backup = {
   deletedNotes: deletable,
 };
 fs.writeFileSync("./note-fix-backup.json", JSON.stringify(backup, null, 2));
-say("backup written: /root/note-fix-backup.json");
+say("backup written: ./note-fix-backup.json");
 
 if (APPLY) {
   let dated = 0, deleted = 0;

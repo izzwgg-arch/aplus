@@ -209,5 +209,5 @@ for (const n of noDate) {
 fs.writeFileSync("./note-session-audit.log", out.join("\n"));
 fs.writeFileSync("./note-session-matchplan.json", JSON.stringify(matchPlan, null, 2));
 console.log("");
-console.log("written /root/note-session-audit.log");
+console.log("written ./note-session-audit.log");
 await prisma.$disconnect();
