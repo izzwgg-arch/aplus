@@ -39,3 +39,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Audit and repair script output. These name children and carry clinical
+# detail - they stay on the server and must never reach the repo.
+note-mismatch-report.*
+note-session-audit*.log
+note-fix-*.json
+note-fix-*.log
+note-date-realign-*

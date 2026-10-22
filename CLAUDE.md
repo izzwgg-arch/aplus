@@ -466,6 +466,11 @@ match up". Audited across 1,170 notes and 925 live sessions with
 through dotenv itself, so run it plainly with `node` from `smart-steps/`).
 `scripts/repairSessionNotes.mjs` is the repair, dry-run by default with
 `--apply` to write and a full before-values backup written first.
+`scripts/noteMismatchReport.mjs` is the human-readable version: it writes
+`note-mismatch-report.md` and `.csv` carrying the fields a TIMESHEET is matched
+on — provider, client, date, session start/end and hours — so the correct
+service date can be established from an independent record instead of assumed.
+Those outputs name children, so keep them off the repo and off GitHub.
 
 **The cause is not a bug.** `POST /api/sessions/[sessionId]/generate-note`
 stamps the note's `serviceDate` and title from the session's `startedAt` AT
