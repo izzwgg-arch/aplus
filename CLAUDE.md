@@ -475,14 +475,38 @@ Those outputs name children, so keep them off the repo and off GitHub.
 timesheets (`TIMESHEET_ROOT`, default `D:\ABA Doc\OneDrive\ABA Folder\Timesheets`;
 needs `openpyxl` and `pdfplumber`).
 
+**2026 timesheets are NOT in the Timesheets folder - they live in the Smart
+Steps ABA Management platform** (`izzwgg-arch/Smart-steps`, a different app on a
+different server, reached with `~/.ssh/id_ed25519_smartsteps` or through its web
+UI). Only Oct-Dec 2025 exist as Excel workbooks; Jan 2026 is PDFs; from Feb 2026
+the month folders hold only ABC data and BCBA notes. That platform's
+`TimesheetEntry` carries `date`, `startTime`/`endTime` as `"HH:mm"` and
+`minutes`, joined through `Timesheet` to provider and client names.
+`GET /api/timesheets` takes `search`, `archived=true`, `startDate`, `endDate`,
+`limit`; per-day rows come from `GET /api/timesheets/[id]`.
+
+- **`archived=true` is required.** A timesheet is archived once invoiced, so
+  without it the list looks almost empty.
+- **Always pass date bounds.** Every row embeds the provider's base64 signature
+  image, so an unbounded page is ~800 KB; fetching many at once wedges the
+  browser renderer and the script times out.
+
 **The session is NOT always the corrected record.** That was the working
-assumption until timesheets were checked, and it is wrong in 3 of the 7 cases
-evidence exists for: a pair of sessions carried a date one day later than the
-evening actually billed, and their notes were right. Verdicts are decided by
-matching the session's EXACT clock window against a timesheet line, because
-these children often have two one-hour slots back to back and hours alone cannot
-separate them; the supervision flag on a session corroborates an `SV` line.
-**Repair nothing on the assumption that one side wins.**
+assumption until timesheets were checked, and the note turns out to be right as
+often as the session is: of the 13 cases evidence exists for, **6 move the
+NOTE's date and 7 move the SESSION's date**. A repair that assumes one side wins
+corrupts about half of them. The remaining 4 cannot be decided from a timesheet
+at all - one child's schedule bills the same clock window on both candidate
+days - and are left alone rather than guessed.
+
+Verdicts are decided by matching the session's EXACT clock window against a
+timesheet line, because these children often have two slots back to back and
+hours alone cannot separate them; a session's supervision flag corroborates an
+`SV` line. One signature recurs: on the real service day the provider bills two
+separate slots, the second often supervision, while the adjacent day carries a
+single longer block - the session matches the split day. The strongest single
+case was a session dated two days after the only day its provider billed that
+child at all. **Repair nothing on the assumption that one side wins.**
 
 Timesheet storage changes shape over time and the reader handles each: Excel
 workbooks per provider, child and half-month through December 2025 (December
