@@ -458,6 +458,39 @@ The panel posts a batch to the existing `POST /api/trials`
   notes are point-in-time. The drawer's button reads "Generate Again" and
   confirms, since generating produces an ADDITIONAL note.
 
+## Tracker BT session notes are SHORT (2026-10-22)
+
+The generated BT session note was five sections long and listed every goal
+twice — once under GOALS ADDRESSED as a name, again under PROGRESS with its
+numbers — then closed with fixed boilerplate (reinforcement delivered, BIP
+implemented as written, "demonstrated strong/developing/emerging skills") and
+up to five recommendations of which two were always the same two sentences.
+A BT writes one of these per session, so the length was all skim-past text.
+
+`generateBTNoteContent()` in
+`smart-steps/src/app/api/sessions/[sessionId]/generate-note/route.ts` now emits
+three sections — SESSION SUMMARY, GOALS & DATA, BEHAVIOR:
+
+- **Summary is two sentences**: who/what/when/with whom, then trials, goals and
+  overall accuracy. The weekday was dropped from the date and the
+  strong/developing/emerging sentence is gone — the percentage says it.
+- **Each goal appears ONCE**, with its skill area in parentheses and its own
+  numbers on the same line. The separate GOALS ADDRESSED list is gone, as are
+  the "Mastery Achieved" / "New Targets Introduced" trailer lines; mastery is a
+  clause on the goal's own line and the phase is implicit.
+- **BEHAVIOR is one line**, and only the recorded events. The two boilerplate
+  sentences were removed.
+- **Recommendations are data-driven only** (below 60%, at or above 80%,
+  mastered), with ONE generic fallback line used when the data says nothing.
+  Next-session items are capped at two and no longer repeat the recommendations.
+
+Nothing was dropped from the record: trial counts, percentages, prompt codes,
+per-trial notes, hand-attached goals and their notes, behavior counts and ABC
+counts all still print. Accuracy is still averaged over `scoredTargets` only.
+No consumer parses these headers (checked) — the note body is free text — so
+renaming PROGRESS to GOALS & DATA is safe. Notes are point-in-time snapshots,
+so existing notes keep their old long text.
+
 ## Tracker session notes show date, timing and provider (2026-08-19)
 
 A note typed by hand carries its own `serviceDate` / `timeIn` / `timeOut` /

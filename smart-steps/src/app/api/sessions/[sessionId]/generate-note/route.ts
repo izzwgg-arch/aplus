@@ -38,7 +38,7 @@ function generateBTNoteContent(opts: {
 }): { title: string; content: string; recommendations: string; nextSteps: string } {
   const { clientName, providerName, sessionDate, mode, sessionTargets, behaviors } = opts;
 
-  const dateStr  = sessionDate.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+  const dateStr   = sessionDate.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
   const shortDate = sessionDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   const modeLabel = mode === "DTT" ? "Discrete Trial Training (DTT)" : mode;
 
@@ -52,140 +52,99 @@ function generateBTNoteContent(opts: {
     ? Math.round(scoredTargets.reduce((s, t) => s + t.percentage, 0) / scoredTargets.length)
     : 0;
 
-  /* ── Session Summary ── */
+  /* ── Summary: one sentence of context, one of data. ── */
   const summaryParts: string[] = [
-    `${clientName} participated in a ${modeLabel} ABA therapy session on ${dateStr} with ${providerName}.`,
+    `${clientName} attended a ${modeLabel} session on ${dateStr} with ${providerName}.`,
     totalTrials > 0
-      ? `A total of ${totalTrials} discrete trial${totalTrials !== 1 ? "s" : ""} were administered across ${scoredTargets.length} target${scoredTargets.length !== 1 ? "s" : ""}, with an overall session accuracy of ${overallPct}%.`
-      : `No discrete trials were recorded during this session.`,
+      ? `${totalTrials} trial${totalTrials !== 1 ? "s" : ""} across ${scoredTargets.length} goal${scoredTargets.length !== 1 ? "s" : ""}, ${overallPct}% overall accuracy.`
+      : `No trial data was recorded.`,
     addedOnly.length > 0
-      ? `An additional ${addedOnly.length} goal${addedOnly.length !== 1 ? "s were" : " was"} addressed during the session without formal trial data.`
-      : "",
-    totalTrials > 0
-      ? `The client demonstrated ${overallPct >= 80 ? "strong" : overallPct >= 60 ? "developing" : "emerging"} skills across targeted areas.`
+      ? `${addedOnly.length} additional goal${addedOnly.length !== 1 ? "s were" : " was"} addressed without data.`
       : "",
   ].filter(Boolean) as string[];
 
-  /* ── Goals Addressed (grouped by parent goal) ── */
-  const goalMap = new Map<string, { label: string; targets: SessionTargetSummary[] }>();
-  for (const t of sessionTargets) {
-    const key   = t.parentGoalTitle ?? t.programName ?? "__general__";
-    const label = goalLabel(t);
-    if (!goalMap.has(key)) goalMap.set(key, { label, targets: [] });
-    goalMap.get(key)!.targets.push(t);
-  }
-
-  const goalsLines: string[] = [];
-  for (const { label, targets } of goalMap.values()) {
-    goalsLines.push(`  • ${label}: ${targets.map((t) => t.targetTitle).join(", ")}`);
-  }
-
-  /* ── Progress Per Target ── */
-  const progressLines: string[] = [];
+  /* ── One line per goal: the numbers, nothing restated. ── */
+  const goalLines: string[] = [];
   for (const t of scoredTargets) {
-    const promptDesc = formatPromptCodes(t.promptCodes);
-    const phaseNote  = t.phase === "MASTERED"
-      ? " Target met mastery criteria."
-      : t.phase === "ACQUISITION"
-      ? ""
-      : ` (Phase: ${t.phase})`;
-    progressLines.push(
-      `  • ${t.targetTitle}: ${t.trialCount} trial${t.trialCount !== 1 ? "s" : ""}, ${t.percentage}% accuracy; ${promptDesc}.${phaseNote}${t.notes.length > 0 ? ` Notes: ${t.notes.join("; ")}.` : ""}`
+    const prompts   = formatPromptCodes(t.promptCodes);
+    const phaseNote = t.phase === "MASTERED" ? " Mastery criteria met." : "";
+    goalLines.push(
+      `  • ${t.targetTitle} (${goalLabel(t)}): ${t.trialCount} trial${t.trialCount !== 1 ? "s" : ""}, ${t.percentage}%, ${prompts}.${phaseNote}${t.notes.length > 0 ? ` ${t.notes.join("; ")}.` : ""}`
     );
   }
-
   /* Goals worked on without trial data still belong in the note — they were
      part of the session, they are just reported qualitatively. */
   for (const t of addedOnly) {
-    progressLines.push(
-      `  • ${t.targetTitle}: addressed this session; no trial data recorded.${t.addedNote ? ` ${t.addedNote}` : ""}`
+    goalLines.push(
+      `  • ${t.targetTitle} (${goalLabel(t)}): addressed, no data.${t.addedNote ? ` ${t.addedNote}` : ""}`
     );
   }
 
   const masteredTargets = scoredTargets.filter((t) => t.phase === "MASTERED");
-  if (masteredTargets.length > 0) {
-    progressLines.push(`\n  Mastery Achieved: ${masteredTargets.map((t) => t.targetTitle).join(", ")} met mastery criteria this session.`);
-  }
+  const newTargets      = scoredTargets.filter((t) => t.phase === "NEW" || t.phase === "BASELINE");
 
-  const newTargets = scoredTargets.filter((t) => t.phase === "NEW" || t.phase === "BASELINE");
-  if (newTargets.length > 0) {
-    progressLines.push(`\n  New Targets Introduced: ${newTargets.map((t) => t.targetTitle).join(", ")}.`);
-  }
-
-  /* ── Behavioral Observations ── */
-  const behaviorLines: string[] = [];
+  /* ── Behavior: only what was actually recorded. ── */
+  let behaviorLine: string;
   if (behaviors.length > 0) {
     const byType = new Map<string, number>();
     for (const b of behaviors) byType.set(b.type, (byType.get(b.type) ?? 0) + 1);
-    for (const [type, count] of byType) {
-      behaviorLines.push(`  ${count} ${type.toLowerCase()} behavior event${count !== 1 ? "s" : ""} recorded.`);
-    }
-    const abcEntries = behaviors.filter((b) => b.antecedent || b.consequence);
-    if (abcEntries.length > 0) {
-      behaviorLines.push(`  ABC data was collected for ${abcEntries.length} behavior instance${abcEntries.length !== 1 ? "s" : ""}.`);
-    }
-    behaviorLines.push(`  Behavior intervention plan procedures were implemented as written.`);
+    const counts = Array.from(byType).map(([type, count]) => `${count} ${type.toLowerCase()}`).join(", ");
+    const abc = behaviors.filter((b) => b.antecedent || b.consequence).length;
+    behaviorLine = `  Behavior events: ${counts}.${abc > 0 ? ` ABC data collected on ${abc}.` : ""} BIP procedures implemented as written.`;
   } else {
-    behaviorLines.push(
-      `  No significant target behaviors were observed during this session.`,
-      `  ${clientName} demonstrated appropriate participation and engagement throughout.`,
-    );
+    behaviorLine = `  No target behaviors observed. ${clientName} participated appropriately throughout.`;
   }
-  behaviorLines.push(
-    `  Reinforcement was delivered contingent on appropriate responding and task completion.`,
-  );
 
-  /* ── Assemble content ── */
   const sections: string[] = [
     "SESSION SUMMARY",
     summaryParts.join(" "),
     "",
-    "GOALS ADDRESSED",
-    goalsLines.length > 0 ? goalsLines.join("\n") : "  No targets recorded.",
+    "GOALS & DATA",
+    goalLines.length > 0 ? goalLines.join("\n") : "  No goals recorded.",
     "",
-    "PROGRESS",
-    progressLines.length > 0 ? progressLines.join("\n") : "  No trial data recorded.",
-    "",
-    "BEHAVIORAL OBSERVATIONS",
-    behaviorLines.join("\n"),
+    "BEHAVIOR",
+    behaviorLine,
   ];
 
-  /* ── Recommendations ── */
+  /* ── Recommendations: data-driven only; one fallback when there is nothing
+     the data says. ── */
   const recLines: string[] = [];
   const lowAcc  = scoredTargets.filter((t) => t.percentage < 60 && t.trialCount >= 3);
   const highAcc = scoredTargets.filter((t) => t.percentage >= 80 && t.trialCount >= 3 && t.phase !== "MASTERED");
 
-  if (masteredTargets.length > 0) {
-    recLines.push(`  • Continue maintenance probes for mastered targets: ${masteredTargets.map((t) => t.targetTitle).join(", ")}.`);
-  }
   if (lowAcc.length > 0) {
-    recLines.push(`  • Review prompt hierarchy and reinforcement schedule for targets below 60% accuracy: ${lowAcc.map((t) => t.targetTitle).join(", ")}.`);
+    recLines.push(`  • Review prompting and reinforcement below 60%: ${lowAcc.map((t) => t.targetTitle).join(", ")}.`);
   }
   if (highAcc.length > 0) {
-    recLines.push(`  • Consider advancing mastery criteria or introducing generalization probes for high-performing targets: ${highAcc.map((t) => t.targetTitle).join(", ")}.`);
-  }
-  recLines.push(`  • Continue consistent data collection across all active targets.`);
-  recLines.push(`  • Implement behavior intervention plan procedures with fidelity.`);
-
-  /* ── Next Session Focus ── */
-  const nextLines: string[] = [];
-  const inProgress = sessionTargets.filter((t) => t.phase !== "MASTERED");
-  if (addedOnly.length > 0) {
-    nextLines.push(`  • Collect trial data for goals addressed without data this session: ${addedOnly.slice(0, 5).map((t) => t.targetTitle).join(", ")}.`);
-  }
-  if (inProgress.length > 0) {
-    nextLines.push(`  • Continue acquisition targets: ${inProgress.slice(0, 5).map((t) => t.targetTitle).join(", ")}.`);
-  }
-  if (newTargets.length > 0) {
-    nextLines.push(`  • Continue baseline data collection for newly introduced goals.`);
-  }
-  if (lowAcc.length > 0) {
-    nextLines.push(`  • Adjust teaching procedures for targets where accuracy is below 60%.`);
+    recLines.push(`  • Consider advancing or probing generalization at or above 80%: ${highAcc.map((t) => t.targetTitle).join(", ")}.`);
   }
   if (masteredTargets.length > 0) {
-    nextLines.push(`  • Identify new skill targets to replace mastered goals as clinically appropriate.`);
+    recLines.push(`  • Begin maintenance probes: ${masteredTargets.map((t) => t.targetTitle).join(", ")}.`);
   }
-  if (nextLines.length === 0) nextLines.push(`  • Continue implementation of current treatment plan.`);
+  if (recLines.length === 0) {
+    recLines.push(`  • Continue the current treatment plan as written.`);
+  }
+
+  /* ── Next session: at most two concrete items. ── */
+  const nextLines: string[] = [];
+  if (addedOnly.length > 0) {
+    nextLines.push(`  • Collect data on: ${addedOnly.slice(0, 3).map((t) => t.targetTitle).join(", ")}.`);
+  }
+  if (lowAcc.length > 0) {
+    nextLines.push(`  • Adjust teaching procedures for targets below 60%.`);
+  } else if (newTargets.length > 0) {
+    nextLines.push(`  • Continue baseline data collection on newly introduced goals.`);
+  } else if (masteredTargets.length > 0) {
+    nextLines.push(`  • Identify replacement targets for mastered goals.`);
+  }
+  if (nextLines.length === 0) {
+    const inProgress = sessionTargets.filter((t) => t.phase !== "MASTERED");
+    nextLines.push(
+      inProgress.length > 0
+        ? `  • Continue acquisition targets: ${inProgress.slice(0, 3).map((t) => t.targetTitle).join(", ")}.`
+        : `  • Continue implementation of the current treatment plan.`
+    );
+  }
 
   return {
     title:           `BT Session Note – ${shortDate}`,
