@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
 import { accessibleClientIds, requireClientAccessResponse, requirePermissionResponse } from "@/lib/permissions";
 import { prisma } from "@/lib/db";
+import { MIN_BT_OBSERVATION_CHARS, btObservationError } from "@/lib/btObservation";
 
 export async function GET(req: Request) {
   const user = await requireSession();
@@ -64,6 +65,7 @@ export async function GET(req: Request) {
         content:         true,
         recommendations: true,
         nextSteps:       true,
+        btObservation:   true,
         user:            { select: { id: true, name: true, role: true } },
         // A BT session note generated from a session carries no timeIn/timeOut of
         // its own — the times live on the session. Return them so the note can
@@ -109,6 +111,7 @@ export async function POST(req: Request) {
       content:         string;
       recommendations?: string;
       nextSteps?:      string;
+      btObservation?:  string;
       providerName?:   string;
       isGenerated?:    boolean;
     };
@@ -128,6 +131,16 @@ export async function POST(req: Request) {
     if (body.type === "BCBA" && body.bcbaServiceType && !VALID_BCBA.includes(body.bcbaServiceType))
       return NextResponse.json({ error: "Invalid BCBA service type" }, { status: 400 });
 
+    /* A BT session note is not complete without the therapist's own account of
+       the session. The generated narrative only knows what was entered as
+       data; it cannot know how the session actually went. Notes produced by
+       "Generate BT Note" are written by the generate-note route directly, not
+       through here, so generation is unaffected by this check. */
+    if (body.type === "BT_SESSION") {
+      const err = btObservationError(body.btObservation);
+      if (err) return NextResponse.json({ error: err }, { status: 400 });
+    }
+
     const note = await prisma.note.create({
       data: {
         clientId:        body.clientId,
@@ -143,6 +156,7 @@ export async function POST(req: Request) {
         content:         body.content,
         recommendations: body.recommendations ?? null,
         nextSteps:       body.nextSteps       ?? null,
+        btObservation:   body.btObservation?.trim() || null,
         providerName:    body.providerName    ?? null,
         isGenerated:     body.isGenerated     ?? false,
       },

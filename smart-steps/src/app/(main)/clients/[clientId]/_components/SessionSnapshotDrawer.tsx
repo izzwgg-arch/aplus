@@ -356,7 +356,9 @@ export function SessionSnapshotDrawer({
         const err = await res.json().catch(() => ({})) as { error?: string };
         throw new Error(err.error ?? "Failed to generate note");
       }
-      toast.success("BT Session Note generated — open the Notes tab to view and edit it.");
+      /* The generated narrative is only the data half. Say plainly that the
+         note is not finished until the therapist adds their own observation. */
+      toast.success("Note generated. Open it in the Notes tab and add your own observations to finish it.");
       onNoteGenerated?.();
       onClose();
     } catch (e) {

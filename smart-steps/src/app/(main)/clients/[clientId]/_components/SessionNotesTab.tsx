@@ -13,6 +13,7 @@ import { NoteEditorModal, type NoteRecord } from "./NoteEditorModal";
 import { printSessionNotes, type PrintableNote } from "@/lib/printNotes";
 import { formatClockRange12h, formatClockRangeHours } from "@/lib/formatDuration";
 import { bcbaServiceLabel } from "@/lib/noteTypes";
+import { isBtObservationComplete } from "@/lib/btObservation";
 
 /* ── Types ───────────────────────────────────────────────────────────────── */
 
@@ -177,6 +178,7 @@ export function SessionNotesTab({ clientId, clientName = "Client", userName = ""
         content: n.content,
         recommendations: n.recommendations,
         nextSteps: n.nextSteps,
+        btObservation: n.btObservation,
         providerName: m.provider,
         createdAt: n.createdAt,
         user: n.user ? { name: n.user.name, credentials: n.user.credentials ?? null } : null,
@@ -437,6 +439,17 @@ export function SessionNotesTab({ clientId, clientName = "Client", userName = ""
                       </span>
                     )}
 
+                    {/* A session note without the therapist's own observation is
+                        not finished — say so on the card. */}
+                    {note.type === "BT_SESSION" && !isBtObservationComplete(note.btObservation) && (
+                      <span
+                        title="Open this note and add your own observations."
+                        className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-400"
+                      >
+                        needs your observations
+                      </span>
+                    )}
+
                     {/* Generated badge */}
                     {note.isGenerated && (
                       <span className="rounded-full px-2 py-0.5 text-[11px] font-medium text-zinc-500 border border-zinc-700">
@@ -476,9 +489,12 @@ export function SessionNotesTab({ clientId, clientName = "Client", userName = ""
                     )}
                   </div>
 
-                  {/* Content preview */}
+                  {/* Content preview — the therapist's own observation when there
+                      is one, since that is the part that differs note to note. */}
                   <p className="text-xs text-zinc-500 line-clamp-2 leading-relaxed">
-                    {contentPreview(note.content)}
+                    {note.btObservation?.trim()
+                      ? note.btObservation.trim()
+                      : contentPreview(note.content)}
                   </p>
                 </div>
 

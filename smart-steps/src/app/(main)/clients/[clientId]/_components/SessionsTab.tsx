@@ -37,6 +37,9 @@ export type SessionListItem = {
   noteGeneratedAt?: string | null;
   /** True when the most recent note came from "Generate BT Note". */
   noteIsGenerated?: boolean | null;
+  /** A BT session note exists but the therapist has not added their own
+   *  observation yet, so it does not count as written. */
+  noteNeedsObservation?: boolean;
   /** Goals attached to the session by hand, without trial data. */
   addedGoalCount?: number;
   /** A BCBA supervised this session — only these can be written up as a
@@ -293,6 +296,7 @@ export function SessionsTab({
                   <option value="">Any</option>
                   <option value="1">Note written</option>
                   <option value="0">Needs a note</option>
+                  <option value="needsObs">Needs your observations</option>
                 </select>
               </div>
 
@@ -391,6 +395,14 @@ export function SessionsTab({
                     {/* Whether the session has been written up — visible without
                         opening the session, so it is obvious what still needs a note. */}
                     {(s.noteCount ?? 0) > 0 ? (
+                      s.noteNeedsObservation ? (
+                        <span
+                          title="The note has been generated, but your own observations are still missing. Open the note and add them."
+                          className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-400"
+                        >
+                          <FilePlus2 className="h-3 w-3" /> Needs your observations
+                        </span>
+                      ) : (
                       <span
                         title={
                           s.noteGeneratedAt
@@ -403,6 +415,7 @@ export function SessionsTab({
                         {s.noteIsGenerated === false ? "Note written" : "Note generated"}
                         {(s.noteCount ?? 0) > 1 ? ` ×${s.noteCount}` : ""}
                       </span>
+                      )
                     ) : (
                       <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-400">
                         <FilePlus2 className="h-3 w-3" /> No note yet

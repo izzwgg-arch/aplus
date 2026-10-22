@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
 import { accessibleClientIds, requireClientAccessResponse, requirePermissionResponse } from "@/lib/permissions";
 import { prisma } from "@/lib/db";
+import { isBtObservationComplete } from "@/lib/btObservation";
 
 export async function GET(req: Request) {
   const user = await requireSession();
@@ -24,7 +25,9 @@ export async function GET(req: Request) {
   const mode = searchParams.get("mode");
   const withData = searchParams.get("withData") === "1"; // hide empty (0-trial) sessions
   // "1" = only sessions that already have a note, "0" = only sessions still
-  // missing one (the daily "what do I still have to write up?" question).
+  // missing one (the daily "what do I still have to write up?" question),
+  // "needsObs" = has a BT session note that is still missing the therapist's
+  // own observation.
   const hasNoteParam = searchParams.get("hasNote");
   // "1" = only sessions a BCBA supervised, "0" = only unsupervised ones.
   const supervisedParam = searchParams.get("supervised");
@@ -57,6 +60,19 @@ export async function GET(req: Request) {
         ...(withData ? { trials: { some: { deletedAt: null } } } : {}),
         ...(hasNoteParam === "1" ? { sessionNotes: { some: {} } } : {}),
         ...(hasNoteParam === "0" ? { sessionNotes: { none: {} } } : {}),
+        /* Null-or-empty is the complete test: both write paths refuse a BT
+           observation shorter than MIN_BT_OBSERVATION_CHARS, so a stored one is
+           either absent (generated and not yet opened) or long enough. */
+        ...(hasNoteParam === "needsObs"
+          ? {
+              sessionNotes: {
+                some: {
+                  type: "BT_SESSION",
+                  OR: [{ btObservation: null }, { btObservation: "" }],
+                },
+              },
+            }
+          : {}),
         ...(supervisedParam === "1" ? { supervised: true } : {}),
         ...(supervisedParam === "0" ? { supervised: false } : {}),
       },
@@ -86,7 +102,7 @@ export async function GET(req: Request) {
         // note produced by "Generate BT Note" from one typed by hand.
         sessionNotes: {
           orderBy: { createdAt: "desc" },
-          select: { id: true, isGenerated: true, createdAt: true },
+          select: { id: true, isGenerated: true, createdAt: true, type: true, btObservation: true },
         },
         _count: { select: { trials: true, addedTargets: true } },
       },
@@ -117,6 +133,12 @@ export async function GET(req: Request) {
         noteCount: s.sessionNotes.length,
         noteGeneratedAt: latestNote?.createdAt ?? null,
         noteIsGenerated: latestNote ? latestNote.isGenerated : null,
+        /* A BT session note is not written until the therapist has added their
+           own observation. Surfaced here so the session card can say so
+           without opening the note. */
+        noteNeedsObservation: s.sessionNotes.some(
+          (n) => n.type === "BT_SESSION" && !isBtObservationComplete(n.btObservation),
+        ),
         addedGoalCount: s._count.addedTargets,
       };
     });

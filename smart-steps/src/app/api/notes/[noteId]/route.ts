@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
 import { requireAnyPermissionResponse, requirePermissionResponse } from "@/lib/permissions";
 import { prisma } from "@/lib/db";
+import { btObservationError } from "@/lib/btObservation";
 
 type Params = { params: Promise<{ noteId: string }> };
 
@@ -49,6 +50,7 @@ export async function PATCH(req: Request, { params }: Params) {
       content?:        string;
       recommendations?: string | null;
       nextSteps?:      string | null;
+      btObservation?:  string | null;
       providerName?:   string | null;
     };
 
@@ -59,6 +61,26 @@ export async function PATCH(req: Request, { params }: Params) {
     const VALID_BCBA = ["DSU", "TM", "TP", "PRT", "ASSES"];
     if (body.bcbaServiceType && !VALID_BCBA.includes(body.bcbaServiceType))
       return NextResponse.json({ error: "Invalid BCBA service type" }, { status: 400 });
+
+    /* A BT session note must still carry the therapist's own observation after
+       the edit. The test runs against the note as it WILL BE, so neither a type
+       change into BT_SESSION nor an edit that blanks the field can leave a
+       session note without one. Notes predating the field are therefore asked
+       for an observation the first time they are edited — which is the point. */
+    const existing = await prisma.note.findUnique({
+      where:  { id: noteId },
+      select: { type: true, btObservation: true },
+    });
+    if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+    const nextType = body.type ?? existing.type;
+    const nextObservation = body.btObservation !== undefined
+      ? body.btObservation
+      : existing.btObservation;
+    if (nextType === "BT_SESSION") {
+      const err = btObservationError(nextObservation);
+      if (err) return NextResponse.json({ error: err }, { status: 400 });
+    }
 
     const updated = await prisma.note.update({
       where: { id: noteId },
@@ -76,6 +98,9 @@ export async function PATCH(req: Request, { params }: Params) {
         ...(body.content         !== undefined ? { content:         body.content }            : {}),
         ...(body.recommendations !== undefined ? { recommendations: body.recommendations }    : {}),
         ...(body.nextSteps       !== undefined ? { nextSteps:       body.nextSteps }          : {}),
+        ...(body.btObservation   !== undefined
+          ? { btObservation: body.btObservation?.trim() || null }
+          : {}),
         ...(body.providerName    !== undefined ? { providerName:    body.providerName }       : {}),
       },
     });

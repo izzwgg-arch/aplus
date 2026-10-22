@@ -8,13 +8,24 @@ import {
   type SessionTargetSummary,
   type BehaviorRecord,
 } from "@/lib/sessionNoteData";
+import {
+  voiceSeed,
+  openingSentence,
+  dataSentence,
+  noDataSentence,
+  addedOnlySentence,
+  behaviorSentence,
+  noBehaviorSentence,
+} from "@/lib/btNoteVoice";
 
 type Params = { params: Promise<{ sessionId: string }> };
 
 /* ─── Deterministic BT Session Note Generator ───────────────────────────────
    The session query and the per-goal aggregation live in @/lib/sessionNoteData
    so this note and the BCBA service note written ABOUT the same session can
-   never report different numbers. ─────────────────────────────────────────── */
+   never report different numbers. Sentence phrasing varies per session via
+   @/lib/btNoteVoice, which is seeded from the session id — so two notes do not
+   read identically, while regenerating one session reproduces its own text. ─────────────────────────────────────────── */
 
 function formatPromptCodes(codes: Record<string, number>): string {
   const entries = Object.entries(codes).filter(([k]) => k !== "INDEPENDENT");
@@ -29,6 +40,7 @@ function goalLabel(t: SessionTargetSummary): string {
 }
 
 function generateBTNoteContent(opts: {
+  sessionId:      string;
   clientName:     string;
   providerName:   string;
   sessionDate:    Date;
@@ -36,7 +48,8 @@ function generateBTNoteContent(opts: {
   sessionTargets: SessionTargetSummary[];
   behaviors:      BehaviorRecord[];
 }): { title: string; content: string; recommendations: string; nextSteps: string } {
-  const { clientName, providerName, sessionDate, mode, sessionTargets, behaviors } = opts;
+  const { sessionId, clientName, providerName, sessionDate, mode, sessionTargets, behaviors } = opts;
+  const seed = voiceSeed(sessionId);
 
   const dateStr   = sessionDate.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
   const shortDate = sessionDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
@@ -54,13 +67,11 @@ function generateBTNoteContent(opts: {
 
   /* ── Summary: one sentence of context, one of data. ── */
   const summaryParts: string[] = [
-    `${clientName} attended a ${modeLabel} session on ${dateStr} with ${providerName}.`,
+    openingSentence(seed, { clientName, modeLabel, dateStr, providerName }),
     totalTrials > 0
-      ? `${totalTrials} trial${totalTrials !== 1 ? "s" : ""} across ${scoredTargets.length} goal${scoredTargets.length !== 1 ? "s" : ""}, ${overallPct}% overall accuracy.`
-      : `No trial data was recorded.`,
-    addedOnly.length > 0
-      ? `${addedOnly.length} additional goal${addedOnly.length !== 1 ? "s were" : " was"} addressed without data.`
-      : "",
+      ? dataSentence(seed, { totalTrials, goalCount: scoredTargets.length, overallPct })
+      : noDataSentence(seed),
+    addedOnly.length > 0 ? addedOnlySentence(seed, addedOnly.length) : "",
   ].filter(Boolean) as string[];
 
   /* ── One line per goal: the numbers, nothing restated. ── */
@@ -90,9 +101,9 @@ function generateBTNoteContent(opts: {
     for (const b of behaviors) byType.set(b.type, (byType.get(b.type) ?? 0) + 1);
     const counts = Array.from(byType).map(([type, count]) => `${count} ${type.toLowerCase()}`).join(", ");
     const abc = behaviors.filter((b) => b.antecedent || b.consequence).length;
-    behaviorLine = `  Behavior events: ${counts}.${abc > 0 ? ` ABC data collected on ${abc}.` : ""} BIP procedures implemented as written.`;
+    behaviorLine = "  " + behaviorSentence(seed, counts, abc);
   } else {
-    behaviorLine = `  No target behaviors observed. ${clientName} participated appropriately throughout.`;
+    behaviorLine = "  " + noBehaviorSentence(seed, clientName);
   }
 
   const sections: string[] = [
@@ -181,6 +192,7 @@ export async function POST(
     /* 3. Generate note text — session times are stored on the session record,
        so duration is intentionally omitted from the narrative. */
     const generated = generateBTNoteContent({
+      sessionId:      s.id,
       clientName:     s.client.name,
       providerName:   s.user?.name ?? "the assigned therapist",
       sessionDate:    s.startedAt,

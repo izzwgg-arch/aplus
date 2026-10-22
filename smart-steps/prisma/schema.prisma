@@ -404,6 +404,10 @@ model Note {
   content         String
   recommendations String?
   nextSteps       String?
+  /// The BT's own account of the session, in their words. Required before a
+  /// BT_SESSION note counts as written; null on a note generated but not yet
+  /// opened, and on notes predating the field.
+  btObservation   String?
   providerName    String?
   isGenerated     Boolean   @default(false)
   createdAt       DateTime  @default(now())

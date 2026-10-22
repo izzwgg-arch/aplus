@@ -12,6 +12,12 @@ import { printSessionNotes, type PrintableNote } from "@/lib/printNotes";
 import { NOTE_TYPES, BCBA_SERVICE_TYPES, bcbaServiceLabel } from "@/lib/noteTypes";
 import { formatClockRange12h } from "@/lib/formatDuration";
 import { TimeInput12h } from "@/components/common/TimeInput12h";
+import {
+  BT_OBSERVATION_HINT,
+  BT_OBSERVATION_LABEL,
+  btObservationError,
+  isBtObservationComplete,
+} from "@/lib/btObservation";
 
 /* ── Types ─────────────────────────────────────────────────────────────────── */
 
@@ -30,6 +36,8 @@ export type NoteRecord = {
   content:         string;
   recommendations: string | null;
   nextSteps:       string | null;
+  /** The BT's own account of the session — required on a BT session note. */
+  btObservation:   string | null;
   providerName:    string | null;
   isGenerated:     boolean;
   createdAt:       string;
@@ -306,6 +314,7 @@ export function NoteEditorModal({
   const [content,         setContent]         = useState(note?.content         ?? "");
   const [recommendations, setRecommendations] = useState(note?.recommendations ?? "");
   const [nextSteps,       setNextSteps]       = useState(note?.nextSteps       ?? "");
+  const [btObservation,   setBtObservation]   = useState(note?.btObservation   ?? "");
   /* An existing saved title counts as hand-written — auto-titling only ever
      fills a title the user has not authored. */
   const [titleTouched,    setTitleTouched]    = useState(!!note?.title);
@@ -505,6 +514,12 @@ export function NoteEditorModal({
 
   async function handleSave() {
     if (!content.trim()) { toast.error("Note content is required."); return; }
+    /* The generated narrative reports the data; this is the part only the
+       person who ran the session can write. Same rule the API enforces. */
+    if (type === "BT_SESSION") {
+      const obsError = btObservationError(btObservation);
+      if (obsError) { toast.error(obsError); return; }
+    }
     if (type === "BT_SESSION" && supervised && supTimeIn && supTimeOut && supTimeOut <= supTimeIn) {
       toast.error("Supervision end must be after supervision start.");
       return;
@@ -526,6 +541,7 @@ export function NoteEditorModal({
         content,
         recommendations: recommendations || undefined,
         nextSteps:       nextSteps || undefined,
+        btObservation:   type === "BT_SESSION" ? btObservation.trim() : undefined,
         providerName:    provider  || undefined,
       };
 
@@ -580,6 +596,7 @@ export function NoteEditorModal({
       content,
       recommendations: recommendations || null,
       nextSteps: nextSteps || null,
+      btObservation: type === "BT_SESSION" ? (btObservation.trim() || null) : null,
       providerName: provider || null,
       createdAt: note?.createdAt ?? new Date().toISOString(),
       user: note?.user ? { name: note.user.name, credentials: note.user.credentials ?? null } : null,
@@ -608,6 +625,7 @@ export function NoteEditorModal({
 
   const isBcba = type === "BCBA";
   const isBt   = type === "BT_SESSION";
+  const observationOk = isBtObservationComplete(btObservation);
 
   /** True while the narrative is still one of the generated service templates. */
   function isTemplateContent(text: string): boolean {
@@ -985,6 +1003,29 @@ export function NoteEditorModal({
               />
               <p className="text-[11px] text-zinc-600 mt-1">Fully editable. All formatting is preserved.</p>
             </div>
+
+            {/* The BT's own observation — required on a session note. The
+                generated narrative covers the data; this covers the session. */}
+            {isBt && (
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wide text-zinc-400 mb-2">
+                  {BT_OBSERVATION_LABEL}
+                  <span className="ml-1.5 text-rose-400 normal-case font-medium">required</span>
+                </label>
+                <textarea
+                  value={btObservation}
+                  onChange={(e) => setBtObservation(e.target.value)}
+                  rows={4}
+                  placeholder="e.g. Came in tired after a long day at school and needed extra breaks. Did well once we moved to the floor. Mom mentioned he has been waking up early."
+                  className={`field-input w-full resize-y text-sm ${
+                    observationOk ? "" : "border-rose-500/50 focus:border-rose-500/70"
+                  }`}
+                />
+                <p className={`text-[11px] mt-1 ${observationOk ? "text-zinc-600" : "text-rose-400"}`}>
+                  {BT_OBSERVATION_HINT}
+                </p>
+              </div>
+            )}
 
             {/* Recommendations — BT and BCBA */}
             {(isBt || isBcba) && (

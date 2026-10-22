@@ -29,6 +29,7 @@ export type PrintableNote = {
   content: string;
   recommendations: string | null;
   nextSteps: string | null;
+  btObservation: string | null;
   providerName: string | null;
   createdAt: string;
   user?: { name?: string | null; credentials?: string | null } | null;
@@ -84,6 +85,7 @@ function noteHtml(note: PrintableNote, index: number): string {
     </div>
 
     ${contentBlock(note.type === "BCBA" ? "Narrative" : "Session Content", note.content)}
+    ${contentBlock("Therapist Observations", note.btObservation)}
     ${contentBlock("Recommendations", note.recommendations)}
     ${contentBlock("Next Session Focus", note.nextSteps)}
   </article>`;

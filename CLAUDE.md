@@ -458,6 +458,82 @@ The panel posts a batch to the existing `POST /api/trials`
   notes are point-in-time. The drawer's button reads "Generate Again" and
   confirms, since generating produces an ADDITIONAL note.
 
+## Tracker BT session notes require the therapist's own observation (2026-10-22)
+
+A generated note reports what was ENTERED: trials, percentages, prompt codes,
+behavior counts. It cannot know the child came in tired, that a program was
+stopped early, that a parent said something at pickup, or that a new behavior
+appeared with no event type yet. Those are the lines a reviewer reads, and only
+the person in the room can write them. So a BT session note is not "written"
+until it carries one.
+
+`smart-steps/src/lib/btObservation.ts` is the single source of truth — the
+minimum length (`MIN_BT_OBSERVATION_CHARS`, 20), the label, the hint, and
+`btObservationError()` / `isBtObservationComplete()`. The server and the form
+share it so they can never disagree about whether a note is complete.
+
+- **`Note.btObservation`** (migration `20261022000000_note_bt_observation`),
+  nullable. Null means not yet written: a note generated but not yet opened, or
+  one predating the field.
+- **Enforced on both write paths.** `POST /api/notes` refuses a `BT_SESSION`
+  note without one. `PATCH /api/notes/[noteId]` tests the note as it WILL BE
+  (it reads the existing row first), so neither blanking the field nor
+  switching a note's type into `BT_SESSION` can leave a session note without
+  one. A legacy note is therefore asked for an observation the first time it is
+  edited, which is the point. **`POST /api/sessions/[sessionId]/generate-note`
+  writes through prisma directly, not through `POST /api/notes`, so generating
+  is deliberately NOT blocked** — generation produces the data half and the BT
+  finishes it.
+- **`NoteEditorModal`** shows a required "Your observations" textarea on BT
+  notes, under the narrative, with the box and hint in rose until it passes.
+  Save refuses with the same message the API would return.
+- **Visible without opening the note**: an amber "needs your observations" chip
+  on the note card, and the card's preview line shows the observation when
+  there is one (it is the part that differs note to note). The session card in
+  `SessionsTab` shows "Needs your observations" in amber INSTEAD of the green
+  "Note generated" chip, from `noteNeedsObservation` on `GET /api/sessions`.
+- **Find the outstanding ones**: the Sessions tab "Session note" filter gained
+  **"Needs your observations"** (`hasNote=needsObs`), server-side like every
+  other session filter. The query tests `btObservation` null-or-empty, which is
+  complete **because both write paths refuse anything shorter than
+  `MIN_BT_OBSERVATION_CHARS`** — a stored observation is either absent or long
+  enough. If that minimum is ever enforced only in the UI, this filter silently
+  stops catching short ones.
+- The printed note PDF renders it as its own "Therapist Observations" section,
+  directly after the session content.
+
+## Tracker generated BT notes vary their PHRASING per session (2026-10-22)
+
+Every generated note opened with the same sentence, so a week of notes for one
+child, and notes for different children by different therapists, were
+word-for-word identical apart from the numbers. Cloned documentation is one of
+the first things a payer audit flags.
+
+`smart-steps/src/lib/btNoteVoice.ts` picks each prose sentence from a bank of
+equivalent variants. **The choice is DETERMINISTIC, seeded from the session
+id** (`voiceSeed()`, FNV-1a; `pickVariant()` mixes in a slot number so a note's
+sentences do not all move in lockstep). Two sessions read differently;
+regenerating ONE session reproduces its own text, which is the same property
+the BCBA generators guarantee — a clinical record must not change wording every
+time it is regenerated, and no figure may ever be invented.
+
+Rules for anyone editing the banks:
+
+- **Variants within a slot must carry exactly the same facts.** Never add one
+  that adds, drops or softens a number.
+- **Mind singular agreement.** "1 trial were run" reads as a bug in a clinical
+  record; `dataSentence()` carries a `wereWas` for that, and the one-goal case
+  of `addedOnlySentence()` is written out longhand.
+- **Slot ids are stable.** Changing one re-rolls the wording of every note that
+  is regenerated afterwards.
+- Lists, headings and numbers are NOT varied — only prose. Varying headings
+  would read as sloppiness, not voice.
+
+Verified with a throwaway `tsx` harness: eight real session ids produce visibly
+different notes, the same id reproduces its text across runs, 2000 synthetic
+ids spread roughly evenly across the four opening variants (475/494/509/522),
+and the one-trial / one-goal edges read correctly.
+
 ## Tracker BT session notes are SHORT (2026-10-22)
 
 The generated BT session note was five sections long and listed every goal
