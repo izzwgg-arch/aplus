@@ -535,18 +535,28 @@ share it so they can never disagree about whether a note is complete.
 - **`Note.btObservation`** (migration `20261022000000_note_bt_observation`),
   nullable. Null means not yet written: a note generated but not yet opened, or
   one predating the field.
-- **Enforced on both write paths.** `POST /api/notes` refuses a `BT_SESSION`
-  note without one. `PATCH /api/notes/[noteId]` tests the note as it WILL BE
-  (it reads the existing row first), so neither blanking the field nor
-  switching a note's type into `BT_SESSION` can leave a session note without
-  one. A legacy note is therefore asked for an observation the first time it is
-  edited, which is the point. **`POST /api/sessions/[sessionId]/generate-note`
-  writes through prisma directly, not through `POST /api/notes`, so generating
-  is deliberately NOT blocked** — generation produces the data half and the BT
+- **Only the therapist who RAN the session is required to write one**
+  (`btObservationRequired()`, fixed the same evening — see below). The note's
+  author owes an observation only when they are the linked session's own
+  provider. A note with no session link has no provider to compare against and
+  is never blocked.
+- **Enforced on both write paths.** `POST /api/notes` and
+  `PATCH /api/notes/[noteId]` both resolve the session's provider and apply
+  `btObservationRequired()`. PATCH tests the note as it WILL BE — type,
+  observation AND session link resolved to their post-edit values (it reads the
+  existing row first) — so neither blanking the field, switching a note's type
+  into `BT_SESSION`, nor re-linking it to one's own session can leave such a
+  note without one. **`POST /api/sessions/[sessionId]/generate-note` writes
+  through prisma directly, not through `POST /api/notes`, so generating is
+  deliberately NOT blocked** — generation produces the data half and the BT
   finishes it.
-- **`NoteEditorModal`** shows a required "Your observations" textarea on BT
-  notes, under the narrative, with the box and hint in rose until it passes.
-  Save refuses with the same message the API would return.
+- **`NoteEditorModal`** shows the "Your observations" textarea on BT notes,
+  under the narrative, labelled **required** (box and hint in rose until it
+  passes) when the author ran the session and **optional** otherwise, with
+  `BT_OBSERVATION_OPTIONAL_HINT` explaining why. It applies the same
+  `btObservationRequired()` test as the server, so the form can never refuse a
+  save the API would accept or offer one it would refuse. Its author id is the
+  note's own `userId` when editing and `useSession()` when creating.
 - **Visible without opening the note**: an amber "needs your observations" chip
   on the note card, and the card's preview line shows the observation when
   there is one (it is the part that differs note to note). The session card in
@@ -561,6 +571,45 @@ share it so they can never disagree about whether a note is complete.
   stops catching short ones.
 - The printed note PDF renders it as its own "Therapist Observations" section,
   directly after the session content.
+
+### This clinic writes its notes CENTRALLY — the requirement blocked everyone (same day)
+
+Reported as "Rivka Ruchy Gottleib can't save session" roughly 45 minutes after
+the requirement was deployed. Nothing was broken server-side: zero 4xx/5xx on
+`/api/sessions` or `/api/notes` all day, her account is a single clean RBT row,
+and the migration was applied. The block was the FORM — `handleSave()` returns
+early with a toast and never issues a request, which is exactly why the logs
+were silent. The tell was the timeline: she had been saving a note every ~5
+minutes (17:49, 17:53, 17:59, 18:06, 18:11), `.next` was rebuilt at 18:12:32,
+she generated her next note at 18:16:11, and no `PATCH /api/notes` ever
+followed.
+
+**The premise was wrong. 846 of 891 BT session notes were authored by somebody
+who was NOT the session's provider** — only 45 by the person who ran it (Leah
+Fulop 35, Jacob Weinstock 9, Zlaty weider 1). A few office staff transcribe for
+the therapists: Zlaty weider 627 such notes, Jacob Weinstock 173, Leah Fulop 31,
+Rivka 8. Rivka's own 194 sessions are written up by Zlaty weider.
+
+Demanding a first-person observation from whoever is at the keyboard therefore
+stopped the clinic's entire documentation workflow, and the only way to satisfy
+it was to invent an account of a session the author never attended — the exact
+thing the field exists to prevent.
+
+So the requirement follows the person, not the keyboard. **Before adding a rule
+of the form "the person doing X must supply Y", check who actually does X in
+this database.** The note author and the session provider are different people
+here 95% of the time.
+
+The 45 notes whose author did run the session are still asked for an observation
+the first time they are edited, which is the intended behavior.
+
+**Still open, deliberately unchanged:** `noteNeedsObservation` and the
+`hasNote=needsObs` filter flag every BT note with no observation, which is now
+~847 of 892 — so most session cards show the amber "Needs your observations"
+chip instead of the green "Note generated" one. That is literally true (the
+therapist has not written one) but it is close to useless as a signal at that
+volume. Whether to key the chip on `btObservationRequired()` too, or drop it, is
+a clinic-process decision and was left to the user.
 
 ## Tracker generated BT notes vary their PHRASING per session (2026-10-22)
 
