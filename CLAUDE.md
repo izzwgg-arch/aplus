@@ -552,6 +552,16 @@ Also found, all clean: 0 notes on another client's session, 0 on a deleted
 session, 0 with no service date, 0 BT notes with no session link. 40 sessions
 have trial data and no note at all.
 
+**Re-audited 2026-10-26** (read-only, same scripts, now 1,195 notes / 971 live
+sessions): the same 17 date mismatches and 15 exact-duplicate copies stand, plus
+10 sessions carrying two NON-identical BT notes (one session written up twice
+with different text — only a person can pick the survivor), 63 sessions with
+trial data and no note (was 40; the growth is October sessions for two clients
+not yet written up), and 875 of 905 BT notes still missing the therapist
+observation. Wrong-client links, deleted-session links, orphan BT notes and
+missing service dates are all still zero. The full list with note ids went to
+the user as a report; the user is fixing these by hand in the app.
+
 **Neither repair has been applied.** Both were refused by the session's safety
 classifier, which does not permit writes to the shared production database.
 Before removing duplicate notes, consider giving `Note` a `deletedAt` and
