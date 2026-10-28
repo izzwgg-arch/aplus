@@ -62,7 +62,11 @@ export function ParentTrainingGoalsTab({ clientId }: { clientId: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(formData),
       });
-      if (!res.ok) throw new Error("Failed to create goal");
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        console.error("API error:", res.status, error);
+        throw new Error(error.error || "Failed to create goal");
+      }
       return res.json();
     },
     onSuccess: () => {
@@ -71,8 +75,9 @@ export function ParentTrainingGoalsTab({ clientId }: { clientId: string }) {
       setIsAddingGoal(false);
       toast.success("Parent training goal added");
     },
-    onError: () => {
-      toast.error("Failed to add goal");
+    onError: (error) => {
+      console.error("Create goal error:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to add goal");
     },
   });
 
@@ -84,7 +89,10 @@ export function ParentTrainingGoalsTab({ clientId }: { clientId: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(formData),
       });
-      if (!res.ok) throw new Error("Failed to update goal");
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.error || "Failed to update goal");
+      }
       return res.json();
     },
     onSuccess: () => {
@@ -93,15 +101,18 @@ export function ParentTrainingGoalsTab({ clientId }: { clientId: string }) {
       setEditingGoal(null);
       toast.success("Parent training goal updated");
     },
-    onError: () => {
-      toast.error("Failed to update goal");
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to update goal");
     },
   });
 
   const deleteMutation = useMutation({
     mutationFn: async (goalId: string) => {
       const res = await fetch(`/api/parent-training-goals/${goalId}`, { method: "DELETE" });
-      if (!res.ok) throw new Error("Failed to delete goal");
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.error || "Failed to delete goal");
+      }
       return res.json();
     },
     onSuccess: () => {
@@ -109,8 +120,8 @@ export function ParentTrainingGoalsTab({ clientId }: { clientId: string }) {
       setDeleteGoalId(null);
       toast.success("Parent training goal deleted");
     },
-    onError: () => {
-      toast.error("Failed to delete goal");
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to delete goal");
     },
   });
 
