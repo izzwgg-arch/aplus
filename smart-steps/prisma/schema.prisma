@@ -192,6 +192,7 @@ model Client {
   assignments       ClientAssignment[]
   programs          Program[]
   parentGoals       ParentGoal[]
+  parentTrainingGoals ParentTrainingGoal[] @relation(name: "ClientParentTrainingGoals")
   sessions          Session[]
   notes             Note[]
   attachments       Attachment[]
@@ -265,6 +266,24 @@ model SubGoal {
   targets      Target[]
 
   @@index([parentGoalId])
+}
+
+// Parent training objective — what a parent/caregiver needs to learn and practice
+// Separate from child skill goals (ParentGoal/SubGoal/Target)
+model ParentTrainingGoal {
+  id        String     @id @default(cuid())
+  clientId  String
+  goal      String // What the parent will learn/practice (e.g., "Parent will deliver clear instructions with 5-second processing time")
+  skillArea String? // Domain/category (Language, Adaptive, Behavior, Social, etc.)
+  status    GoalStatus @default(ACTIVE) // ACTIVE, MASTERED, ON_HOLD
+  startDate DateTime?
+  notes     String? // Additional context or recommendations
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  client    Client     @relation(name: "ClientParentTrainingGoals", fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId])
+  @@index([status])
 }
 
 // Measurable ABA target

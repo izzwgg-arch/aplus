@@ -23,6 +23,7 @@ import { DataEntryTab } from "./_components/DataEntryTab";
 import { SessionSnapshotDrawer } from "./_components/SessionSnapshotDrawer";
 import { SessionNotesTab } from "./_components/SessionNotesTab";
 import { SessionsTab } from "./_components/SessionsTab";
+import { ParentTrainingGoalsTab } from "./_components/ParentTrainingGoalsTab";
 import { usePermissions } from "@/hooks/usePermissions";
 import { formatMinutesAsHours } from "@/lib/formatDuration";
 
@@ -60,13 +61,14 @@ type GoalSummary = {
 };
 
 const TABS = [
-  { id: "overview",    label: "Overview",          icon: LayoutGrid },
-  { id: "data-entry",  label: "Data Entry",         icon: Zap        },
-  { id: "programs",    label: "Goals & Targets",    icon: Target     },
-  { id: "sessions",    label: "Sessions",           icon: Activity   },
-  { id: "schedule",    label: "Schedule",           icon: Calendar   },
-  { id: "graphs",      label: "Graphs",             icon: BarChart2  },
-  { id: "notes",       label: "Notes",              icon: StickyNote },
+  { id: "overview",    label: "Overview",             icon: LayoutGrid },
+  { id: "data-entry",  label: "Data Entry",           icon: Zap        },
+  { id: "programs",    label: "Goals & Targets",      icon: Target     },
+  { id: "parent-goals",label: "Parent Training",      icon: BookOpen   },
+  { id: "sessions",    label: "Sessions",             icon: Activity   },
+  { id: "schedule",    label: "Schedule",             icon: Calendar   },
+  { id: "graphs",      label: "Graphs",               icon: BarChart2  },
+  { id: "notes",       label: "Notes",                icon: StickyNote },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -582,6 +584,13 @@ function ClientHubInner() {
           {activeTab === "programs" && (
             <TabErrorBoundary label="Goals & Targets">
               <ProgramsTab clientId={clientId} onOpenTarget={handleOpenTarget} />
+            </TabErrorBoundary>
+          )}
+
+          {/* PARENT TRAINING GOALS TAB */}
+          {activeTab === "parent-goals" && (
+            <TabErrorBoundary label="Parent Training Goals">
+              <ParentTrainingGoalsTab clientId={clientId} />
             </TabErrorBoundary>
           )}
 
