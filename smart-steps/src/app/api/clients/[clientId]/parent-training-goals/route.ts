@@ -75,6 +75,8 @@ export async function POST(
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }
 
+    console.log("Creating parent training goal with data:", { clientId, goal: goal?.substring(0, 50), skillArea, status, startDate, notes: notes?.substring(0, 50) });
+
     const created = await prisma.parentTrainingGoal.create({
       data: {
         clientId,
@@ -86,6 +88,8 @@ export async function POST(
       },
     });
 
+    console.log("Successfully created parent training goal:", created.id);
+
     await auditLog(user.id, "CREATE_PARENT_TRAINING_GOAL", "ParentTrainingGoal", created.id, {
       clientId,
       goal: created.goal,
@@ -93,9 +97,9 @@ export async function POST(
 
     return NextResponse.json(created, { status: 201 });
   } catch (error) {
-    console.error("Error creating parent training goal:", error);
+    console.error("Error creating parent training goal:", error instanceof Error ? error.message : error);
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: error instanceof Error ? error.message : "Internal server error" },
       { status: 500 }
     );
   }
