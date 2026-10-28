@@ -67,7 +67,7 @@ export function ParentTrainingGoalsTab({ clientId }: { clientId: string }) {
       if (!res.ok) {
         const text = await res.text();
         console.error("API response body:", text);
-        let error = {};
+        let error: { error?: string } = {};
         try {
           error = JSON.parse(text);
         } catch {}
