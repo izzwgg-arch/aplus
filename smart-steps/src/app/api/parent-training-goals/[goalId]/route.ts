@@ -42,10 +42,10 @@ export async function PATCH(
       where: { id: goalId },
       data: {
         ...(goal && { goal: goal.trim() }),
-        ...(skillArea !== undefined && { skillArea }),
+        ...(skillArea !== undefined && { skillArea: skillArea || null }),
         ...(status && { status }),
         ...(startDate !== undefined && { startDate: startDate ? new Date(startDate) : null }),
-        ...(notes !== undefined && { notes }),
+        ...(notes !== undefined && { notes: notes || null }),
       },
     });
 

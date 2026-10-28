@@ -79,10 +79,10 @@ export async function POST(
       data: {
         clientId,
         goal: goal.trim(),
-        skillArea,
+        skillArea: skillArea || null,
         status,
         startDate: startDate ? new Date(startDate) : null,
-        notes,
+        notes: notes || null,
       },
     });
 
