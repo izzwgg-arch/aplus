@@ -1,19 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { requireSession } from "@/lib/auth";
-import { writeAuditLog } from "@/lib/audit";
+import { prisma } from "@/lib/db";
+import { requireSession } from "@/lib/session";
+import { auditLog } from "@/lib/auditLogger";
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { goalId: string } }
+  { params }: { params: Promise<{ goalId: string }> }
 ) {
   try {
-    const session = await requireSession();
-    if (!session?.user?.id) {
+    const user = await requireSession();
+    if (!user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { goalId } = params;
+    const { goalId } = await params;
     const body = await request.json();
     const { goal, skillArea, status, startDate, notes } = body;
 
@@ -30,7 +30,7 @@ export async function PATCH(
     const hasAccess = await prisma.clientAssignment.findFirst({
       where: {
         clientId: existing.clientId,
-        userId: session.user.id,
+        userId: user.id,
       },
     });
 
@@ -49,12 +49,8 @@ export async function PATCH(
       },
     });
 
-    await writeAuditLog({
-      userId: session.user.id,
-      action: "UPDATE",
-      entityType: "ParentTrainingGoal",
-      entityId: goalId,
-      details: { clientId: existing.clientId },
+    await auditLog(user.id, "UPDATE_PARENT_TRAINING_GOAL", "ParentTrainingGoal", goalId, {
+      clientId: existing.clientId,
     });
 
     return NextResponse.json(updated);
@@ -69,15 +65,15 @@ export async function PATCH(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { goalId: string } }
+  { params }: { params: Promise<{ goalId: string }> }
 ) {
   try {
-    const session = await requireSession();
-    if (!session?.user?.id) {
+    const user = await requireSession();
+    if (!user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { goalId } = params;
+    const { goalId } = await params;
 
     // Fetch the goal to verify client access
     const existing = await prisma.parentTrainingGoal.findUnique({
@@ -91,7 +87,7 @@ export async function DELETE(
     const hasAccess = await prisma.clientAssignment.findFirst({
       where: {
         clientId: existing.clientId,
-        userId: session.user.id,
+        userId: user.id,
       },
     });
 
@@ -103,12 +99,8 @@ export async function DELETE(
       where: { id: goalId },
     });
 
-    await writeAuditLog({
-      userId: session.user.id,
-      action: "DELETE",
-      entityType: "ParentTrainingGoal",
-      entityId: goalId,
-      details: { clientId: existing.clientId },
+    await auditLog(user.id, "DELETE_PARENT_TRAINING_GOAL", "ParentTrainingGoal", goalId, {
+      clientId: existing.clientId,
     });
 
     return NextResponse.json({ success: true });

@@ -1,25 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { requireSession } from "@/lib/auth";
-import { writeAuditLog } from "@/lib/audit";
+import { prisma } from "@/lib/db";
+import { requireSession } from "@/lib/session";
+import { auditLog } from "@/lib/auditLogger";
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { clientId: string } }
+  { params }: { params: Promise<{ clientId: string }> }
 ) {
   try {
-    const session = await requireSession();
-    if (!session?.user?.id) {
+    const user = await requireSession();
+    if (!user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { clientId } = params;
+    const { clientId } = await params;
 
     // Check client access
     const hasAccess = await prisma.clientAssignment.findFirst({
       where: {
         clientId,
-        userId: session.user.id,
+        userId: user.id,
       },
     });
 
@@ -44,15 +44,15 @@ export async function GET(
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { clientId: string } }
+  { params }: { params: Promise<{ clientId: string }> }
 ) {
   try {
-    const session = await requireSession();
-    if (!session?.user?.id) {
+    const user = await requireSession();
+    if (!user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { clientId } = params;
+    const { clientId } = await params;
     const body = await request.json();
     const { goal, skillArea, status = "ACTIVE", startDate, notes } = body;
 
@@ -67,7 +67,7 @@ export async function POST(
     const hasAccess = await prisma.clientAssignment.findFirst({
       where: {
         clientId,
-        userId: session.user.id,
+        userId: user.id,
       },
     });
 
@@ -86,12 +86,9 @@ export async function POST(
       },
     });
 
-    await writeAuditLog({
-      userId: session.user.id,
-      action: "CREATE",
-      entityType: "ParentTrainingGoal",
-      entityId: created.id,
-      details: { clientId, goal: created.goal },
+    await auditLog(user.id, "CREATE_PARENT_TRAINING_GOAL", "ParentTrainingGoal", created.id, {
+      clientId,
+      goal: created.goal,
     });
 
     return NextResponse.json(created, { status: 201 });
