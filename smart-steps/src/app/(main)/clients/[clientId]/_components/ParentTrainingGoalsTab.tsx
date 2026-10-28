@@ -57,13 +57,20 @@ export function ParentTrainingGoalsTab({ clientId }: { clientId: string }) {
 
   const createMutation = useMutation({
     mutationFn: async () => {
+      console.log("Creating goal with data:", formData);
       const res = await fetch(`/api/clients/${clientId}/parent-training-goals`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(formData),
       });
+      console.log("Response status:", res.status);
       if (!res.ok) {
-        const error = await res.json().catch(() => ({}));
+        const text = await res.text();
+        console.error("API response body:", text);
+        let error = {};
+        try {
+          error = JSON.parse(text);
+        } catch {}
         console.error("API error:", res.status, error);
         throw new Error(error.error || "Failed to create goal");
       }
