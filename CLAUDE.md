@@ -278,6 +278,18 @@ Gavriel Schiff-Weiss initial assessment). Key rules, all implemented in
   section title now maps to a builder. Full pre-change backup:
   `/root/initial-template-fix-20260831.log` on the server.
 
+## Tracker Create Client Report — BCBA dropdown lists ALL BCBAs (2026-11-02)
+
+The BCBA/Provider dropdown in the Create Client Report modal
+(`src/app/(main)/assessments/page.tsx`) used to list only the staff ASSIGNED to
+the selected client with assignment role "BCBA" — in practice only one BCBA
+clinic-wide held any such assignments, so she was the only name ever offered.
+At the user's request it now lists every active account with role BCBA
+(`GET /api/users?forDropdown=1`, filtered client-side). Picking a client still
+PRESELECTS that client's assigned BCBA as a convenience, but the list itself is
+never filtered by assignment. The generate-report route resolves the chosen
+`bcbaUserId` server-side, so the minimal dropdown payload (no email) is enough.
+
 ## Tracker client assessments page tolerates a deleted report template (fixed 2026-11-02)
 
 The client Assessments page crashed ("Cannot read properties of null (reading

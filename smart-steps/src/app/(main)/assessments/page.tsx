@@ -119,7 +119,7 @@ function CreateReportTemplateModal({ onClose, onCreated }: { onClose: () => void
 
 // ── Create Report Modal (pick client) ────────────────────────────────────────
 type Client = { id: string; name: string };
-type BcbaAssignment = { userId: string; userName: string; userEmail: string };
+type BcbaOption = { userId: string; userName: string };
 
 function CreateReportModal({
   template, clients, onClose, onCreated,
@@ -133,34 +133,47 @@ function CreateReportModal({
   const [servicePeriodEnd,   setServicePeriodEnd]   = useState("");
   const [assessmentType, setAssessmentType]         = useState<"initial" | "reassessment">("reassessment");
   const [bcbaUserId, setBcbaUserId]                 = useState("");
-  const [bcbaOptions, setBcbaOptions]               = useState<BcbaAssignment[]>([]);
-  const [loadingBcba, setLoadingBcba]               = useState(false);
+  const [bcbaOptions, setBcbaOptions]               = useState<BcbaOption[]>([]);
+  const [loadingBcba, setLoadingBcba]               = useState(true);
   const [showManualProvider, setShowManualProvider] = useState(false);
   const [bcbaManualName, setBcbaManualName]         = useState("");
   const [bcbaManualEmail, setBcbaManualEmail]       = useState("");
   const [bcbaManualCreds, setBcbaManualCreds]       = useState("");
   const [saving, setSaving]                         = useState(false);
 
-  // Load BCBA assignments when client changes
+  // The dropdown lists EVERY active BCBA in the clinic, not just the ones
+  // assigned to the selected client (changed 2026-11-02 at the user's request).
   useEffect(() => {
-    if (!clientId) { setBcbaOptions([]); setBcbaUserId(""); return; }
-    setLoadingBcba(true);
-    setBcbaUserId("");
-    fetch(`/smart-steps/api/clients/${clientId}/assignments`)
+    let cancelled = false;
+    fetch(`/smart-steps/api/users?forDropdown=1`)
       .then((r) => r.ok ? r.json() : [])
-      .then((data: { role: string; userId: string; name?: string | null; email?: string | null }[]) => {
+      .then((data: { id: string; name: string | null; role: string }[]) => {
+        if (cancelled) return;
         const bcbas = data
-          .filter((a) => a.role === "BCBA")
-          .map((a) => ({
-            userId:    a.userId,
-            userName:  a.name  ?? a.email ?? a.userId,
-            userEmail: a.email ?? "",
-          }));
+          .filter((u) => u.role === "BCBA")
+          .map((u) => ({ userId: u.id, userName: u.name ?? u.id }));
         setBcbaOptions(bcbas);
         if (bcbas.length === 1) setBcbaUserId(bcbas[0].userId);
       })
-      .catch(() => setBcbaOptions([]))
-      .finally(() => setLoadingBcba(false));
+      .catch(() => { if (!cancelled) setBcbaOptions([]); })
+      .finally(() => { if (!cancelled) setLoadingBcba(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Picking a client preselects that client's assigned BCBA as a convenience —
+  // the dropdown itself stays unfiltered, so any BCBA can still be chosen.
+  useEffect(() => {
+    if (!clientId) return;
+    let cancelled = false;
+    fetch(`/smart-steps/api/clients/${clientId}/assignments`)
+      .then((r) => r.ok ? r.json() : [])
+      .then((data: { role: string; userId: string }[]) => {
+        if (cancelled) return;
+        const assigned = data.find((a) => a.role === "BCBA");
+        if (assigned) setBcbaUserId(assigned.userId);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, [clientId]);
 
   async function submit(e: React.FormEvent) {
@@ -251,19 +264,15 @@ function CreateReportModal({
           {/* BCBA selector */}
           <div>
             <label className="mb-1 block text-xs font-semibold text-zinc-400 uppercase tracking-wide">BCBA / Provider</label>
-            {!clientId ? (
-              <p className="text-xs text-zinc-600 italic">Select a client to load assigned BCBAs</p>
-            ) : loadingBcba ? (
+            {loadingBcba ? (
               <p className="text-xs text-zinc-500">Loading BCBAs…</p>
             ) : bcbaOptions.length === 0 ? (
-              <p className="text-xs text-zinc-600 italic">No BCBA assigned to this client — enter manually below or leave blank for placeholders</p>
+              <p className="text-xs text-zinc-600 italic">No BCBA accounts found — enter manually below or leave blank for placeholders</p>
             ) : (
               <select className="field-input w-full" value={bcbaUserId} onChange={(e) => setBcbaUserId(e.target.value)}>
                 <option value="">Select BCBA…</option>
                 {bcbaOptions.map((b) => (
-                  <option key={b.userId} value={b.userId}>
-                    {b.userName}{b.userEmail ? ` (${b.userEmail})` : ""}
-                  </option>
+                  <option key={b.userId} value={b.userId}>{b.userName}</option>
                 ))}
               </select>
             )}
