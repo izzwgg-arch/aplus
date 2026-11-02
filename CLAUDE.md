@@ -294,7 +294,7 @@ client-side PATCHes were left in place as belt-and-suspenders.
 
 `scripts/promoteGoalsWithData.mjs` (dry-run by default, `--apply` to write)
 backfills NEW goals that already have live trials (`trial.deletedAt: null`);
-run on the server on 2026-11-02 (count noted below after the run).
+run on the server on 2026-11-02 — 56 goals promoted (re-run reports zero).
 
 Manual status change already exists and was not touched: the status dropdown
 and phase menu on every goal card (client goals page `TargetCard` and
