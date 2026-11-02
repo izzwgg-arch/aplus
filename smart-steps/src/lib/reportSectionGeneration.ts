@@ -45,8 +45,12 @@ export interface ClientGenerationData {
 }
 
 /** Loads everything the builders need for one client. Returns null when the
- *  client does not exist. Mastered targets are bounded to the last 6 months,
- *  trial stats to the last 30 days / 500 trials (performance safety). */
+ *  client does not exist. Mastered targets are bounded to the last 6 months.
+ *  Trial stats prefer the last 30 days ("current level") and fall back to the
+ *  goal's all-time numbers when it has no recent data — a goal with data must
+ *  never print a blank percentage. Computed with groupBy, never by fetching
+ *  trial rows: the old `take: 500` row fetch silently dropped most targets for
+ *  high-volume clients (one client logs 4,000+ trials in 30 days). */
 export async function loadClientGenerationData(clientId: string): Promise<ClientGenerationData | null> {
   const sixMonthsAgo = new Date();
   sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
@@ -95,21 +99,31 @@ export async function loadClientGenerationData(clientId: string): Promise<Client
 
   if (allTargetIds.length > 0) {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const recentTrials = await prisma.trial.findMany({
-      where: {
-        targetId: { in: allTargetIds },
-        deletedAt: null,
-        createdAt: { gte: thirtyDaysAgo },
-      },
-      select: { targetId: true, result: true },
-      orderBy: { createdAt: "desc" },
-      take: 500,
-    });
-    for (const trial of recentTrials) {
-      const s = trialStats.get(trial.targetId) ?? { correct: 0, total: 0 };
-      s.total++;
-      if (["CORRECT", "INDEPENDENT"].includes(trial.result.toUpperCase())) s.correct++;
-      trialStats.set(trial.targetId, s);
+    const toStatsMap = (groups: { targetId: string; result: string; _count: { _all: number } }[]) => {
+      const map = new Map<string, TrialStats>();
+      for (const g of groups) {
+        const s = map.get(g.targetId) ?? { correct: 0, total: 0 };
+        s.total += g._count._all;
+        if (["CORRECT", "INDEPENDENT"].includes(g.result.toUpperCase())) s.correct += g._count._all;
+        map.set(g.targetId, s);
+      }
+      return map;
+    };
+    const [recentGroups, allTimeGroups] = await Promise.all([
+      prisma.trial.groupBy({
+        by: ["targetId", "result"],
+        where: { targetId: { in: allTargetIds }, deletedAt: null, createdAt: { gte: thirtyDaysAgo } },
+        _count: { _all: true },
+      }),
+      prisma.trial.groupBy({
+        by: ["targetId", "result"],
+        where: { targetId: { in: allTargetIds }, deletedAt: null },
+        _count: { _all: true },
+      }),
+    ]);
+    const recent = toStatsMap(recentGroups);
+    for (const [targetId, s] of toStatsMap(allTimeGroups)) {
+      trialStats.set(targetId, recent.get(targetId) ?? s);
     }
   }
 

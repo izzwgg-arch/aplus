@@ -386,6 +386,23 @@ export function computeProgressPct(
   return `${pct}% (${s.total} trial${s.total !== 1 ? "s" : ""})`;
 }
 
+/**
+ * The "Baseline Level" column expects a LEVEL ("Low", "20%", "2/10 steps").
+ * But goals added through the report editor / goal library store their
+ * operational definition in `Target.baseline` (that mapping is how
+ * POST /api/targets and goal-library-import work), and an operational
+ * definition is usually another phrasing of the goal itself ("Usher will
+ * learn not to repeat a story more than twice") — printing it made the goal
+ * appear twice on one chart row. A baseline that reads as a goal sentence is
+ * therefore rendered as "Low", the chart's default level.
+ */
+export function baselineLevelLabel(baseline: string | null | undefined): string {
+  const text = (baseline ?? "").trim();
+  if (!text) return "Low";
+  if (/\bwill\b/i.test(text) && text.length > 25) return "Low";
+  return escapeHtml(text);
+}
+
 // ── HTML builders ─────────────────────────────────────────────────────────────
 
 /**
@@ -956,8 +973,12 @@ export function buildCurrentGoalsHtml(
       for (const t of g.targets) {
         if (t.phase === "MASTERED") continue;
         const startDate    = getTargetStartDate(t);
-        const baseline     = t.baseline ? escapeHtml(t.baseline) : "Low";
-        const currentLevel = assessmentType === "initial" ? "" : computeCurrentLevel(t.id, trialStats);
+        const baseline     = baselineLevelLabel(t.baseline);
+        // Data-driven, not type-driven: a true initial assessment has no
+        // trials yet, so the cell is naturally blank — but an "initial"
+        // template regenerated months into treatment must show the real
+        // percentages rather than wiping them (reported 2026-11-02).
+        const currentLevel = computeCurrentLevel(t.id, trialStats);
         catRows.push(
           `<tr>` +
           `<td>${goalText(g.title, firstName)}</td>` +
@@ -1071,7 +1092,7 @@ export function buildNewGoalsHtml(
         `<tr>` +
         `<td>${goalText(goalTitle, firstName)}</td>` +
         `<td>${goalText(t.definition, firstName)}</td>` +
-        `<td>${t.baseline ? escapeHtml(t.baseline) : "Low"}</td>` +
+        `<td>${baselineLevelLabel(t.baseline)}</td>` +
         `<td>${escapeHtml(getTargetStartDate(t))}</td>` +
         `</tr>`,
       );

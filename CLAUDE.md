@@ -212,7 +212,8 @@ Gavriel Schiff-Weiss initial assessment). Key rules, all implemented in
   skill-acquisition chart is grouped under fixed category headers with
   "NEW GOALS – To Be Mastered by <service period end>" rows (Start Date =
   masteryRule.openedDate or TBD, Baseline = target.baseline or "Low", Current
-  level = last-30-day trial % — blank on initial).
+  level = trial % — see the 2026-11-02 regeneration-fidelity entry: data-driven,
+  no longer blanked on initial, 30-day window with all-time fallback).
 - **Default paragraphs** (Why-ABA boilerplate, Coordination, Team Training,
   Parent Involvement, Crisis Plan, Transition, Discharge, closing/signature)
   are fixed text with the first name substituted; `detectSectionType()` maps
@@ -300,6 +301,38 @@ Manual status change already exists and was not touched: the status dropdown
 and phase menu on every goal card (client goals page `TargetCard` and
 ProgramsTab's lifecycle select), writing `PATCH /api/targets/[targetId]`
 (gated on `smartsteps.targets.edit`).
+
+## Tracker assessment regeneration — percentages and baseline column fixed (2026-11-02)
+
+Reported right after "Update from data" was used on a live report: "all
+percentages went away and some goals have a duplicate on the same line".
+Three defects, all in the shared generation core, so both generation routes
+got the fix:
+
+- **"Current level" was blanked by TYPE, not by data.** `buildCurrentGoalsHtml`
+  emitted an empty cell whenever `assessmentType === "initial"` — and the
+  regenerate route derives the type from the template/report NAME, so any
+  report built from the "Initial ABA Assessment Template" wiped every
+  percentage on regeneration, months into treatment. Current level is now
+  data-driven (`computeCurrentLevel` always runs): a true initial assessment
+  has no trials and stays naturally blank.
+- **Trial stats were capped at 500 rows.** `loadClientGenerationData` fetched
+  the 500 most recent trials; one client alone logged 4,460 trials in the last
+  30 days, so most targets got no stats at all. Stats now come from
+  `prisma.trial.groupBy` (no row cap): last-30-days per target, falling back
+  to the target's all-time numbers when it has no recent data — a goal with
+  data never prints a blank percentage.
+- **The Baseline Level column printed goal sentences.** Goals added through
+  the report editor / goal library store their operational definition in
+  `Target.baseline` (that mapping is intentional in POST /api/targets and
+  goal-library-import), and an op-def usually re-phrases the goal — so the
+  chart row showed the goal twice. `baselineLevelLabel()` renders a baseline
+  that reads as a goal sentence (contains "will", longer than 25 chars) as
+  "Low"; real levels ("Low", "20%", short descriptions) pass through.
+
+Reports are snapshots, so the broken regeneration had already been stored for
+the affected report; it was regenerated server-side with the fixed builders
+the same day. Any other report shows the fix on its next "Update from data".
 
 ## Tracker Create Client Report — BCBA dropdown lists ALL BCBAs (2026-11-02)
 
