@@ -33,7 +33,8 @@ type ClientReport = {
   status: string;
   createdAt: string;
   updatedAt: string;
-  template: { id: string; name: string; type: string };
+  // Nullable: ClientReport.template is SetNull when its template is deleted.
+  template: { id: string; name: string; type: string } | null;
   _count: { sections: number };
 };
 
@@ -293,12 +294,14 @@ function ClientAssessmentsPageInner() {
                         <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${statusStyle.bg} ${statusStyle.text}`}>
                           {statusStyle.label}
                         </span>
-                        <span className="text-xs px-2 py-0.5 rounded-full shrink-0 bg-[var(--accent-cyan)]/15 text-[var(--accent-cyan)]">
-                          {r.template.type.replace(/_/g, " ")}
-                        </span>
+                        {r.template && (
+                          <span className="text-xs px-2 py-0.5 rounded-full shrink-0 bg-[var(--accent-cyan)]/15 text-[var(--accent-cyan)]">
+                            {r.template.type.replace(/_/g, " ")}
+                          </span>
+                        )}
                       </div>
                       <p className="text-xs text-zinc-500 mt-0.5">
-                        Template: {r.template.name} · {r._count.sections} section{r._count.sections !== 1 ? "s" : ""}
+                        {r.template ? `Template: ${r.template.name} · ` : ""}{r._count.sections} section{r._count.sections !== 1 ? "s" : ""}
                       </p>
                       <p className="text-xs text-zinc-600 mt-0.5">
                         Created {new Date(r.createdAt).toLocaleDateString()}

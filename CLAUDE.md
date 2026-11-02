@@ -278,6 +278,17 @@ Gavriel Schiff-Weiss initial assessment). Key rules, all implemented in
   section title now maps to a builder. Full pre-change backup:
   `/root/initial-template-fix-20260831.log` on the server.
 
+## Tracker client assessments page tolerates a deleted report template (fixed 2026-11-02)
+
+The client Assessments page crashed ("Cannot read properties of null (reading
+'type')", caught by the error boundary) for any client with a clinical report
+whose template had been deleted: `ClientReport.template` is `SetNull` on
+template delete, but the page read `r.template.type` / `r.template.name`
+unguarded. 12 such reports existed in prod across 2 clients. The type is now
+`| null` and both renders are guarded (the type chip and the "Template:" line
+are simply omitted). The report editor page already guarded this; when adding
+any new `ClientReport.template` consumer, treat it as nullable.
+
 ## Tracker client DOB is validated (fixed 2026-09-10)
 
 "Failed to create client" was a stray digit in the date-of-birth year ("20009",
