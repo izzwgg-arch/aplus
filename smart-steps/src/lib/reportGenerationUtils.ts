@@ -870,7 +870,7 @@ export function buildMasteredGoalsHtml(
       const entries = masteredTs.map((t) => ({
         skillArea: g.title,
         def: t.definition,
-        date: t.dateMastered ? formatDate(t.dateMastered) : "—",
+        date: t.dateMastered ? formatDate(t.dateMastered) : "TBD",
       }));
       if (idx >= 0) {
         if (!masteredByCat.has(idx)) masteredByCat.set(idx, []);
@@ -1052,11 +1052,12 @@ export function buildParentGoalsHtml(
     `<th>Current level</th><th>Carrying Over? (Y/N)</th><th>Comments</th>` +
     `</tr></thead>`;
 
+  // An undated goal row always shows TBD in its date column, never a blank.
   const rows = [
     `<tr><td colspan="7" style="text-align:center"><strong>NEW GOALS</strong></td></tr>`,
-    `<tr><td>ABA principles</td><td>Parents should learn to identify the 4 main functions of behavior.</td><td></td><td></td><td></td><td></td><td></td></tr>`,
-    `<tr><td>Reinforcement</td><td>${first}'s parents will learn when to use appropriate reinforcement/consequences.</td><td></td><td></td><td></td><td></td><td></td></tr>`,
-    `<tr><td>Compliance</td><td>${first}'s parents will learn how to help ${first} be more compliant.</td><td></td><td></td><td></td><td></td><td></td></tr>`,
+    `<tr><td>ABA principles</td><td>Parents should learn to identify the 4 main functions of behavior.</td><td>TBD</td><td></td><td></td><td></td><td></td></tr>`,
+    `<tr><td>Reinforcement</td><td>${first}'s parents will learn when to use appropriate reinforcement/consequences.</td><td>TBD</td><td></td><td></td><td></td><td></td></tr>`,
+    `<tr><td>Compliance</td><td>${first}'s parents will learn how to help ${first} be more compliant.</td><td>TBD</td><td></td><td></td><td></td><td></td></tr>`,
   ];
 
   return [intro, `<table>`, HEADER, `<tbody>`, ...rows, `</tbody></table>`].join("\n");

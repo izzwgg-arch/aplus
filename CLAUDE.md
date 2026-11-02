@@ -334,6 +334,15 @@ Reports are snapshots, so the broken regeneration had already been stored for
 the affected report; it was regenerated server-side with the fixed builders
 the same day. Any other report shows the fix on its next "Update from data".
 
+**Undated goal rows always print "TBD", never a blank date cell** (same day,
+user request): the skill-acquisition chart and new-goals table already did
+(`getTargetStartDate`); extended to the mastered table's Date Mastered (was
+"—"), the parent-training table's default rows' Introduction Date, and the
+report editor's Add-goal modal (undated mastered-table rows now insert "TBD";
+the modal also stopped putting the operational definition in the Baseline
+cell — same goal-sentence heuristic as `baselineLevelLabel`). The mastered
+table's empty SKELETON rows stay blank — they carry no goal at all.
+
 ## Tracker Create Client Report — BCBA dropdown lists ALL BCBAs (2026-11-02)
 
 The BCBA/Provider dropdown in the Create Client Report modal

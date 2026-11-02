@@ -352,13 +352,20 @@ export default function AddGoalFromLibraryModal({
       }
     }
 
+    // The Baseline Level column expects a LEVEL ("Low", "20%"), but the
+    // operational definition is usually another phrasing of the goal itself —
+    // printing it made the goal appear twice on one row (reported 2026-11-02;
+    // same rule as baselineLevelLabel() in reportGenerationUtils).
+    const opDef = operationalDefinition.trim();
+    const baselineLevel = opDef && !(/\bwill\b/i.test(opDef) && opDef.length > 25) ? opDef : "Low";
     const row: GoalRow = {
       skillArea: resolvedSkillArea,
       objective: itemType === "PARENT_GOAL" ? operationalDefinition.trim() || title.trim() : title.trim(),
       startDate: isMasteredTable ? "" : dateValue ? toTableDate(dateValue) : "TBD",
-      baseline: operationalDefinition.trim() || "Low",
+      baseline: baselineLevel,
       currentLevel: "",
-      dateMastered: isMasteredTable && dateValue ? toTableDate(dateValue) : "",
+      // An undated goal row shows TBD, never a blank date cell.
+      dateMastered: isMasteredTable ? (dateValue ? toTableDate(dateValue) : "TBD") : "",
       comments: comments.trim(),
       categoryLabel: resolvedCategoryHeading || undefined,
     };
