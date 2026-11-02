@@ -3,6 +3,7 @@ import { requireSession } from "@/lib/session";
 import { requirePermissionResponse } from "@/lib/permissions";
 import { prisma } from "@/lib/db";
 import { auditLog } from "@/lib/auditLogger";
+import { promoteNewTargetsWithData } from "@/lib/targetPromotion";
 
 type QueueItem = {
   id?: number;
@@ -65,6 +66,9 @@ export async function POST(req: Request) {
     // reference a session id that will NEVER exist server-side and would
     // fail to sync forever.
     const sessionIdMap: Record<string, string> = {};
+    // Targets that received trial data in this sync — a goal with data
+    // collected under it is In Treatment, so NEW ones are promoted below.
+    const trialTargetIds: string[] = [];
 
     for (const item of queue) {
       try {
@@ -90,6 +94,7 @@ export async function POST(req: Request) {
               },
             });
             synced.push(`trial:${p.targetId}`);
+            trialTargetIds.push(p.targetId as string);
             if (item.id != null) processedIds.push(item.id);
           }
         } else if (item.table === "sessions") {
@@ -149,6 +154,8 @@ export async function POST(req: Request) {
         errors.push({ id: item.id, table: item.table, error: String(e) });
       }
     }
+
+    await promoteNewTargetsWithData(trialTargetIds);
 
     await auditLog(user.id, "LOG_TRIAL", "SyncQueue", null, {
       synced: synced.length,

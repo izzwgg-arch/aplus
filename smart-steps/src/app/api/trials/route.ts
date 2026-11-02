@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
 import { requireClientAccessResponse, requirePermissionResponse } from "@/lib/permissions";
 import { prisma } from "@/lib/db";
+import { promoteNewTargetsWithData } from "@/lib/targetPromotion";
 
 const TRIAL_RESULTS = ["CORRECT", "INCORRECT", "PROMPTED", "NR", "SKIP"] as const;
 const PROMPT_LEVELS = ["FULL_PHYSICAL", "PARTIAL_PHYSICAL", "GESTURAL", "VERBAL", "MODEL", "INDEPENDENT"] as const;
@@ -115,6 +116,10 @@ export async function POST(req: Request) {
         })
       )
     );
+    // A goal with data collected under it is In Treatment. Promoting here
+    // (server-side) is what guarantees it; the client-side PATCHes remain as a
+    // belt-and-suspenders for older deployed bundles.
+    await promoteNewTargetsWithData(targetIds);
     return NextResponse.json({ count: created.length, items: created }, { status: 201 });
   } catch (e) {
     console.error("POST /api/trials error:", e);

@@ -278,6 +278,29 @@ Gavriel Schiff-Weiss initial assessment). Key rules, all implemented in
   section title now maps to a builder. Full pre-change backup:
   `/root/initial-template-fix-20260831.log` on the server.
 
+## Tracker goals with data auto-promote to In Treatment, server-side (2026-11-02)
+
+A goal (Target) that has collected trial data is "In Treatment" (phase
+ACQUISITION). The NEW -> ACQUISITION promotion used to be only a
+fire-and-forget PATCH from the browser, which silently failed for BTs without
+`targets.edit` and on any network hiccup — leaving goals with data still
+showing as New. `src/lib/targetPromotion.ts`
+(`promoteNewTargetsWithData(targetIds)`) is the single source of truth: it is
+called after every trial write in `POST /api/trials` AND in `/api/sync`
+(offline queue), and promotes only phase `NEW` — BASELINE / MAINTENANCE /
+GENERALIZATION / MASTERED are deliberate clinical states and are never
+rewritten by data entry. It never throws (the trials are already saved). The
+client-side PATCHes were left in place as belt-and-suspenders.
+
+`scripts/promoteGoalsWithData.mjs` (dry-run by default, `--apply` to write)
+backfills NEW goals that already have live trials (`trial.deletedAt: null`);
+run on the server on 2026-11-02 (count noted below after the run).
+
+Manual status change already exists and was not touched: the status dropdown
+and phase menu on every goal card (client goals page `TargetCard` and
+ProgramsTab's lifecycle select), writing `PATCH /api/targets/[targetId]`
+(gated on `smartsteps.targets.edit`).
+
 ## Tracker Create Client Report — BCBA dropdown lists ALL BCBAs (2026-11-02)
 
 The BCBA/Provider dropdown in the Create Client Report modal
