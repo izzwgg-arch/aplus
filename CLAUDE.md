@@ -2067,3 +2067,20 @@ A dedicated **Transportation Log** page tracks transportation usage as a separat
 - **QuickBooks sync**: `syncTransportationToQuickbooks()` in `quickbooksService.js` marks the entry as synced; actual QB line-item creation can be extended when QB account setup specifies the account codes for transportation charges.
 
 - **Audit logging**: all CRUD operations logged via `writeAuditLog()`.
+
+## A+ Scheduling appointments — provider required on creation (fixed 2026-11-03)
+
+**Issue: "I can only see Yehudit Weinstock's schedule; other providers show no appointments"**
+
+Audit of the `Appointment` table found:
+- **619 total appointments**: 552 with `providerId: NULL`, 64 for provider 'N A', 2 for Yehudit Weinstock, 1 for GOLDY SILBERMAN
+- When filtering by a specific provider, only that provider's appointments display — but since most have no provider assigned, filtering shows few or no results
+- Users create appointments without selecting a provider, leaving `providerId` blank
+
+**Fix (2026-11-03)**:
+
+- **Provider is now REQUIRED** on appointment creation (`client/src/pages/aplus/AppointmentsPage.jsx` line ~1043): if `form.providerId` is empty, the modal rejects the save with "Select a provider."
+- **UI now shows appointment counts** when filtering by provider: the toolbar displays "(<count> appointments for <Provider Name>)" so users know what they're looking at
+- The calendar's provider filter dropdown (`CalendarToolbar`) passes `visibleCount` and `totalCount` and uses them to display the filtered count
+
+This prevents new appointments from entering the database unassigned to a provider. The existing 552 unassigned appointments remain in the database — they will show in "All Providers" view but not in individual provider calendars. If needed, these can be backfilled based on context (e.g., from session provider, from invoice provider), but that requires manual work per appointment or a migration script matching appointments to their correct provider from other records.
