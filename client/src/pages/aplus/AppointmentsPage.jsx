@@ -1040,6 +1040,7 @@ function AppointmentModal({ modal, onClose, onSaved, onDeleted, clients, service
       }
     }
     if (!form.serviceId)  { toast?.error("Select a service.");  return; }
+    if (!form.providerId) { toast?.error("Select a provider.");  return; }
     if (!form.startsAt)   { toast?.error("Set a start time.");  return; }
     if (!form.endsAt)     { toast?.error("Set an end time.");   return; }
     if (new Date(form.endsAt) <= new Date(form.startsAt)) {
@@ -1592,17 +1593,28 @@ function ViewSwitcher({ view, onChange }) {
 }
 
 /* ─── CalendarToolbar ───────────────────────────────────────────────────────── */
-function CalendarToolbar({ view, viewDate, weekStart, onPrev, onNext, onToday, onNew, onViewChange, providers, selectedProviderId, onProviderChange }) {
+function CalendarToolbar({ view, viewDate, weekStart, onPrev, onNext, onToday, onNew, onViewChange, providers, selectedProviderId, onProviderChange, visibleCount, totalCount }) {
   let label;
   if (view === "day")   label = viewDate.toLocaleDateString("en-US", { weekday:"long", month:"long", day:"numeric", year:"numeric" });
   else if (view === "week") label = weekRangeLabel(weekStart);
   else label = viewDate.toLocaleDateString("en-US", { month:"long", year:"numeric" });
 
+  const providerName = selectedProviderId
+    ? (providers.find(p => p.id === selectedProviderId)?.fullName || "Unknown Provider")
+    : null;
+
   return (
     <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
       <div>
         <h1 className="text-2xl font-semibold text-slate-900">Appointments</h1>
-        <p className="mt-0.5 text-sm text-slate-500">{label}</p>
+        <p className="mt-0.5 text-sm text-slate-500">
+          {label}
+          {selectedProviderId && providerName && (
+            <span className="ml-3 text-blue-600 font-medium">
+              ({visibleCount || 0} appointments for {providerName})
+            </span>
+          )}
+        </p>
       </div>
 
       <div className="flex items-center gap-2 flex-wrap">
@@ -1903,6 +1915,8 @@ export default function AppointmentsPage() {
         providers={providers}
         selectedProviderId={selectedProviderId}
         onProviderChange={setSelectedProviderId}
+        visibleCount={visibleAppts.length}
+        totalCount={appointments.length}
       />
 
       {loading ? (
