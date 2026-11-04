@@ -171,14 +171,16 @@ function GoalCard({
       <div className="flex items-start justify-between px-4 pt-4 pb-2 gap-3">
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-[var(--foreground)] leading-snug">{resolvedTitle}</p>
-          <div className="flex items-center gap-2 mt-0.5">
+          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
             <span className={`text-xs rounded-full px-2 py-0.5 ${
               goal.phase === "MASTERED" ? "bg-emerald-400/10 text-emerald-400" :
               goal.phase === "ACQUISITION" ? "bg-[var(--accent-cyan)]/10 text-[var(--accent-cyan)]" :
               "bg-zinc-500/15 text-zinc-400"
             }`}>{goal.phase?.charAt(0) + (goal.phase ?? "BASELINE").slice(1).toLowerCase()}</span>
             {total > 0 && (
-              <span className="text-xs text-zinc-500">{total} trial{total !== 1 ? "s" : ""}</span>
+              <span className="text-xs rounded-full px-2 py-0.5 bg-emerald-400/15 text-emerald-300">
+                Data collected · {total} trial{total !== 1 ? "s" : ""}
+              </span>
             )}
           </div>
         </div>

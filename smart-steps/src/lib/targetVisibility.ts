@@ -50,14 +50,9 @@ export function isMasteredPhase(phase?: string | null): boolean {
  * cards, the new-session target picker, the Session Snapshot "add goal"
  * picker).
  *
- * A mastered goal is finished clinical work — nobody is running trials on it
- * any more, so putting it in front of the person entering the session only
- * makes the real, open goals harder to find. Restricted viewers were already
- * never shown mastered goals (see RESTRICTED_VISIBLE_PHASES); this is the same
- * rule applied to BCBAs/Admins, but ONLY on the data-entry surfaces. Every
- * other view — Goals & Targets, analytics, reports, a session's own recorded
- * goals — still shows mastered goals, because that is where finished work is
- * meant to be read.
+ * Only goals in ACQUISITION (In Treatment) are offered — NEW goals haven't been
+ * started yet and shouldn't be mixed with active work; MASTERED goals are
+ * finished clinical work and nobody is running trials on them any more.
  *
  * The local store's `status` is checked as well: a locally-created goal that
  * has not been re-hydrated from the server can carry `status: "mastered"` with
@@ -67,7 +62,7 @@ export function isOpenForDataEntry(target: {
   phase?: string | null;
   status?: string | null;
 }): boolean {
-  return !isMasteredPhase(target.phase) && target.status !== "mastered";
+  return (target.phase === "ACQUISITION" || target.status === "active") && target.status !== "mastered";
 }
 
 /**
