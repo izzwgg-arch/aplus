@@ -1055,6 +1055,11 @@ export function ProgramsTab({
             // forever while every other user still sees it.
             if (localTarget.isActive === false) patch.isActive = true;
             if (localTarget.clientId !== clientId) patch.clientId = clientId;
+            // Reconcile the phase and status from the server so mastered goals
+            // (or any phase change made by another user) are always current.
+            if (localTarget.phase !== t.phase) patch.phase = t.phase as LocalTarget["phase"];
+            const expectedStatus = t.phase === "MASTERED" ? "mastered" : t.phase === "NEW" ? "new" : "active";
+            if (localTarget.status !== expectedStatus) patch.status = expectedStatus as LocalTarget["status"];
             if (Object.keys(patch).length > 0) updateTarget(localTarget.id, patch);
             continue;
           }
