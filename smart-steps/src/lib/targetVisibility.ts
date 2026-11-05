@@ -50,9 +50,9 @@ export function isMasteredPhase(phase?: string | null): boolean {
  * cards, the new-session target picker, the Session Snapshot "add goal"
  * picker).
  *
- * Only goals in ACQUISITION (In Treatment) are offered — NEW goals haven't been
- * started yet and shouldn't be mixed with active work; MASTERED goals are
- * finished clinical work and nobody is running trials on them any more.
+ * Excludes NEW goals (not started yet) and MASTERED goals (finished clinical
+ * work). Allows BASELINE, ACQUISITION, MAINTENANCE, GENERALIZATION — all
+ * active phases where trials can be collected.
  *
  * The local store's `status` is checked as well: a locally-created goal that
  * has not been re-hydrated from the server can carry `status: "mastered"` with
@@ -62,7 +62,7 @@ export function isOpenForDataEntry(target: {
   phase?: string | null;
   status?: string | null;
 }): boolean {
-  return (target.phase === "ACQUISITION" || target.status === "active") && target.status !== "mastered";
+  return !isMasteredPhase(target.phase) && target.phase !== "NEW" && target.status !== "mastered";
 }
 
 /**

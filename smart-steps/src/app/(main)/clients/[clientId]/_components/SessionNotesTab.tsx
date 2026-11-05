@@ -48,7 +48,11 @@ const BCBA_BADGE: Record<string, string> = {
 
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  // Extract YYYY-MM-DD without timezone interpretation
+  const datePart = iso.split('T')[0];
+  const [year, month, day] = datePart.split('-').map(Number);
+  // Create local date at midnight (not UTC) to avoid timezone shift
+  return new Date(year, month - 1, day).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
 /** Local "HH:MM" for a timestamp, matching how a typed note stores its times. */
