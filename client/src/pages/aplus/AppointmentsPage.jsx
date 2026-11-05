@@ -1739,6 +1739,16 @@ export default function AppointmentsPage() {
         api.get("/services", { params: { status: "active" } }),
         api.get("/providers", { params: { status: "active" } }),
       ]);
+      // DEBUG: Check if appointments have providerId
+      console.log("[DEBUG] Appointments loaded:", a.data.length);
+      if (a.data.length > 0) {
+        console.log("[DEBUG] First appointment:", {
+          id: a.data[0].id?.substring(0, 8),
+          providerId: a.data[0].providerId,
+          provider: a.data[0].provider?.fullName,
+          title: a.data[0].title
+        });
+      }
       setAppointments(a.data);
       // Always alphabetical — backend now sorts, but apply client-side as safety net
       setClients(
