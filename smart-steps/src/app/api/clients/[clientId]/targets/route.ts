@@ -55,9 +55,9 @@ export async function GET(
       if (!isForClient && t.subGoalId) {
         const subGoal = await prisma.parentGoal.findUnique({
           where: { id: t.subGoalId },
-          select: { parentGoal: { select: { clientId: true } } },
+          select: { clientId: true },
         });
-        if (subGoal?.parentGoal?.clientId === clientId) isForClient = true;
+        if (subGoal?.clientId === clientId) isForClient = true;
       }
 
       if (!isForClient && t.programId) {
