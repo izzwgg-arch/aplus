@@ -1695,10 +1695,23 @@ export default function AppointmentsPage() {
 
     // Filter by selected provider if one is chosen
     if (selectedProviderId) {
+      console.log(`[DEBUG] Filtering by provider: "${selectedProviderId}" (type: ${typeof selectedProviderId})`);
+
+      // Show unique provider IDs in the appointments
+      const uniqueProviderIds = [...new Set(appointments.map(a => a.providerId))];
+      console.log(`[DEBUG] Unique provider IDs in appointments:`, uniqueProviderIds);
+
       filtered = filtered.filter((a) => a.providerId === selectedProviderId);
-      // DEBUG: Log if no appointments matched
+      console.log(`[DEBUG] After filter: ${filtered.length} of ${appointments.length} appointments matched`);
+
       if (filtered.length === 0 && appointments.length > 0) {
-        console.warn(`[DEBUG] Provider filter for "${selectedProviderId}" found no matches. Sample appointment:`, appointments[0]);
+        console.warn(`[DEBUG] NO MATCHES! Selected provider: "${selectedProviderId}"`);
+        console.warn(`[DEBUG] Sample appointments:`, appointments.slice(0, 3).map(a => ({
+          id: a.id?.substring(0,8),
+          providerId: a.providerId,
+          providerName: a.provider?.fullName,
+          title: a.title
+        })));
       }
     }
 
