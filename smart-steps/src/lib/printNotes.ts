@@ -37,8 +37,12 @@ export type PrintableNote = {
 
 function fmtDate(iso: string | null | undefined): string {
   if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
+  // Extract YYYY-MM-DD without timezone interpretation
+  const datePart = iso.split('T')[0];
+  const [year, month, day] = datePart.split('-').map(Number);
+  if (Number.isNaN(year) || Number.isNaN(month) || Number.isNaN(day)) return "—";
+  // Create local date at midnight (not UTC) to avoid timezone shift
+  const d = new Date(year, month - 1, day);
   return d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
 }
 

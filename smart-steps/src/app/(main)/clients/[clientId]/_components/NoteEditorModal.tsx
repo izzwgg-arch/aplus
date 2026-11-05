@@ -82,6 +82,15 @@ const ATTENDANCE_OPTIONS = [
 
 /* ── Helper ─────────────────────────────────────────────────────────────────── */
 
+/** Format a date string (YYYY-MM-DD or ISO) without timezone shift.
+ *  Extracts the date part and creates a local date at midnight. */
+function formatDateNoShift(dateString: string | null | undefined): string {
+  if (!dateString) return "";
+  const datePart = dateString.split('T')[0];
+  const [year, month, day] = datePart.split('-').map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
 /** What `POST /api/clients/[clientId]/generate-bcba-note` returns. */
 type GeneratedNoteResponse = {
   title:           string;
@@ -357,9 +366,7 @@ export function NoteEditorModal({
   /* Auto-title — tracks the note-type dropdown until the user types their own */
   useEffect(() => {
     if (titleTouched) return;
-    const dateStr = serviceDate
-      ? new Date(serviceDate + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-      : "";
+    const dateStr = formatDateNoShift(serviceDate);
     const suffix = dateStr ? " – " + dateStr : "";
     if (type === "BT_SESSION")  setTitle(`BT Session Note${suffix}`);
     else if (type === "BCBA")   setTitle(`${bcbaServiceLabel(bcbaServiceType)} Note${suffix}`);
@@ -493,7 +500,7 @@ export function NoteEditorModal({
         setGenWarning(null);
         setGenInfo(
           data.sessions.length === 1
-            ? `Generated from ${only!.providerName}'s session on ${new Date(only!.startedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })} (${only!.trialCount} trial${only!.trialCount !== 1 ? "s" : ""}).`
+            ? `Generated from ${only!.providerName}'s session on ${formatDateNoShift(only!.startedAt)} (${only!.trialCount} trial${only!.trialCount !== 1 ? "s" : ""}).`
             : `Generated from ${data.sessions.length} sessions on this date.`
         );
       }
