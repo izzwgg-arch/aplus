@@ -28,26 +28,52 @@ export async function GET(
   const phaseWhere = targetPhaseWhere({ restricted, excludeMastered });
 
   try {
-    // Get all active targets that belong to this client, through any relationship.
-    // Explicitly apply phase filtering to each relationship branch to avoid Prisma
-    // interpretation issues with mixed AND/OR conditions.
-    const allTargets = await prisma.target.findMany({
+    // Simple approach: get ALL active targets in allowed phases, then filter
+    // by client connection after the fact to avoid Prisma query issues
+    const phaseTargets = await prisma.target.findMany({
       where: {
         isActive: true,
-        AND: [
-          { ...phaseWhere },
-          {
-            OR: [
-              // Via parentGoal hierarchy
-              { parentGoal: { clientId } },
-              // Via subGoal hierarchy
-              { subGoal: { parentGoal: { clientId } } },
-              // Via program directly
-              { program: { clientId } },
-            ],
-          },
-        ],
+        ...phaseWhere,
       },
+      select: { id: true, parentGoalId: true, subGoalId: true, programId: true },
+    });
+
+    // Filter to only those connected to this specific client
+    const clientConnectedIds = new Set<string>();
+
+    for (const t of phaseTargets) {
+      let isForClient = false;
+
+      if (t.parentGoalId) {
+        const parentGoal = await prisma.parentGoal.findUnique({
+          where: { id: t.parentGoalId },
+          select: { clientId: true },
+        });
+        if (parentGoal?.clientId === clientId) isForClient = true;
+      }
+
+      if (!isForClient && t.subGoalId) {
+        const subGoal = await prisma.parentGoal.findUnique({
+          where: { id: t.subGoalId },
+          select: { parentGoal: { select: { clientId: true } } },
+        });
+        if (subGoal?.parentGoal?.clientId === clientId) isForClient = true;
+      }
+
+      if (!isForClient && t.programId) {
+        const prog = await prisma.program.findUnique({
+          where: { id: t.programId },
+          select: { clientId: true },
+        });
+        if (prog?.clientId === clientId) isForClient = true;
+      }
+
+      if (isForClient) clientConnectedIds.add(t.id);
+    }
+
+    // Fetch full details for client-connected targets
+    const allTargets = await prisma.target.findMany({
+      where: { id: { in: Array.from(clientConnectedIds) } },
       include: {
         parentGoal: { select: { id: true, title: true, domain: true } },
         subGoal: {
