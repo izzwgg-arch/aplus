@@ -28,14 +28,21 @@ export async function GET(
   const phaseWhere = targetPhaseWhere({ restricted, excludeMastered });
 
   try {
-    // Targets via goal hierarchy
-    const goalTargets = await prisma.target.findMany({
+    // Get ALL active targets for this client in a single query, regardless of their hierarchy.
+    // Targets can be:
+    // 1. Under a goal (via parentGoalId or subGoalId)
+    // 2. Under a program (via programId with no parent/subgoal)
+    // Include them all in one query to avoid missing any.
+    const allTargets = await prisma.target.findMany({
       where: {
         isActive: true,
         ...phaseWhere,
         OR: [
+          // Via goal hierarchy
           { parentGoal: { clientId } },
           { subGoal: { parentGoal: { clientId } } },
+          // Via program
+          { program: { clientId } },
         ],
       },
       include: {
@@ -47,21 +54,6 @@ export async function GET(
             parentGoal: { select: { id: true, title: true, domain: true } },
           },
         },
-      },
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    });
-
-    // Targets via programs
-    const programTargets = await prisma.target.findMany({
-      where: {
-        isActive: true,
-        ...phaseWhere,
-        programId: { not: null },
-        program: { clientId },
-        parentGoalId: null,
-        subGoalId: null,
-      },
-      include: {
         program: { select: { id: true, name: true, domain: true } },
       },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
@@ -83,24 +75,43 @@ export async function GET(
       }>;
     }> = [];
 
-    // Group goal targets by parentGoal
-    const byGoal = new Map<string, typeof groups[0]>();
-    for (const t of goalTargets) {
-      const goalId = t.parentGoal?.id ?? t.subGoal?.parentGoal?.id ?? "unknown";
-      const goalTitle = t.parentGoal?.title ?? t.subGoal?.parentGoal?.title ?? "Unknown goal";
-      const domain = t.parentGoal?.domain ?? t.subGoal?.parentGoal?.domain;
+    // Group targets by their parent (goal hierarchy or program)
+    const byGroup = new Map<string, typeof groups[0]>();
 
-      if (!byGoal.has(goalId)) {
-        byGoal.set(goalId, {
-          groupId: goalId,
-          groupLabel: goalTitle,
-          groupType: "goal",
+    for (const t of allTargets) {
+      // Determine grouping: prefer goal hierarchy, fall back to program
+      const isGoalHierarchy = t.parentGoal || t.subGoal;
+      let groupId: string;
+      let groupLabel: string;
+      let groupType: "goal" | "program";
+      let domain: string | null | undefined;
+
+      if (isGoalHierarchy) {
+        groupId = t.parentGoal?.id ?? t.subGoal?.parentGoal?.id ?? "unknown";
+        groupLabel = t.parentGoal?.title ?? t.subGoal?.parentGoal?.title ?? "Unknown goal";
+        groupType = "goal";
+        domain = t.parentGoal?.domain ?? t.subGoal?.parentGoal?.domain;
+      } else if (t.program) {
+        groupId = t.program.id;
+        groupLabel = t.program.name;
+        groupType = "program";
+        domain = t.program.domain;
+      } else {
+        // Orphan target with no parent or program — skip or handle as uncategorized
+        continue;
+      }
+
+      if (!byGroup.has(groupId)) {
+        byGroup.set(groupId, {
+          groupId,
+          groupLabel,
+          groupType,
           domain,
           targets: [],
         });
       }
 
-      byGoal.get(goalId)!.targets.push({
+      byGroup.get(groupId)!.targets.push({
         id: t.id,
         definition: t.definition,
         targetType: t.targetType,
@@ -109,39 +120,12 @@ export async function GET(
         subGoalTitle: t.subGoal?.title ?? null,
       });
     }
-    groups.push(...byGoal.values());
 
-    // Group program targets by program
-    const byProgram = new Map<string, typeof groups[0]>();
-    for (const t of programTargets) {
-      const progId = t.program!.id;
-      const progName = t.program!.name;
-      const domain = t.program!.domain;
-
-      if (!byProgram.has(progId)) {
-        byProgram.set(progId, {
-          groupId: progId,
-          groupLabel: progName,
-          groupType: "program",
-          domain,
-          targets: [],
-        });
-      }
-
-      byProgram.get(progId)!.targets.push({
-        id: t.id,
-        definition: t.definition,
-        targetType: t.targetType,
-        phase: t.phase,
-        masteryRule: t.masteryRule,
-        subGoalTitle: null,
-      });
-    }
-    groups.push(...byProgram.values());
+    groups.push(...byGroup.values());
 
     return NextResponse.json({
       groups,
-      totalTargets: goalTargets.length + programTargets.length,
+      totalTargets: allTargets.length,
     });
   } catch (err) {
     console.error("GET /api/clients/[clientId]/targets error:", err);
