@@ -29,18 +29,23 @@ export async function GET(
 
   try {
     // Get all active targets that belong to this client, through any relationship.
-    // This is more reliable than two separate queries that might miss targets.
+    // Explicitly apply phase filtering to each relationship branch to avoid Prisma
+    // interpretation issues with mixed AND/OR conditions.
     const allTargets = await prisma.target.findMany({
       where: {
         isActive: true,
-        ...phaseWhere,
-        OR: [
-          // Via parentGoal hierarchy
-          { parentGoal: { clientId } },
-          // Via subGoal hierarchy
-          { subGoal: { parentGoal: { clientId } } },
-          // Via program directly
-          { program: { clientId } },
+        AND: [
+          { ...phaseWhere },
+          {
+            OR: [
+              // Via parentGoal hierarchy
+              { parentGoal: { clientId } },
+              // Via subGoal hierarchy
+              { subGoal: { parentGoal: { clientId } } },
+              // Via program directly
+              { program: { clientId } },
+            ],
+          },
         ],
       },
       include: {
