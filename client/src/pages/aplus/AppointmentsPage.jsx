@@ -1696,6 +1696,10 @@ export default function AppointmentsPage() {
     // Filter by selected provider if one is chosen
     if (selectedProviderId) {
       filtered = filtered.filter((a) => a.providerId === selectedProviderId);
+      // DEBUG: Log if no appointments matched
+      if (filtered.length === 0 && appointments.length > 0) {
+        console.warn(`[DEBUG] Provider filter for "${selectedProviderId}" found no matches. Sample appointment:`, appointments[0]);
+      }
     }
 
     if (view === "day") {
