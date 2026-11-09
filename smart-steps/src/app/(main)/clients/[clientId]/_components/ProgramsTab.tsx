@@ -987,7 +987,7 @@ export function ProgramsTab({
           createdAt?: string;
           updatedAt?: string;
         }>;
-      }> | null = await fetch(`/smart-steps/api/clients/${clientId}/goals`)
+      }> | null = await fetch(`/smart-steps/api/clients/${clientId}/goals?includeAllPhases=1`)
         .then((r) => (r.ok ? r.json() : null))
         .catch(() => null);
 

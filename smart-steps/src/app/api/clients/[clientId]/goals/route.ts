@@ -19,7 +19,9 @@ export async function GET(
   // (holding `.all`) see everything. See @/lib/targetVisibility for why this is
   // not restricted to ACQUISITION.
   const restricted = !(await hasAllScope(user.id, "smartsteps.goals.view"));
-  const targetPhaseWhere = restrictedPhaseWhere(restricted);
+  const url = new URL(req.url);
+  const includeAllPhases = url.searchParams.get("includeAllPhases") === "1";
+  const targetPhaseWhere = includeAllPhases ? {} : restrictedPhaseWhere(restricted);
 
   try {
     const goals = await prisma.parentGoal.findMany({
@@ -48,8 +50,10 @@ export async function GET(
     });
 
     // For restricted viewers, drop parent goals left with no visible targets
-    // (directly or via sub-goals) so fully-mastered goals stay hidden.
-    const result = restricted
+    // (directly or via sub-goals) so fully-mastered goals stay hidden. But when
+    // includeAllPhases=1 (hydration), return everything so reconciliation can update
+    // all goals including MASTERED ones.
+    const result = restricted && !includeAllPhases
       ? goals.filter((g) => g.targets.length > 0 || g.subGoals.some((sg) => sg.targets.length > 0))
       : goals;
 
