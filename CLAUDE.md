@@ -131,6 +131,21 @@ GENERALIZATION — everything active except `MASTERED`. Used by
 `/api/targets/[targetId]`. Do not re-add an ACQUISITION-only filter; if
 finished goals need hiding, extend the exclusion list in that one file.
 
+## Tracker BT goal sync — hydration fetches all phases (fixed 2026-11-09)
+
+When a BCBA changed a goal to MASTERED, BTs (restricted viewers) could not see
+the phase update even after reloading. The hydration effect in ProgramsTab
+fetched goals from `/api/clients/[clientId]/goals`, which filters MASTERED goals
+out of BT requests as intended for data entry views. But this meant the store
+never saw the phase change to reconcile it — the local cache kept the old phase,
+and clients with ALL goals MASTERED appeared completely empty.
+
+`GET /api/clients/[clientId]/goals` now accepts `?includeAllPhases=1` to bypass
+phase filtering. The hydration effect passes this flag so it retrieves all goals
+including MASTERED, allowing the store to stay current. Data-entry views still
+correctly filter MASTERED goals out via `isOpenForDataEntry()` for BTs, and the
+Goals & Targets tab shows all phases as intended.
+
 ## Tracker assessment reports — classic letterhead layout (2026-08-17)
 
 Report generation follows the approved Smart Steps assessment document (sample:
