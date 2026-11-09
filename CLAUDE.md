@@ -1462,9 +1462,9 @@ their note.
 - The session card chip tooltip and the snapshot's Supervision fact show the
   window in 12-hour form via `formatClockRange12h`.
 
-## Tracker session data — delete per-goal trial data (feature request, 2026-11-09)
+## Tracker session data — delete per-goal trial data (2026-11-09)
 
-**TODO:** Add ability to delete trial data for individual goals within a session if data was entered as an error, without deleting the entire session. Currently a BT can only delete an entire session or an individual trial; there should be a way to remove all trials for a specific goal in a session (e.g., "Clear all trials for Goal X" button on each goal card in the session snapshot). This preserves the session itself while allowing correction of mistaken goal entries.
+When viewing a session in the Session Snapshot drawer, users can delete all trial data for a specific goal without deleting the entire session. Each goal card in "Goals Worked" section displays the trials entered for that goal, and users can remove that goal's data if it was entered as an error. This preserves the session and other goals' data while allowing correction of mistaken entries.
 
 ## A+ Scheduling "page goes blank" — error boundary + error log (2026-09-17)
 
