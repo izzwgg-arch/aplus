@@ -34,6 +34,7 @@ import roleRoutes from "./routes/role.routes.js";
 import permissionRoutes from "./routes/permission.routes.js";
 import clientErrorRoutes from "./routes/clientErrors.routes.js";
 import transportationRoutes from "./routes/transportation.routes.js";
+import timesheetReconciliationRoutes from "./routes/timesheetReconciliation.routes.js";
 
 const app = express();
 app.set("trust proxy", 1);
@@ -104,6 +105,7 @@ app.use("/api/roles", roleRoutes);
 app.use("/api/permissions", permissionRoutes);
 app.use("/api/client-errors", clientErrorRoutes);
 app.use("/api/transportation", transportationRoutes);
+app.use("/api/timesheet-reconciliation", timesheetReconciliationRoutes);
 
 if (process.env.NODE_ENV === "production") {
   // Hashed assets (JS/CSS chunks) can be cached forever — their filenames change on every build.

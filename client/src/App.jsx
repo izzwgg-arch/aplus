@@ -26,6 +26,7 @@ const WaitlistPage = lazy(() => import("./pages/aplus/WaitlistPage"));
 const InvoicesPage = lazy(() => import("./pages/aplus/InvoicesPage"));
 const PaymentsPage = lazy(() => import("./pages/aplus/PaymentsPage"));
 const TransportationLogPage = lazy(() => import("./pages/aplus/TransportationLogPage"));
+const TimesheetReconciliationPage = lazy(() => import("./pages/aplus/TimesheetReconciliationPage"));
 const IntakeFormPage = lazy(() => import("./pages/aplus/IntakeFormPage"));
 const SettingsPage = lazy(() => import("./pages/aplus/SettingsPage"));
 const RemindersPage = lazy(() => import("./pages/aplus/RemindersPage"));
@@ -77,6 +78,7 @@ export default function App() {
           <Route path="invoices" element={<RequirePermission permission="aplus.billing.view_invoices"><InvoicesPage /></RequirePermission>} />
           <Route path="payments" element={<RequirePermission permission="aplus.billing.view_payment_history"><PaymentsPage /></RequirePermission>} />
           <Route path="transportation" element={<RequirePermission permission="aplus.billing.view_invoices"><TransportationLogPage /></RequirePermission>} />
+          <Route path="timesheet-reconciliation" element={<RequirePermission permission="aplus.billing.view_invoices"><TimesheetReconciliationPage /></RequirePermission>} />
           <Route path="intake" element={<RequirePermission permission="aplus.intake.view"><IntakeFormPage /></RequirePermission>} />
           <Route path="settings" element={<RequirePermission permission="aplus.settings.view"><SettingsPage /></RequirePermission>} />
           <Route path="settings/permissions" element={<RequirePermission permission="aplus.settings.manage_permissions"><PermissionsPage /></RequirePermission>} />
