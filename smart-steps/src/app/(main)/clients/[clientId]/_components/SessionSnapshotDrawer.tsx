@@ -322,6 +322,7 @@ export function SessionSnapshotDrawer({
   const canLogTrials = can("smartsteps.trials.create");
   const [trialTargetId, setTrialTargetId] = useState<string | null>(null);
   const [savingTrials, setSavingTrials]   = useState(false);
+  const [deletingGoalTrialsId, setDeletingGoalTrialsId] = useState<string | null>(null);
   const [trialForm, setTrialForm] = useState<{ result: string; promptLevel: string; count: number; notes: string }>(
     { result: "CORRECT", promptLevel: "", count: 1, notes: "" }
   );
@@ -430,6 +431,29 @@ export function SessionSnapshotDrawer({
       toast.error(String(e));
     } finally {
       setDeletingTrialId(null);
+    }
+  }
+
+  async function handleDeleteGoalTrials(targetId: string, trialCount: number) {
+    const ok = window.confirm(
+      `Delete all ${trialCount} trial${trialCount !== 1 ? "s" : ""} for this goal? The goal will remain on the session.`
+    );
+    if (!ok) return;
+
+    setDeletingGoalTrialsId(targetId);
+    try {
+      const res = await fetch(`/smart-steps/api/sessions/${sessionId}/targets/${targetId}/trials`, { method: "DELETE" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(err.error ?? "Failed to delete trials");
+      }
+      toast.success(`Deleted ${trialCount} trial${trialCount !== 1 ? "s" : ""}`);
+      qc.invalidateQueries({ queryKey: ["session-snapshot", sessionId] });
+      qc.invalidateQueries({ queryKey: ["sessions"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDeletingGoalTrialsId(null);
     }
   }
 
@@ -1143,16 +1167,29 @@ export function SessionSnapshotDrawer({
 
                               {/* -- Trial data for this goal -- */}
                               {canLogTrials && (
-                                <div className="mt-3">
-                                  <button
-                                    type="button"
-                                    onClick={() => (trialTargetId === item.targetId ? setTrialTargetId(null) : openTrialEntry(item.targetId))}
-                                    className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--glass-border)] px-2.5 py-1.5 text-[11px] font-semibold text-zinc-400 hover:border-[var(--accent-cyan)]/40 hover:text-[var(--accent-cyan)] transition-colors"
-                                  >
-                                    {trialTargetId === item.targetId
-                                      ? <><X className="h-3.5 w-3.5" /> Close</>
-                                      : <><Plus className="h-3.5 w-3.5" /> {item.trialCount === 0 ? "Add trial data" : "Add more trials"}</>}
-                                  </button>
+                                <>
+                                  <div className="mt-3 flex flex-wrap gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => (trialTargetId === item.targetId ? setTrialTargetId(null) : openTrialEntry(item.targetId))}
+                                      className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--glass-border)] px-2.5 py-1.5 text-[11px] font-semibold text-zinc-400 hover:border-[var(--accent-cyan)]/40 hover:text-[var(--accent-cyan)] transition-colors"
+                                    >
+                                      {trialTargetId === item.targetId
+                                        ? <><X className="h-3.5 w-3.5" /> Close</>
+                                        : <><Plus className="h-3.5 w-3.5" /> {item.trialCount === 0 ? "Add trial data" : "Add more trials"}</>}
+                                    </button>
+                                    {item.trialCount > 0 && canEditSession && (
+                                      <button
+                                        type="button"
+                                        disabled={deletingGoalTrialsId === item.targetId}
+                                        onClick={() => handleDeleteGoalTrials(item.targetId, item.trialCount)}
+                                        className="inline-flex items-center gap-1.5 rounded-xl border border-[var(--glass-border)] px-2.5 py-1.5 text-[11px] font-semibold text-zinc-400 hover:border-rose-500/40 hover:text-rose-400 disabled:opacity-50 transition-colors"
+                                        title="Delete all trial data for this goal"
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" /> Delete trials
+                                      </button>
+                                    )}
+                                  </div>
 
                                   <AnimatePresence>
                                     {trialTargetId === item.targetId && (
@@ -1247,7 +1284,7 @@ export function SessionSnapshotDrawer({
                                       </motion.div>
                                     )}
                                   </AnimatePresence>
-                                </div>
+                                </>
                               )}
                             </div>
                           </div>
