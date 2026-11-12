@@ -2104,19 +2104,28 @@ Audit of the `Appointment` table found:
 
 This prevents new appointments from entering the database unassigned to a provider. The existing 552 unassigned appointments remain in the database — they will show in "All Providers" view but not in individual provider calendars. If needed, these can be backfilled based on context (e.g., from session provider, from invoice provider), but that requires manual work per appointment or a migration script matching appointments to their correct provider from other records.
 
-## Tracker Goals & Targets — anomalous data structure (identified 2026-11-12)
+## Tracker Goals & Targets — direct-parent linking is standard clinic practice (audited 2026-11-12)
 
-Client **Usher Jakubowicz** has 30 active goals (Targets) that are structured differently from the norm:
-- **Normal structure**: Program (Category) → ParentGoal (Skill Area) → SubGoal (Sub-skill) → Target (Goal)
-- **Usher's structure**: Program (Category) → ParentGoal (Skill Area) → Target (Goal, **skipping SubGoal layer**)
+**Critical finding from clinic-wide audit (15 active clients):**
+- **13 of 15 clients (87%)** use direct-parent linking: Program → ParentGoal → Target (skipping SubGoal layer)
+- **Only 2 clients** use the normal hierarchy: Program → ParentGoal → SubGoal → Target
+- This is NOT an anomaly — it's the established pattern across the clinic
 
-All 30 of Usher's targets are in ACQUISITION phase and have `parentGoalId` set (linked directly to their ParentGoal/Skill Area), with `programId: null` (no Program-direct link). The API correctly returns them; hydration correctly maps them to the client store with `programId` pointing to their Skill Area ID. They should be visible in the Goals & Targets drill-down.
+**Examples**:
+| Client | Goals | Structure |
+|--------|-------|-----------|
+| Shlomo Schiff | 60 | 100% direct-parent (17 NEW) |
+| Shulem Ekstien | 30 | 100% direct-parent (21 NEW) |
+| Aron Wertzberger | 21 | 100% direct-parent (8 NEW) |
+| Usher Jakubowicz | 30 | 100% direct-parent (4 NEW) |
 
-**Verification**: database query confirmed 30 active targets, all linked to ParentGoals, all ACQUISITION phase. The server API endpoint `/api/clients/[clientId]/goals?includeAllPhases=1` returns the correct structure. The client-side `ProgramsTab` hydration code (line 1077) correctly adds them to the store with `programId: skillLocalId`.
+**Visibility issue**: Goals with direct-parent links are not showing in Goals & Targets drill-down for some users (e.g., Zlaty Weider sees Usher's goals in data-entry but NOT in Goals & Targets). Root causes:
+1. **Hydration effect may not be running** — `/api/clients/[clientId]/goals?includeAllPhases=1` not being called or not returning data
+2. **Network filter (Meshimer) blocking API calls** — requests never reach the server
+3. **Client-side filter not matching the linking pattern** — fixed 2026-11-12 but needs testing
 
-**If Usher's goals remain invisible**:
-1. Clear browser localStorage for the smart-steps store (key `smart-steps-aba`)
-2. Reload the page to trigger fresh hydration from the API
-3. If still invisible, check that the user's browser is not blocked by Meshimer or another network filter from reaching the API endpoints
+**Hotfix deployed 2026-11-12**: ProgramsTab now checks both `programId` (normal case) and attempts to match `parentGoalId` (direct-parent case), though LocalTarget doesn't have that field in practice.
 
-**Root cause remains TBD**: either the hydration effect is not running, or the API response is being blocked at the network level for some users. The data structure itself is benign and the code handles it correctly.
+**Proper fix needed**: Ensure hydration runs reliably for all users. The `/api/targets` endpoint provides a fallback that groups goals correctly by linking type (lines 116-120 of route.ts: if `parentGoal` exists, `groupType="goal"`, `groupId=parentGoal.id`). DataEntryTab already syncs these correctly (lines 659-660: `programId = groupId when groupType="goal"`).
+
+**Next steps**: Verify hydration is running for users with visibility issues. If `/api/targets` returns data correctly but hydration doesn't, add fallback fetch or ensure useEffect dependencies are correct.
