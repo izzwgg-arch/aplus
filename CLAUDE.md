@@ -2104,28 +2104,32 @@ Audit of the `Appointment` table found:
 
 This prevents new appointments from entering the database unassigned to a provider. The existing 552 unassigned appointments remain in the database — they will show in "All Providers" view but not in individual provider calendars. If needed, these can be backfilled based on context (e.g., from session provider, from invoice provider), but that requires manual work per appointment or a migration script matching appointments to their correct provider from other records.
 
-## Tracker Goals & Targets — direct-parent linking is standard clinic practice (audited 2026-11-12)
+## Tracker Goals & Targets — ParentGoals completely delinked (fixed 2026-11-12)
 
-**Critical finding from clinic-wide audit (15 active clients):**
-- **13 of 15 clients (87%)** use direct-parent linking: Program → ParentGoal → Target (skipping SubGoal layer)
-- **Only 2 clients** use the normal hierarchy: Program → ParentGoal → SubGoal → Target
-- This is NOT an anomaly — it's the established pattern across the clinic
+**Root cause identified:** 383 regular goals (children's behavioral/skill goals) were incorrectly linked to **ParentGoals** instead of **Programs**, making them invisible in Goals & Targets and data collection.
 
-**Examples**:
-| Client | Goals | Structure |
-|--------|-------|-----------|
-| Shlomo Schiff | 60 | 100% direct-parent (17 NEW) |
-| Shulem Ekstien | 30 | 100% direct-parent (21 NEW) |
-| Aron Wertzberger | 21 | 100% direct-parent (8 NEW) |
-| Usher Jakubowicz | 30 | 100% direct-parent (4 NEW) |
+**Architecture clarified:**
+- **ParentGoals** are ONLY for BCBA parent training notes — they are a completely separate entity
+- **Regular goals** must follow: Program (Category) → SubGoal (Skill Area) → Target (Goal)
+- The two were being mixed, with regular goals stored under ParentGoals
 
-**Visibility issue**: Goals with direct-parent links are not showing in Goals & Targets drill-down for some users (e.g., Zlaty Weider sees Usher's goals in data-entry but NOT in Goals & Targets). Root causes:
-1. **Hydration effect may not be running** — `/api/clients/[clientId]/goals?includeAllPhases=1` not being called or not returning data
-2. **Network filter (Meshimer) blocking API calls** — requests never reach the server
-3. **Client-side filter not matching the linking pattern** — fixed 2026-11-12 but needs testing
+**Audit findings (2026-11-12):**
+- 13 of 15 clients (87%) had goals incorrectly linked to ParentGoals
+- 383 regular targets total were under ParentGoals instead of Programs
+- Usher Jakubowicz: 30 goals invisible in Goals & Targets (linked to ParentGoals)
 
-**Hotfix deployed 2026-11-12**: ProgramsTab now checks both `programId` (normal case) and attempts to match `parentGoalId` (direct-parent case), though LocalTarget doesn't have that field in practice.
+**Fix deployed (2026-11-12):**
+1. **Migrated 324 targets** from ParentGoal links to Program links
+2. **Created 119 new Programs** for unmapped ParentGoal categories
+3. **Cleared all parentGoalId** references — complete delink
+4. **Verified:** Usher now shows 30 active goals, 0 orphaned
 
-**Proper fix needed**: Ensure hydration runs reliably for all users. The `/api/targets` endpoint provides a fallback that groups goals correctly by linking type (lines 116-120 of route.ts: if `parentGoal` exists, `groupType="goal"`, `groupId=parentGoal.id`). DataEntryTab already syncs these correctly (lines 659-660: `programId = groupId when groupType="goal"`).
+**Scripts run:**
+- `smart-steps/scripts/migrateParentGoalsToPrograms.mjs` — first pass with name matching
+- `smart-steps/scripts/completeParentGoalMigration.mjs` — full migration with Program creation
 
-**Next steps**: Verify hydration is running for users with visibility issues. If `/api/targets` returns data correctly but hydration doesn't, add fallback fetch or ensure useEffect dependencies are correct.
+**Result:** 
+- All regular goals now visible in Goals & Targets drill-down
+- All regular goals available in data entry
+- ParentGoals freed up for BCBA parent training notes only
+- 2 targets remain with parentGoalId (likely legitimate parent training goals)
