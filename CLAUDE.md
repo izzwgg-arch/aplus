@@ -2103,3 +2103,20 @@ Audit of the `Appointment` table found:
 - The calendar's provider filter dropdown (`CalendarToolbar`) passes `visibleCount` and `totalCount` and uses them to display the filtered count
 
 This prevents new appointments from entering the database unassigned to a provider. The existing 552 unassigned appointments remain in the database — they will show in "All Providers" view but not in individual provider calendars. If needed, these can be backfilled based on context (e.g., from session provider, from invoice provider), but that requires manual work per appointment or a migration script matching appointments to their correct provider from other records.
+
+## Tracker Goals & Targets — anomalous data structure (identified 2026-11-12)
+
+Client **Usher Jakubowicz** has 30 active goals (Targets) that are structured differently from the norm:
+- **Normal structure**: Program (Category) → ParentGoal (Skill Area) → SubGoal (Sub-skill) → Target (Goal)
+- **Usher's structure**: Program (Category) → ParentGoal (Skill Area) → Target (Goal, **skipping SubGoal layer**)
+
+All 30 of Usher's targets are in ACQUISITION phase and have `parentGoalId` set (linked directly to their ParentGoal/Skill Area), with `programId: null` (no Program-direct link). The API correctly returns them; hydration correctly maps them to the client store with `programId` pointing to their Skill Area ID. They should be visible in the Goals & Targets drill-down.
+
+**Verification**: database query confirmed 30 active targets, all linked to ParentGoals, all ACQUISITION phase. The server API endpoint `/api/clients/[clientId]/goals?includeAllPhases=1` returns the correct structure. The client-side `ProgramsTab` hydration code (line 1077) correctly adds them to the store with `programId: skillLocalId`.
+
+**If Usher's goals remain invisible**:
+1. Clear browser localStorage for the smart-steps store (key `smart-steps-aba`)
+2. Reload the page to trigger fresh hydration from the API
+3. If still invisible, check that the user's browser is not blocked by Meshimer or another network filter from reaching the API endpoints
+
+**Root cause remains TBD**: either the hydration effect is not running, or the API response is being blocked at the network level for some users. The data structure itself is benign and the code handles it correctly.
