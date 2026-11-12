@@ -1103,7 +1103,10 @@ export function ProgramsTab({
 
   const skillItems = useMemo<SkillItem[]>(() => {
     const items: SkillItem[] = categorySkills.map((skill) => {
-      const relatedGoals = goals.filter((goal) => goal.programId === skill.id);
+      // Goals can be linked to a skill via programId (the normal case, which is set to the
+      // skill/ParentGoal id during hydration), or via the original server parentGoalId when
+      // goals are fetched directly from the /api/targets endpoint. Both patterns should match.
+      const relatedGoals = goals.filter((goal) => goal.programId === skill.id || (goal as any).parentGoalId === skill.id);
       return {
         id: skill.id,
         name: skill.name,
@@ -1130,8 +1133,9 @@ export function ProgramsTab({
 
   const visibleGoals = useMemo(() => {
     if (view.level !== "goals" && view.level !== "goal") return [];
-    if (isUnassignedSkillId(view.skillId)) return goals.filter((goal) => goal.categoryId === view.categoryId && !goal.programId);
-    return goals.filter((goal) => goal.programId === view.skillId);
+    if (isUnassignedSkillId(view.skillId)) return goals.filter((goal) => goal.categoryId === view.categoryId && !goal.programId && !(goal as any).parentGoalId);
+    // Goals can be linked to a skill via programId or parentGoalId (both resolve to the skill id)
+    return goals.filter((goal) => goal.programId === view.skillId || (goal as any).parentGoalId === view.skillId);
   }, [goals, view]);
 
   async function cloneGoal(goal: LocalTarget) {
