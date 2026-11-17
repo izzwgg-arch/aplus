@@ -1495,6 +1495,17 @@ their note.
 - The session card chip tooltip and the snapshot's Supervision fact show the
   window in 12-hour form via `formatClockRange12h`.
 
+## Tracker Sessions tab shows load ERRORS, not an empty list (2026-11-17)
+
+`SessionsTab`'s query used to `return []` on any failure, so a blocked,
+refused or logged-out request rendered "No sessions recorded yet" — reported as
+"Risi Weiss has no sessions" on one PC while the server log showed the same
+login getting all 50 elsewhere. The query now THROWS a plain-English reason
+(never reached the server / login expired / no access / HTTP status / not a
+session list) and the tab shows "Sessions could not be loaded" with that reason
+and a Try again button. Goals still render on such a PC because the Goals tab
+draws from the persisted local store; sessions are always fetched live.
+
 ## Tracker session data — delete per-goal trial data (2026-11-09)
 
 When viewing a session in the Session Snapshot drawer, users can delete all trial data for a specific goal without deleting the entire session. Each goal card in "Goals Worked" section displays the trials entered for that goal, and users can remove that goal's data if it was entered as an error. This preserves the session and other goals' data while allowing correction of mistaken entries.

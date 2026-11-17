@@ -5,7 +5,7 @@ import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-quer
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Activity, Calendar, Clock, Eye, FileCheck2, FilePlus2, Filter, Target as TargetIcon,
-  Trash2, User, X, Zap, StickyNote,
+  Trash2, User, X, Zap, StickyNote, AlertTriangle, RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -137,6 +137,9 @@ export function SessionsTab({
   const {
     data,
     isLoading,
+    isError,
+    error,
+    refetch,
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
@@ -156,9 +159,20 @@ export function SessionsTab({
       if (filters.withData) params.set("withData", "1");
       if (filters.hasNote) params.set("hasNote", filters.hasNote);
       if (filters.supervised) params.set("supervised", filters.supervised);
-      const res = await fetch(`/smart-steps/api/sessions?${params}`);
-      if (!res.ok) return [] as SessionListItem[];
-      return (await res.json()) as SessionListItem[];
+      // A failure must surface as an error, never as an empty list: "No sessions
+      // recorded yet" for a request that was blocked or refused hides the problem.
+      let res: Response;
+      try {
+        res = await fetch(`/smart-steps/api/sessions?${params}`);
+      } catch {
+        throw new Error("The request never reached the server (no connection, or blocked by a browser extension such as an ad blocker).");
+      }
+      if (res.status === 401) throw new Error("Your login has expired. Sign out and sign in again.");
+      if (res.status === 403) throw new Error("This account does not have access to this client's sessions.");
+      if (!res.ok) throw new Error(`The server answered with an error (${res.status}).`);
+      const body = await res.json().catch(() => null);
+      if (!Array.isArray(body)) throw new Error("The server sent back something other than a session list (often a login page).");
+      return body as SessionListItem[];
     },
     getNextPageParam: (lastPage, allPages) =>
       lastPage.length === SESSIONS_PAGE_SIZE ? allPages.length * SESSIONS_PAGE_SIZE : undefined,
@@ -342,6 +356,19 @@ export function SessionsTab({
       {isLoading ? (
         <div className="space-y-2">
           {[1, 2, 3].map((i) => <div key={i} className="glass-card skeleton h-24 rounded-2xl" />)}
+        </div>
+      ) : isError && sessions.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-rose-400/50 py-12 text-center">
+          <AlertTriangle className="mx-auto mb-3 h-10 w-10 text-rose-400" />
+          <p className="mb-1 font-medium text-rose-500">Sessions could not be loaded</p>
+          <p className="mx-auto max-w-md text-sm text-zinc-400">{error instanceof Error ? error.message : String(error)}</p>
+          <button
+            type="button"
+            onClick={() => refetch()}
+            className="mt-4 inline-flex items-center gap-2 rounded-xl border border-[var(--glass-border)] px-5 py-2.5 text-sm text-zinc-400 hover:text-zinc-200"
+          >
+            <RefreshCw className="h-4 w-4" /> Try again
+          </button>
         </div>
       ) : sessions.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-[var(--glass-border)] py-12 text-center">
