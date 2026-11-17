@@ -32,6 +32,18 @@ this order:
    whenever possible; if any are made after deploying, commit and push them
    too. The working tree must end clean.
 
+## Tracker NextAuth basePath required for JWT cookies (fixed 2026-11-17)
+
+**Issue:** Sessions API returned 302 redirects to login even when user was authenticated. All `/api/` calls failed silently because the JWT session cookie was never created.
+
+**Root cause:** `smart-steps/src/auth.config.ts` was missing the `basePath` property. Without it, NextAuth doesn't know which path to set cookies on, so the JWT session cookie is never stored in the browser. Every API call to a protected route finds no cookie, fails auth check, and redirects to login.
+
+**Fix:** Added `basePath: "/smart-steps"` to `authConfig`. NextAuth automatically appends `/api/auth` to create handlers at `/smart-steps/api/auth`, and cookies are now set with the correct domain/path so the browser stores them.
+
+**Verification:** After fix, JWT session cookies appear in browser (`__Secure-authjs.session-token`), API calls authenticate successfully, and all data loads (sessions, goals, notes, etc.).
+
+**Service worker caching note:** Browser may serve stale code after deployment due to aggressive service worker caching. Force fresh load: DevTools → Application → Storage → Clear site data, then hard-reload (Ctrl+Shift+R) or navigate to a fresh page (dashboard → client page).
+
 ## Rule 1: Read the MD files first
 
 At the start of **every task**, before doing anything else, read this file and any
