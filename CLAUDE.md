@@ -36,11 +36,17 @@ this order:
 
 **Issue:** Sessions API returned 302 redirects to login even when user was authenticated. All `/api/` calls failed silently because the JWT session cookie was never created.
 
-**Root cause:** `smart-steps/src/auth.config.ts` was missing the `basePath` property. Without it, NextAuth doesn't know which path to set cookies on, so the JWT session cookie is never stored in the browser. Every API call to a protected route finds no cookie, fails auth check, and redirects to login.
+**Root cause — three missing pieces:**
+1. `smart-steps/src/auth.config.ts` was missing the `basePath` property. Without it, NextAuth doesn't know which path to set cookies on, so the JWT session cookie is never stored in the browser.
+2. `smart-steps/src/middleware.ts` was protecting `/smart-steps/api/auth` routes because the matcher excluded only `/api/auth` (without the basePath prefix).
+3. `.env.local` had `NEXTAUTH_URL=https://app.apluscenterinc.org/api/auth` without the `/smart-steps` basePath, causing NextAuth to report `env-url-basepath-mismatch` and return 400 errors.
 
-**Fix:** Added `basePath: "/smart-steps"` to `authConfig`. NextAuth automatically appends `/api/auth` to create handlers at `/smart-steps/api/auth`, and cookies are now set with the correct domain/path so the browser stores them.
+**Fix:** 
+1. Added `basePath: "/smart-steps"` to `authConfig` in `smart-steps/src/auth.config.ts` — NextAuth automatically appends `/api/auth` to create handlers at `/smart-steps/api/auth`.
+2. Updated `smart-steps/src/middleware.ts` matcher to exclude both `/api/auth` and `/smart-steps/api/auth`, so auth handlers are never protected.
+3. Set `NEXTAUTH_URL=https://app.apluscenterinc.org/smart-steps/api/auth` in `.env.local` on the server (`/var/www/aplus2/smart-steps/.env.local`), matching the basePath.
 
-**Verification:** After fix, JWT session cookies appear in browser (`__Secure-authjs.session-token`), API calls authenticate successfully, and all data loads (sessions, goals, notes, etc.).
+**Verification:** After all three fixes, JWT session cookies appear in browser (`__Secure-authjs.session-token`), API calls authenticate successfully, and all data loads (sessions, goals, notes, etc.). Sessions tab now displays data instead of "No sessions recorded yet".
 
 **Service worker caching note:** Browser may serve stale code after deployment due to aggressive service worker caching. Force fresh load: DevTools → Application → Storage → Clear site data, then hard-reload (Ctrl+Shift+R) or navigate to a fresh page (dashboard → client page).
 
