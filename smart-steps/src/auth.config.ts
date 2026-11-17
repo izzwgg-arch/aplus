@@ -30,7 +30,7 @@ function isPublicPath(path: string): boolean {
 }
 
 export const authConfig: NextAuthConfig = {
-  basePath: `${APP_BASEPATH}/api/auth`,
+  basePath: APP_BASEPATH,
   providers: [], // Credentials provider added in auth.ts (server-only)
   pages: {
     signIn: "/smart-steps/login",
