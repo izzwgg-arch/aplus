@@ -2122,32 +2122,61 @@ Audit of the `Appointment` table found:
 
 This prevents new appointments from entering the database unassigned to a provider. The existing 552 unassigned appointments remain in the database — they will show in "All Providers" view but not in individual provider calendars. If needed, these can be backfilled based on context (e.g., from session provider, from invoice provider), but that requires manual work per appointment or a migration script matching appointments to their correct provider from other records.
 
-## Tracker Goals & Targets — ParentGoals completely delinked (fixed 2026-11-12)
+## Tracker goal hierarchy — what the tables MEAN (restored 2026-11-17)
 
-**Root cause identified:** 383 regular goals (children's behavioral/skill goals) were incorrectly linked to **ParentGoals** instead of **Programs**, making them invisible in Goals & Targets and data collection.
+**The `ParentGoal` model IS the skill area.** Its name is misleading; it has
+nothing to do with parent training (that is `ParentTrainingGoal`, a separate
+model and tab). The Goals & Targets tab reads exactly this:
 
-**Architecture clarified:**
-- **ParentGoals** are ONLY for BCBA parent training notes — they are a completely separate entity
-- **Regular goals** must follow: Program (Category) → SubGoal (Skill Area) → Target (Goal)
-- The two were being mixed, with regular goals stored under ParentGoals
+| UI | DB model | Link |
+| --- | --- | --- |
+| Category | `Program` (`isActive`) | `ParentGoal.programId` |
+| Skill Area | `ParentGoal` (`status != ARCHIVED`) | `Target.parentGoalId` |
+| Goal | `Target` (`isActive`, `subGoalId: null`) | — |
 
-**Audit findings (2026-11-12):**
-- 13 of 15 clients (87%) had goals incorrectly linked to ParentGoals
-- 383 regular targets total were under ParentGoals instead of Programs
-- Usher Jakubowicz: 30 goals invisible in Goals & Targets (linked to ParentGoals)
+`GET /api/clients/[clientId]/goals` returns skill areas with their DIRECT
+targets (`subGoalId: null`); ProgramsTab's hydration reads only those. A goal
+under a `SubGoal`, or with only `Target.programId` set, does not appear in the
+drill-down. `SubGoal` is unused by the UI.
 
-**Fix deployed (2026-11-12):**
-1. **Migrated 324 targets** from ParentGoal links to Program links
-2. **Created 119 new Programs** for unmapped ParentGoal categories
-3. **Cleared all parentGoalId** references — complete delink
-4. **Verified:** Usher now shows 30 active goals, 0 orphaned
+**What went wrong (2026-11-12 .. 11-17).** A misreading of the model name
+("ParentGoals are only for parent training") drove three stacked prod
+migrations that emptied every skill area clinic-wide:
 
-**Scripts run:**
-- `smart-steps/scripts/migrateParentGoalsToPrograms.mjs` — first pass with name matching
-- `smart-steps/scripts/completeParentGoalMigration.mjs` — full migration with Program creation
+1. `completeParentGoalMigration.mjs` moved every goal off its skill area onto a
+   Program named after that skill area (creating 119 fake categories,
+   description `Created from ParentGoal "<title>"`).
+2. `fixGoalHierarchy.mjs` wrapped each of those goals in a NEW skill area
+   titled with the goal sentence (`Auto-created skill area for: …`) — goals
+   showed up as skill areas with 0 goals.
+3. A follow-up moved them under new `SubGoal`s
+   (`Auto-migrated from orphaned link`), which the tab does not read at all.
 
-**Result:** 
-- All regular goals now visible in Goals & Targets drill-down
-- All regular goals available in data entry
-- ParentGoals freed up for BCBA parent training notes only
-- 2 targets remain with parentGoalId (likely legitimate parent training goals)
+**Restored 2026-11-17** with `smart-steps/scripts/restoreSkillAreaLinks.mjs`
+(dry run by default, `--apply`, `--client <id>`). No DB backup existed, so it
+follows the trail the migrations left: Target → SubGoal → goal-named skill
+area → Program whose name == the ORIGINAL skill area title → that skill area.
+All 364 affected goals were placed: 327 traced to their original skill area,
+3 to the earliest of a duplicated title, 2 put back where step 3 found them,
+and 22 that had sat directly on a category went into a new skill area named
+after the category (e.g. "Challenging Behavior > Challenging Behavior" —
+rename in the app if needed). The emptied scaffolding was archived, not
+deleted: 364 sub-goals, 362 goal-named skill areas, 89 fake categories
+(`isActive: false`). Pre-change backup of every touched row:
+`/root/restore-skill-areas-1794950566225.json` on the server. The three
+migration scripts (plus `delinkParentGoalsFromTargets.mjs`) were removed from
+the repo so they cannot be re-run.
+
+After the restore, 362 of 388 active goals sit in Category > Skill Area. The
+rest predate all this: Izzy Weinstock's legacy program-direct/test goals
+(decision still pending) and 20 goals from July with no parent and no client
+at all, zero trials — left alone.
+
+**ProgramsTab hydration now prunes categories and skill areas** the server no
+longer returns (`staleServerRowIds`, same rule as targets; unsynced local rows
+are never pruned). Before this, archived skill areas and fake categories
+stayed in every browser's persisted store forever.
+
+**Before any bulk hierarchy migration: read `GET /api/clients/[id]/goals` and
+ProgramsTab's hydration first, dry-run per client, and check the result in the
+Goals & Targets tab — not just a row count.**

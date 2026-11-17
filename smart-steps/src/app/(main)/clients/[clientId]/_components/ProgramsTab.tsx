@@ -969,6 +969,11 @@ export function ProgramsTab({
             synced: true,
           });
         });
+        // Hydration only ever ADDED rows, so a category deleted or archived on the
+        // server (or on another device) stayed in this persisted store forever.
+        const liveCategoryIds = new Set(programs.map((p) => p.id));
+        const { categories: afterCats, removeCategory: dropCategory } = useABAStore.getState();
+        for (const staleId of staleServerRowIds(afterCats, clientId, liveCategoryIds)) dropCategory(staleId);
       }
 
       // 2. Fetch skill areas (ParentGoals) and their direct targets
@@ -1085,6 +1090,12 @@ export function ProgramsTab({
           });
         }
       }
+
+      // Same for skill areas: the endpoint returns every non-archived one (all
+      // phases), so a server-backed skill area it omits has been archived.
+      const liveSkillIds = new Set(serverGoals.map((g) => g.id));
+      const { programs: afterSkills, removeProgram: dropSkill } = useABAStore.getState();
+      for (const staleId of staleServerRowIds(afterSkills, clientId, liveSkillIds)) dropSkill(staleId);
     }
 
     hydrate();
