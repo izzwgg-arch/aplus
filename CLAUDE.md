@@ -1506,6 +1506,16 @@ session list) and the tab shows "Sessions could not be loaded" with that reason
 and a Try again button. Goals still render on such a PC because the Goals tab
 draws from the persisted local store; sessions are always fetched live.
 
+**Root cause on that PC: the Meshimer internet filter.** The error box (which
+prints status, content type, length and the first 120 chars of what the
+browser received) showed `200 text/html` titled "Meshimer - Access
+Restricted" — the filter replaced the session JSON with its block page, while
+nginx logged the server sending the real 31 KB list. The page URL (containing
+"sessions") and the goals loaded fine, so it is likely content-triggered. Fix
+is on the PC: whitelist `app.apluscenterinc.org` in Meshimer. When a feature
+"works on one PC, not another" and the server log shows 200s, suspect the
+filter first.
+
 ## Tracker session data — delete per-goal trial data (2026-11-09)
 
 When viewing a session in the Session Snapshot drawer, users can delete all trial data for a specific goal without deleting the entire session. Each goal card in "Goals Worked" section displays the trials entered for that goal, and users can remove that goal's data if it was entered as an error. This preserves the session and other goals' data while allowing correction of mistaken entries.
