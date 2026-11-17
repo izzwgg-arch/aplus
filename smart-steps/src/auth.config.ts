@@ -30,7 +30,7 @@ function isPublicPath(path: string): boolean {
 }
 
 export const authConfig: NextAuthConfig = {
-  // basePath is derived from AUTH_URL env var pathname: /api/auth (matches what Next.js delivers to handlers after stripping basePath /smart-steps)
+  basePath: `${APP_BASEPATH}/api/auth`,
   providers: [], // Credentials provider added in auth.ts (server-only)
   pages: {
     signIn: "/smart-steps/login",
