@@ -170,8 +170,14 @@ export function SessionsTab({
       if (res.status === 401) throw new Error("Your login has expired. Sign out and sign in again.");
       if (res.status === 403) throw new Error("This account does not have access to this client's sessions.");
       if (!res.ok) throw new Error(`The server answered with an error (${res.status}).`);
-      const body = await res.json().catch(() => null);
-      if (!Array.isArray(body)) throw new Error("The server sent back something other than a session list (often a login page).");
+      const text = await res.text();
+      let body: unknown = null;
+      try { body = JSON.parse(text); } catch { /* reported below */ }
+      if (!Array.isArray(body)) {
+        // Exactly what this browser received, so a per-PC failure can be identified from a screenshot.
+        const detail = `[${res.status} ${res.headers.get("content-type") ?? "no type"}, ${text.length} chars${res.redirected ? `, redirected to ${res.url}` : ""}] ${text.slice(0, 120)}`;
+        throw new Error(`The server sent back something other than a session list (often a login page). ${detail}`);
+      }
       return body as SessionListItem[];
     },
     getNextPageParam: (lastPage, allPages) =>
