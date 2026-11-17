@@ -66,8 +66,8 @@ function SidebarContent({
   const pathname = usePathname();
   const router = useRouter();
   const { data: session } = useSession();
-  const { canAny } = usePermissions();
-  const visibleNav = NAV.filter((item) => canAny(item.anyOf));
+  const { canAny, isLoading } = usePermissions();
+  const visibleNav = !isLoading ? NAV.filter((item) => canAny(item.anyOf)) : NAV;
 
   return (
     <>
