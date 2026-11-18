@@ -1515,6 +1515,13 @@ nginx logged the server sending the real 31 KB list. The page URL (containing
 is on the PC: whitelist `app.apluscenterinc.org` in Meshimer. When a feature
 "works on one PC, not another" and the server log shows 200s, suspect the
 filter first.
+The user reports the site IS already whitelisted in Meshimer and it still
+blocks — and only for this one client. Her session-list response carries no
+free text (ids, dates, three staff names, roles, "DTT"), and a scan of every
+client's list found no blocklist-style word in hers, so the trigger is
+Meshimer-side and unknown. The error box now shows the block page's READABLE
+text (up to 800 chars) so Meshimer's stated reason can be read off a
+screenshot.
 
 ## Tracker session data — delete per-goal trial data (2026-11-09)
 

@@ -175,7 +175,16 @@ export function SessionsTab({
       try { body = JSON.parse(text); } catch { /* reported below */ }
       if (!Array.isArray(body)) {
         // Exactly what this browser received, so a per-PC failure can be identified from a screenshot.
-        const detail = `[${res.status} ${res.headers.get("content-type") ?? "no type"}, ${text.length} chars${res.redirected ? `, redirected to ${res.url}` : ""}] ${text.slice(0, 120)}`;
+        // A filter's block page (e.g. Meshimer) usually states its reason in the page text, so show
+        // the READABLE text, not the first bytes of HTML.
+        const readable = text
+          .replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ")
+          .replace(/<[^>]+>/g, " ")
+          .replace(/&nbsp;/g, " ")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 800);
+        const detail = `[${res.status} ${res.headers.get("content-type") ?? "no type"}, ${text.length} chars${res.redirected ? `, redirected to ${res.url}` : ""}] ${readable || text.slice(0, 120)}`;
         throw new Error(`The server sent back something other than a session list (often a login page). ${detail}`);
       }
       return body as SessionListItem[];
@@ -367,7 +376,7 @@ export function SessionsTab({
         <div className="rounded-2xl border border-dashed border-rose-400/50 py-12 text-center">
           <AlertTriangle className="mx-auto mb-3 h-10 w-10 text-rose-400" />
           <p className="mb-1 font-medium text-rose-500">Sessions could not be loaded</p>
-          <p className="mx-auto max-w-md text-sm text-zinc-400">{error instanceof Error ? error.message : String(error)}</p>
+          <p className="mx-auto max-w-md break-words text-sm text-zinc-400">{error instanceof Error ? error.message : String(error)}</p>
           <button
             type="button"
             onClick={() => refetch()}
