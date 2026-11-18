@@ -12,7 +12,7 @@ import {
   ArrowLeft, BookOpen, Brain, Calendar, ChevronRight, ClipboardList, Edit2,
   FileText, Target, TrendingUp, User, Share2, Play, Layers,
   CheckCircle2, Circle, Star, Plus, Activity, StickyNote,
-  BarChart2, LayoutGrid, Zap,
+  BarChart2, LayoutGrid, Zap, Archive,
 } from "lucide-react";
 import { useState, Suspense, Component, type ReactNode, type ErrorInfo } from "react";
 import { toast } from "sonner";
@@ -40,6 +40,7 @@ type ClientDetail = {
   guardianEmail?: string | null;
   guardianPhone?: string | null;
   school?: string | null;
+  isArchived?: boolean;
   assignedRbt?: string;
   assignedBcba?: string;
   masteredTargets: number;
@@ -263,6 +264,31 @@ function ClientHubInner() {
   const [generatingLink, setGeneratingLink] = useState(false);
   const [selectedTarget, setSelectedTarget] = useState<TargetPanelData | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [restoring, setRestoring] = useState(false);
+  const canArchiveClient = canAny(["smartsteps.clients.archive"]);
+
+  async function restoreClient() {
+    if (!confirm("Restore this client? They will appear in the active client list again.")) return;
+    setRestoring(true);
+    try {
+      const res = await fetch(`/smart-steps/api/clients/${clientId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isArchived: false }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? "Failed to restore client");
+      }
+      toast.success("Client restored");
+      qc.invalidateQueries({ queryKey: ["client", clientId] });
+      qc.invalidateQueries({ queryKey: ["clients"] });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to restore client");
+    } finally {
+      setRestoring(false);
+    }
+  }
 
   function setTab(t: TabId) {
     router.replace(`/clients/${clientId}?tab=${t}`, { scroll: false });
@@ -427,6 +453,30 @@ function ClientHubInner() {
           </button>
         </div>
       </motion.div>
+
+      {client.isArchived && (
+        <div className="mb-6 flex flex-col gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <Archive className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
+            <div>
+              <p className="text-sm font-semibold text-amber-400">This client is archived</p>
+              <p className="text-xs text-zinc-400">
+                All goals, sessions, notes and reports are kept. The client is hidden from the active client list and from client pickers.
+              </p>
+            </div>
+          </div>
+          {canArchiveClient && (
+            <button
+              type="button"
+              onClick={restoreClient}
+              disabled={restoring}
+              className="shrink-0 rounded-xl border border-amber-500/40 px-4 py-2 text-sm font-semibold text-amber-400 hover:bg-amber-500/15 transition-colors disabled:opacity-60"
+            >
+              {restoring ? "Restoring…" : "Restore client"}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* ── Progress banner ── */}
       <motion.div

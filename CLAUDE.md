@@ -2053,6 +2053,34 @@ clinical data, and that guard was verified by running the Rivka merge backwards
 first (correctly refused, naming the 213 sessions). It writes a `USER_MERGED`
 audit entry recording the dropped id, its email, and the new address.
 
+## Tracker client archive (2026-11-18)
+
+`Client.isArchived` and an "Archive client" button on the edit page already
+existed, but the archive was a one-way trapdoor: `GET /api/clients` always
+filtered `isArchived: false`, so the Clients page's "Show archived" toggle
+(shown only when the count was > 0) could never appear, and nothing could
+un-archive.
+
+- **`GET /api/clients?includeArchived=1`** returns archived clients too. The
+  DEFAULT still excludes them, because every client picker in the app reads
+  this endpoint and must never offer an archived child. Only the Clients page
+  passes the flag (query key `["clients", "withArchived"]`; invalidating
+  `["clients"]` still refreshes it by prefix).
+- **Clients page** has **Active (n) / Archived (n)** tabs; archived cards carry
+  an amber "Archived" chip. Search applies within the selected tab.
+- **Restore** is on the client page (amber "This client is archived" banner
+  with a Restore button) and on the edit page (the Archive card flips to
+  "Restore client").
+- **Archiving / restoring requires `smartsteps.clients.archive`** (BCBA +
+  ADMIN), enforced in `PATCH /api/clients/[clientId]` whenever the body
+  carries `isArchived`, on top of the edit access already checked. The UI
+  hides the buttons without it. Each actual change writes a
+  `CLIENT_ARCHIVED` / `CLIENT_RESTORED` audit entry.
+- Nothing is deleted or rewritten on archive; sessions, goals, notes and
+  reports stay attached. The dashboard's client count already excluded
+  archived clients. `GET /api/clients`' "last session" now also ignores
+  soft-deleted sessions.
+
 ## Rule 5: Deploy (step 3 of the Rule 0 end-of-task sequence)
 
 ### Smart Steps ABA Tracker (git-based, re-wired 2026-08-13)

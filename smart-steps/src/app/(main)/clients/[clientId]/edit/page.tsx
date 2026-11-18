@@ -7,6 +7,8 @@ import { motion } from "framer-motion";
 import { ArrowLeft, Plus, X, UserPlus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { parseDob, DOB_ERROR, MIN_DOB_YEAR, todayDateInputValue } from "@/lib/dob";
+import { usePermissions } from "@/hooks/usePermissions";
+import { useQueryClient } from "@tanstack/react-query";
 
 const COMMON_DIAGNOSES = ["ASD", "ADHD", "ID", "ODD", "SPD", "Down Syndrome", "Cerebral Palsy", "Apraxia", "Other"];
 
@@ -17,6 +19,11 @@ export default function EditClientPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [diagnosisInput, setDiagnosisInput] = useState("");
+  const [isArchived, setIsArchived] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  const { canAny } = usePermissions();
+  const qc = useQueryClient();
+  const canArchiveClient = canAny(["smartsteps.clients.archive"]);
 
   // Staff assignments
   // email is null for record-only providers (added with a name and no login).
@@ -60,6 +67,7 @@ export default function EditClientPage() {
           insuranceId: data.insuranceId ?? "",
           intakeNotes: data.intakeNotes ?? "",
         });
+        setIsArchived(Boolean(data.isArchived));
         if (data.assignments) setAssignments(data.assignments);
         if (usersRes?.ok) {
           const users = await usersRes.json();
@@ -115,19 +123,33 @@ export default function EditClientPage() {
     }
   }
 
-  async function handleArchive() {
-    if (!confirm("Archive this client? They will no longer appear in the client list.")) return;
+  async function handleArchiveToggle() {
+    const next = !isArchived;
+    const question = next
+      ? "Archive this client? They move to the Archived tab on the Clients page and stop appearing in client pickers. Nothing is deleted, and you can restore them at any time."
+      : "Restore this client? They will appear in the active client list again.";
+    if (!confirm(question)) return;
+    setArchiving(true);
     try {
       const res = await fetch(`/smart-steps/api/clients/${clientId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ isArchived: true }),
+        body: JSON.stringify({ isArchived: next }),
       });
-      if (!res.ok) throw new Error();
-      toast.success("Client archived");
-      router.push("/clients");
-    } catch {
-      toast.error("Failed to archive client");
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? "");
+      }
+      setIsArchived(next);
+      qc.invalidateQueries({ queryKey: ["clients"] });
+      qc.invalidateQueries({ queryKey: ["client", clientId] });
+      toast.success(next ? "Client archived" : "Client restored");
+      router.push(next ? "/clients" : `/clients/${clientId}`);
+    } catch (err) {
+      const msg = err instanceof Error && err.message ? err.message : null;
+      toast.error(msg ?? (next ? "Failed to archive client" : "Failed to restore client"));
+    } finally {
+      setArchiving(false);
     }
   }
 
@@ -347,13 +369,24 @@ export default function EditClientPage() {
           <Link href={`/clients/${clientId}`} className="btn-secondary tap-target rounded-xl px-6 py-3 text-center">Cancel</Link>
         </div>
 
+        {canArchiveClient && (
         <div className="glass-card rounded-2xl p-4 border border-amber-500/20">
-          <h3 className="text-sm font-semibold text-amber-400 mb-1">Danger zone</h3>
-          <p className="text-xs text-zinc-500 mb-3">Archiving hides this client from the list but preserves all data.</p>
-          <button type="button" onClick={handleArchive} className="rounded-xl border border-amber-500/30 px-4 py-2 text-sm text-amber-400 hover:bg-amber-500/10 transition-colors">
-            Archive client
+          <h3 className="text-sm font-semibold text-amber-400 mb-1">{isArchived ? "This client is archived" : "Archive"}</h3>
+          <p className="text-xs text-zinc-500 mb-3">
+            {isArchived
+              ? "Archived clients are hidden from the active client list and from client pickers. All their data is kept. Restore to make them active again."
+              : "Archiving moves this client to the Archived tab on the Clients page. Goals, sessions, notes and reports are all kept, and you can restore them at any time."}
+          </p>
+          <button
+            type="button"
+            onClick={handleArchiveToggle}
+            disabled={archiving}
+            className="rounded-xl border border-amber-500/30 px-4 py-2 text-sm text-amber-400 hover:bg-amber-500/10 transition-colors disabled:opacity-60"
+          >
+            {archiving ? "…" : isArchived ? "Restore client" : "Archive client"}
           </button>
         </div>
+        )}
       </motion.form>
     </div>
   );

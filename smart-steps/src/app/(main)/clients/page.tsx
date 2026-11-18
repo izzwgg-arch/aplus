@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { Plus, Search, Archive } from "lucide-react";
 import { toast } from "sonner";
@@ -38,7 +38,14 @@ function ClientCardItem({ c }: { c: ClientCard }) {
             )}
           </div>
           <div className="min-w-0 flex-1">
-            <h3 className="truncate font-semibold text-[var(--foreground)]">{c.name}</h3>
+            <div className="flex items-center gap-2">
+              <h3 className="truncate font-semibold text-[var(--foreground)]">{c.name}</h3>
+              {c.isArchived && (
+                <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-400">
+                  <Archive className="h-3 w-3" /> Archived
+                </span>
+              )}
+            </div>
             <p className="text-xs text-zinc-500">Age {c.age} · DOB {new Date(c.dob + "T00:00:00").toLocaleDateString()}</p>
             <div className="mt-1 flex flex-wrap gap-1">
               {c.diagnosis.map((d) => (
@@ -61,22 +68,26 @@ function ClientCardItem({ c }: { c: ClientCard }) {
 
 export default function ClientsPage() {
   const [search, setSearch] = useState("");
-  const [showArchived, setShowArchived] = useState(false);
-  const qc = useQueryClient();
+  const [view, setView] = useState<"active" | "archived">("active");
 
+  // Archived clients are requested explicitly: the endpoint leaves them out by
+  // default so no client picker elsewhere in the app ever offers one.
   const { data: clients = [], isLoading, error } = useQuery<ClientCard[]>({
-    queryKey: ["clients"],
+    queryKey: ["clients", "withArchived"],
     queryFn: async () => {
-      const res = await fetch("/smart-steps/api/clients");
+      const res = await fetch("/smart-steps/api/clients?includeArchived=1");
       if (!res.ok) throw new Error("Failed to load clients");
       return res.json();
     },
   });
 
+  const activeCount = clients.filter((c) => !c.isArchived).length;
+  const archivedCount = clients.length - activeCount;
+
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
     return clients.filter((c) => {
-      if (!showArchived && c.isArchived) return false;
+      if (c.isArchived !== (view === "archived")) return false;
       if (!q) return true;
       return (
         c.name.toLowerCase().includes(q) ||
@@ -85,16 +96,17 @@ export default function ClientsPage() {
         c.assignedBcba?.toLowerCase().includes(q)
       );
     });
-  }, [clients, search, showArchived]);
-
-  const archivedCount = clients.filter((c) => c.isArchived).length;
+  }, [clients, search, view]);
 
   return (
     <div className="p-6 md:p-8">
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-[var(--foreground)]">Clients</h1>
-          <p className="text-zinc-500 text-sm">{clients.filter((c) => !c.isArchived).length} active client{clients.filter((c) => !c.isArchived).length !== 1 ? "s" : ""}</p>
+          <p className="text-zinc-500 text-sm">
+            {activeCount} active client{activeCount !== 1 ? "s" : ""}
+            {archivedCount > 0 && ` · ${archivedCount} archived`}
+          </p>
         </div>
         <Link
           href="/clients/new"
@@ -122,17 +134,36 @@ export default function ClientsPage() {
             className="w-full rounded-xl border border-[var(--glass-border)] bg-[var(--glass-bg)] py-2.5 pl-9 pr-4 text-sm text-[var(--foreground)] placeholder:text-zinc-500 focus:border-[var(--accent-cyan)]/50 focus:outline-none focus:ring-2 focus:ring-[var(--accent-cyan)]/20"
           />
         </div>
-        {archivedCount > 0 && (
-          <button
-            type="button"
-            onClick={() => setShowArchived((v) => !v)}
-            className="inline-flex items-center gap-2 rounded-xl border border-[var(--glass-border)] px-3 py-2.5 text-xs text-zinc-400 hover:text-[var(--foreground)] transition-colors"
-          >
-            <Archive className="h-3.5 w-3.5" />
-            {showArchived ? "Hide" : "Show"} archived ({archivedCount})
-          </button>
-        )}
+        <div className="inline-flex shrink-0 rounded-xl border border-[var(--glass-border)] p-1 text-sm" role="tablist">
+          {([
+            { id: "active", label: `Active (${activeCount})` },
+            { id: "archived", label: `Archived (${archivedCount})` },
+          ] as const).map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={view === t.id}
+              onClick={() => setView(t.id)}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 transition-colors ${
+                view === t.id
+                  ? "bg-[var(--accent-cyan)]/15 font-semibold text-[var(--accent-cyan)]"
+                  : "text-zinc-400 hover:text-[var(--foreground)]"
+              }`}
+            >
+              {t.id === "archived" && <Archive className="h-3.5 w-3.5" />}
+              {t.label}
+            </button>
+          ))}
+        </div>
       </div>
+
+      {view === "archived" && (
+        <p className="mb-4 text-xs text-zinc-500">
+          Archived clients keep all their goals, sessions, notes and reports. They are hidden from the client
+          list and from client pickers. Open one and use <span className="font-medium text-zinc-400">Restore client</span> to make it active again.
+        </p>
+      )}
 
       {isLoading ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -148,8 +179,12 @@ export default function ClientsPage() {
                 <Plus className="h-4 w-4" /> Add first client
               </Link>
             </>
+          ) : search.trim() ? (
+            <p className="text-zinc-500">No {view} clients match your search</p>
+          ) : view === "archived" ? (
+            <p className="text-zinc-500">No archived clients</p>
           ) : (
-            <p className="text-zinc-500">No clients match your search</p>
+            <p className="text-zinc-500">No active clients</p>
           )}
         </div>
       ) : (

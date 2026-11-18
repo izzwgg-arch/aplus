@@ -36,7 +36,9 @@ export type AuditAction =
   | "EMAIL_TEST_SEND"
   | "CREATE_PARENT_TRAINING_GOAL"
   | "UPDATE_PARENT_TRAINING_GOAL"
-  | "DELETE_PARENT_TRAINING_GOAL";
+  | "DELETE_PARENT_TRAINING_GOAL"
+  | "CLIENT_ARCHIVED"
+  | "CLIENT_RESTORED";
 
 export async function auditLog(
   userId: string,

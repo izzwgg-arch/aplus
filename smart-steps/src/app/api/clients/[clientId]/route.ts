@@ -3,6 +3,7 @@ import { requireSession } from "@/lib/session";
 import { requireClientAccessResponse, requirePermissionResponse } from "@/lib/permissions";
 import { parseDob, DOB_ERROR } from "@/lib/dob";
 import { prisma } from "@/lib/db";
+import { auditLog } from "@/lib/auditLogger";
 
 export async function GET(
   _req: Request,
@@ -161,12 +162,32 @@ export async function PATCH(
     if (school !== undefined) data.school = school?.trim() || null;
     if (insuranceId !== undefined) data.insuranceId = insuranceId?.trim() || null;
     if (intakeNotes !== undefined) data.intakeNotes = intakeNotes?.trim() || null;
-    if (isArchived !== undefined) data.isArchived = Boolean(isArchived);
+    // Archiving/restoring is its own permission (BCBA + ADMIN), on top of the
+    // edit access checked above — editing a client's details does not imply
+    // the right to take them off the active list.
+    let archiveChange: boolean | null = null;
+    if (isArchived !== undefined) {
+      const archiveDenied = await requirePermissionResponse(user.id, "smartsteps.clients.archive");
+      if (archiveDenied) return archiveDenied;
+      archiveChange = Boolean(isArchived);
+      data.isArchived = archiveChange;
+    }
+
+    const before = archiveChange === null
+      ? null
+      : await prisma.client.findUnique({ where: { id: clientId }, select: { isArchived: true } });
+    if (archiveChange !== null && !before) {
+      return NextResponse.json({ error: "Client not found" }, { status: 404 });
+    }
 
     const updated = await prisma.client.update({
       where: { id: clientId },
       data,
     });
+
+    if (archiveChange !== null && before && before.isArchived !== archiveChange) {
+      await auditLog(user.id, archiveChange ? "CLIENT_ARCHIVED" : "CLIENT_RESTORED", "Client", clientId);
+    }
 
     return NextResponse.json(updated);
   } catch (err) {

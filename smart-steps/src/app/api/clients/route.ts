@@ -4,24 +4,28 @@ import { accessibleClientIds, requirePermissionResponse } from "@/lib/permission
 import { parseDob, DOB_ERROR } from "@/lib/dob";
 import { prisma } from "@/lib/db";
 
-export async function GET() {
+export async function GET(req: Request) {
   const user = await requireSession();
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const clientIds = await accessibleClientIds(user.id, "smartsteps.clients.view");
+  // Archived clients are left out by default: every client picker in the app
+  // reads this endpoint and must not offer an archived child. Only the Clients
+  // page asks for them (its Archived tab), via ?includeArchived=1.
+  const includeArchived = new URL(req.url).searchParams.get("includeArchived") === "1";
 
   try {
     const clients = await prisma.client.findMany({
       where: {
-        isArchived: false,
+        ...(includeArchived ? {} : { isArchived: false }),
         ...(clientIds === "ALL" ? {} : { id: { in: clientIds } }),
       },
       orderBy: { updatedAt: "desc" },
       include: {
         assignments: { include: { user: { select: { name: true, role: true } } } },
-        sessions: { take: 1, orderBy: { startedAt: "desc" } },
+        sessions: { where: { deletedAt: null }, take: 1, orderBy: { startedAt: "desc" } },
       },
     });
 
