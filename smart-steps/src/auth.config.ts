@@ -30,7 +30,11 @@ function isPublicPath(path: string): boolean {
 }
 
 export const authConfig: NextAuthConfig = {
-  basePath: APP_BASEPATH,
+  // NO basePath here. It is derived from AUTH_URL's pathname (/api/auth), which
+  // matches what Next.js hands the route handler after stripping its own
+  // basePath (/smart-steps). Setting basePath: "/smart-steps" (2026-11-17) made
+  // every /smart-steps/api/auth/* request answer 400 "Bad request", so the
+  // browser never got a session: no Sign out button, no permissions.
   providers: [], // Credentials provider added in auth.ts (server-only)
   pages: {
     signIn: "/smart-steps/login",

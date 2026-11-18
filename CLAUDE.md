@@ -32,21 +32,40 @@ this order:
    whenever possible; if any are made after deploying, commit and push them
    too. The working tree must end clean.
 
-## Tracker NextAuth basePath required for JWT cookies (fixed 2026-11-17)
+## Tracker NextAuth paths — DO NOT set `basePath` in authConfig (restored 2026-11-18)
 
-**Issue:** Sessions API returned 302 redirects to login even when user was authenticated. All `/api/` calls failed silently because the JWT session cookie was never created.
+The working setup (Aug–Nov 16, and again from 2026-11-18):
 
-**Root cause — three missing pieces:**
-1. `smart-steps/src/auth.config.ts` was missing the `basePath` property. Without it, NextAuth doesn't know which path to set cookies on, so the JWT session cookie is never stored in the browser.
-2. `smart-steps/src/middleware.ts` was protecting `/smart-steps/api/auth` routes because the matcher excluded only `/api/auth` (without the basePath prefix).
-3. `.env.local` had `NEXTAUTH_URL=https://app.apluscenterinc.org/api/auth` without the `/smart-steps` basePath, causing NextAuth to report `env-url-basepath-mismatch` and return 400 errors.
+- `smart-steps/src/auth.config.ts` has **no `basePath`**. next-auth derives it
+  from `AUTH_URL`'s pathname, `/api/auth`, which is what Next.js hands the
+  route handler after stripping its own basePath `/smart-steps`.
+- `smart-steps/src/app/providers.tsx`: `<SessionProvider basePath="/smart-steps/api/auth">`
+  — the browser's fetch is a raw URL, so it needs the full path.
+- Server `.env.local`: `AUTH_URL=https://app.apluscenterinc.org/api/auth`
+  (`AUTH_URL` wins over `NEXTAUTH_URL` in next-auth v5; `NEXTAUTH_URL` was
+  changed to `.../smart-steps` on 2026-11-17 and is ignored).
+- `middleware.ts` matcher excludes both `api/auth` and `smart-steps/api/auth`.
 
-**Fix:** 
-1. Added `basePath: "/smart-steps"` to `authConfig` in `smart-steps/src/auth.config.ts` — NextAuth automatically appends `/api/auth` to create handlers at `/smart-steps/api/auth`.
-2. Updated `smart-steps/src/middleware.ts` matcher to exclude both `/api/auth` and `/smart-steps/api/auth`, so auth handlers are never protected.
-3. Set `NEXTAUTH_URL=https://app.apluscenterinc.org/smart-steps/api/auth` in `.env.local` on the server (`/var/www/aplus2/smart-steps/.env.local`), matching the basePath.
+**What broke on 2026-11-17.** A chain of commits (e54799d, 6bb637f, 9e8267a,
+plus fd4da70 / 72b54fc on the sidebar) set `basePath: "/smart-steps"` on the
+server config and on SessionProvider, on the false belief that "NextAuth
+appends /api/auth automatically". It does not: every
+`/smart-steps/api/auth/{session,csrf,providers}` request answered
+**400 "Bad request."** and the browser fetched a nonexistent
+`/smart-steps/session` (404). So `useSession()` never resolved:
+the sidebar's Sign out button (rendered only with `session.user`) vanished,
+and `usePermissions()` (enabled only when authenticated) never called
+`/api/permissions/me` — zero such requests on 2026-11-18 vs ~75/day before —
+so every `can()` returned false and edit buttons (e.g. Staff) disappeared for
+EVERYONE, admins included. Server-side `auth()` kept working off the existing
+cookie, which is why data still loaded. The sidebar was then "fixed" by
+showing every nav item to every role; that is reverted too (nav filters by
+permission again once they load).
 
-**Verification:** After all three fixes, JWT session cookies appear in browser (`__Secure-authjs.session-token`), API calls authenticate successfully, and all data loads (sessions, goals, notes, etc.). Sessions tab now displays data instead of "No sessions recorded yet".
+**Verify after any auth change:**
+`curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/smart-steps/api/auth/session`
+must be **200** (and `/csrf` 200), and the nginx log must show
+`/smart-steps/api/permissions/me 200` again once users load pages.
 
 **Service worker caching note:** Browser may serve stale code after deployment due to aggressive service worker caching. Force fresh load: DevTools → Application → Storage → Clear site data, then hard-reload (Ctrl+Shift+R) or navigate to a fresh page (dashboard → client page).
 

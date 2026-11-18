@@ -23,11 +23,11 @@ import { usePermissions } from "@/hooks/usePermissions";
 // this list only controls nav visibility.
 
 const NAV = [
-  { href: "/dashboard",            label: "Dashboard",           icon: LayoutDashboard, anyOf: ["smartsteps.dashboard.view", "smartsteps.clients.view.assigned", "smartsteps.clients.view.all"] },
+  { href: "/dashboard",            label: "Dashboard",           icon: LayoutDashboard, anyOf: ["smartsteps.dashboard.view"] },
   { href: "/clients",              label: "Clients",             icon: Users, anyOf: ["smartsteps.clients.view.assigned", "smartsteps.clients.view.all"] },
   { href: "/goals-and-targets",    label: "Goals & Targets",     icon: Target, anyOf: ["smartsteps.goals.view.assigned", "smartsteps.goals.view.all", "smartsteps.targets.view.assigned", "smartsteps.targets.view.all"] },
-  { href: "/goal-library",         label: "Goal Library",        icon: BookOpen, anyOf: ["smartsteps.goal_library.view", "smartsteps.goals.view.assigned", "smartsteps.goals.view.all"] },
-  { href: "/parent-goal-library",  label: "Parent Goal Library", icon: Target, anyOf: ["smartsteps.parent_goal_library.view", "smartsteps.goals.view.assigned", "smartsteps.goals.view.all"] },
+  { href: "/goal-library",         label: "Goal Library",        icon: BookOpen, anyOf: ["smartsteps.goal_library.view"] },
+  { href: "/parent-goal-library",  label: "Parent Goal Library", icon: Target, anyOf: ["smartsteps.parent_goal_library.view"] },
   // NOTE: "/assessments" is the template-management + report-generation console
   // (create scoring/report templates, generate a client report), NOT the
   // per-client assessment viewer — it must be gated by the *template* keys,
@@ -36,7 +36,7 @@ const NAV = [
   // this admin/BCBA-facing page to them).
   { href: "/assessments",          label: "Assessments",         icon: ClipboardList, anyOf: ["smartsteps.assessment_templates.view", "smartsteps.assessment_templates.manage", "smartsteps.report_templates.view", "smartsteps.report_templates.manage"] },
   { href: "/reports",              label: "Reports",             icon: FileBarChart, anyOf: ["smartsteps.reports.view.assigned", "smartsteps.reports.view.all", "smartsteps.reports.export"] },
-  { href: "/staff",                label: "Staff",               icon: UserCheck, anyOf: ["smartsteps.staff.view", "smartsteps.clients.view.all"] },
+  { href: "/staff",                label: "Staff",               icon: UserCheck, anyOf: ["smartsteps.staff.view"] },
   { href: "/settings",             label: "Settings",            icon: Settings, anyOf: null },
 ];
 
@@ -68,9 +68,8 @@ function SidebarContent({
   const { data: session } = useSession();
   const { canAny, isLoading } = usePermissions();
 
-  // Always show nav items; permissions are checked on the routes themselves
-  // This ensures the sidebar is always usable while permissions load
-  const visibleNav = NAV;
+  // Show every item while permissions load, then only what the user may open.
+  const visibleNav = isLoading ? NAV : NAV.filter((item) => canAny(item.anyOf));
 
   return (
     <>

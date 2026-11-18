@@ -17,7 +17,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
       })
   );
   return (
-    <SessionProvider basePath="/smart-steps">
+    <SessionProvider basePath="/smart-steps/api/auth">
       <QueryClientProvider client={client}>
         {children}
         <Toaster richColors position="top-center" theme={resolved} />
