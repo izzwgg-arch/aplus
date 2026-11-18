@@ -67,6 +67,14 @@ permission again once they load).
 must be **200** (and `/csrf` 200), and the nginx log must show
 `/smart-steps/api/permissions/me 200` again once users load pages.
 
+**Permission audit, 2026-11-18 (after the fix).** All 74 permission keys are
+in the DB; every system role matches `SYSTEM_ROLES` except RBT, which also
+holds `smartsteps.clients.create` (added by someone in the app; the user chose
+to KEEP it). All 22 users have an active role. Libby Weinstock was labelled
+ADMIN with RBT permissions; at the user's request the label was set to RBT
+through `PATCH /api/staff/[userId]` (permissions unchanged). Two RBTs with no
+assigned clients (last sessions 2026-08-24) were deliberately left unassigned.
+
 **Service worker caching note:** Browser may serve stale code after deployment due to aggressive service worker caching. Force fresh load: DevTools → Application → Storage → Clear site data, then hard-reload (Ctrl+Shift+R) or navigate to a fresh page (dashboard → client page).
 
 ## Rule 1: Read the MD files first
