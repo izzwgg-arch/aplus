@@ -25,7 +25,8 @@ import {
 import { toast } from "sonner";
 import { printGoals, type GoalStatusFilter, type PrintableGoal, type PrintableTarget } from "@/lib/printGoals";
 import { usePermissions } from "@/hooks/usePermissions";
-import { normalizeLabel, staleServerRowIds } from "@/lib/storeDedupe";
+import { abandonedUnsavedRowIds, normalizeLabel, staleServerRowIds } from "@/lib/storeDedupe";
+import { saveNewOrRollback } from "@/lib/saveNewOrRollback";
 import {
   useABAStore,
   defaultMastery,
@@ -237,17 +238,13 @@ function CategoryModal({ clientId, category, onClose }: { clientId: string; cate
         createdAt: new Date().toISOString(),
         synced: false,
       });
-      fetch("/smart-steps/api/programs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId, name: trimmedName, domain: trimmedName, description: trimmedDescription }),
-      })
-        .then((r) => r.json())
-        .then((d) => {
-          if (d?.id) setCategoryServerId(id, d.id);
-        })
-        .catch(() => {});
-      toast.success("Category created");
+      void saveNewOrRollback({
+        url: "/smart-steps/api/programs",
+        body: { clientId, name: trimmedName, domain: trimmedName, description: trimmedDescription },
+        noun: "category",
+        onSaved: (serverId) => setCategoryServerId(id, serverId),
+        rollback: () => useABAStore.getState().removeCategory(id),
+      });
     }
     setSaving(false);
     onClose();
@@ -342,22 +339,18 @@ function SkillAreaModal({ clientId, category, skill, onClose }: { clientId: stri
         createdAt: new Date().toISOString(),
         synced: false,
       });
-      fetch(`/smart-steps/api/clients/${clientId}/goals`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      void saveNewOrRollback({
+        url: `/smart-steps/api/clients/${clientId}/goals`,
+        body: {
           title: trimmedName,
           description: trimmedDescription,
           domain: category.name,
           programId: resolvedCategoryServerId,
-        }),
-      })
-        .then((r) => r.json())
-        .then((d) => {
-          if (d?.id) setProgramServerId(id, d.id);
-        })
-        .catch(() => {});
-      toast.success("Skill area created");
+        },
+        noun: "skill area",
+        onSaved: (serverId) => setProgramServerId(id, serverId),
+        rollback: () => useABAStore.getState().removeProgram(id),
+      });
     }
 
     setSaving(false);
@@ -480,10 +473,9 @@ function GoalModal({ clientId, category, skill, goal, onClose }: { clientId: str
         updatedAt: now,
         synced: false,
       });
-      fetch("/smart-steps/api/targets", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      void saveNewOrRollback({
+        url: "/smart-steps/api/targets",
+        body: {
           definition: title.trim(),
           operationalDefinition: description.trim(),
           targetType,
@@ -500,14 +492,11 @@ function GoalModal({ clientId, category, skill, goal, onClose }: { clientId: str
           baseline: baselineLevel.trim() || null,
           notes: description.trim() || null,
           parentGoalId: skill.serverId ?? null,
-        }),
-      })
-        .then((r) => r.json())
-        .then((d) => {
-          if (d?.id) setTargetServerId(id, d.id);
-        })
-        .catch(() => {});
-      toast.success("Goal created");
+        },
+        noun: "goal",
+        onSaved: (serverId) => setTargetServerId(id, serverId),
+        rollback: () => useABAStore.getState().removeTarget(id),
+      });
     }
 
     setSaving(false);
@@ -897,6 +886,11 @@ export function ProgramsTab({
         const serverIds = new Set(data.groups.flatMap((g) => g.targets.map((t) => t.id)));
         const { targets: afterSync, removeTarget } = useABAStore.getState();
         for (const staleId of staleServerRowIds(afterSync, clientId, serverIds)) removeTarget(staleId);
+        // A goal whose one POST was refused or failed is never re-sent, so it can
+        // never become real -- it only ever shows in this browser, and next to
+        // the real goal once that is entered. Drop it after the in-flight grace
+        // period (and after the label match above had its chance to link it).
+        for (const deadId of abandonedUnsavedRowIds(useABAStore.getState().targets, clientId)) removeTarget(deadId);
       })
       .catch(() => {});
   }, [clientId, setTargetServerId, addTarget]);
@@ -974,6 +968,9 @@ export function ProgramsTab({
         const liveCategoryIds = new Set(programs.map((p) => p.id));
         const { categories: afterCats, removeCategory: dropCategory } = useABAStore.getState();
         for (const staleId of staleServerRowIds(afterCats, clientId, liveCategoryIds)) dropCategory(staleId);
+        // Same for a category that never reached the server (the name match
+        // above has already linked any that did).
+        for (const deadId of abandonedUnsavedRowIds(useABAStore.getState().categories, clientId)) dropCategory(deadId);
       }
 
       // 2. Fetch skill areas (ParentGoals) and their direct targets
@@ -1096,6 +1093,8 @@ export function ProgramsTab({
       const liveSkillIds = new Set(serverGoals.map((g) => g.id));
       const { programs: afterSkills, removeProgram: dropSkill } = useABAStore.getState();
       for (const staleId of staleServerRowIds(afterSkills, clientId, liveSkillIds)) dropSkill(staleId);
+      // A skill area that never reached the server can never be saved later.
+      for (const deadId of abandonedUnsavedRowIds(useABAStore.getState().programs, clientId)) dropSkill(deadId);
     }
 
     hydrate();

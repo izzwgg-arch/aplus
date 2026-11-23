@@ -170,3 +170,41 @@ export function staleServerRowIds<T extends LabelledRow>(
     .filter((row) => row.clientId === clientId && !!row.serverId && !serverIds.has(row.serverId))
     .map((row) => row.id);
 }
+
+/**
+ * How long an unsaved row may sit in the store before it is treated as
+ * abandoned. Every create path POSTs immediately and a reply takes seconds; the
+ * margin only exists so a save still in flight is never pruned from under it.
+ */
+export const UNSAVED_ROW_GRACE_MS = 10 * 60 * 1000;
+
+/**
+ * Ids of store rows for `clientId` that NEVER reached the server (no
+ * `serverId`) and are older than `UNSAVED_ROW_GRACE_MS`.
+ *
+ * Nothing in the Tracker ever re-sends an unsaved category, skill area or goal:
+ * every create path makes exactly one POST, and when that POST is refused (403 —
+ * e.g. an RBT without `targets.create`) or fails, the row stays in this ONE
+ * browser forever, looking saved, while nobody else ever sees it. (Reported
+ * 2026-11-18: an RBT "added" ~30 goals for a client; every POST answered 403,
+ * the server had none, and she kept seeing them.) Such a row can never become
+ * real, so showing it is a lie — and once the goals are entered properly it
+ * shows up as a double next to the real one.
+ *
+ * ONLY call this after the client's server list was fetched SUCCESSFULLY, so
+ * an offline browser never drops what it is showing because it could not ask.
+ */
+export function abandonedUnsavedRowIds<T extends IdentifiableRow & { clientId?: string; createdAt?: string | null }>(
+  rows: readonly T[],
+  clientId: string,
+  nowMs: number = Date.now(),
+): string[] {
+  return rows
+    .filter((row) => {
+      if (row.clientId !== clientId || row.serverId) return false;
+      const created = row.createdAt ? Date.parse(row.createdAt) : NaN;
+      // An undated unsaved row cannot be aged; it is just as unreachable, so treat it as old.
+      return Number.isNaN(created) || nowMs - created > UNSAVED_ROW_GRACE_MS;
+    })
+    .map((row) => row.id);
+}

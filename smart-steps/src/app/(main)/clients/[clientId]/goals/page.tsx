@@ -589,8 +589,26 @@ function TargetModal({
             body: JSON.stringify({ itemId: sourceLibraryId, itemType: "GOAL" }),
           }).catch(() => {});
         }
+      } else if (!editTarget) {
+        // Nothing ever re-sends an unsaved target, so a refused create must not
+        // stay on screen looking saved (it was only ever in this browser).
+        useABAStore.getState().removeTarget(id);
+        toast.error(
+          res.status === 403
+            ? "Target was NOT saved — your account is not allowed to add goals. Ask a BCBA or an admin to add it."
+            : "Target was NOT saved. Please try again.",
+        );
+        setSaving(false);
+        return;
       }
-    } catch { /* Offline — will sync later */ }
+    } catch {
+      if (!editTarget) {
+        useABAStore.getState().removeTarget(id);
+        toast.error("Target was NOT saved — the server could not be reached. Check the connection and try again.");
+        setSaving(false);
+        return;
+      }
+    }
 
     toast.success(editTarget ? "Target updated ✓" : "Target added ✓");
     setSaving(false);
@@ -1113,8 +1131,25 @@ function CategoryModal({
       if (res.ok) {
         const data = await res.json();
         if (data.id) useABAStore.getState().setCategoryServerId(id, data.id);
+      } else if (!editCat) {
+        // A refused create must not linger in this browser looking saved.
+        useABAStore.getState().removeCategory(id);
+        toast.error(
+          res.status === 403
+            ? "Category was NOT saved — your account is not allowed to add categories. Ask a BCBA or an admin."
+            : "Category was NOT saved. Please try again.",
+        );
+        setSaving(false);
+        return;
       }
-    } catch { /* offline — that's fine */ }
+    } catch {
+      if (!editCat) {
+        useABAStore.getState().removeCategory(id);
+        toast.error("Category was NOT saved — the server could not be reached. Check the connection and try again.");
+        setSaving(false);
+        return;
+      }
+    }
 
     toast.success(editCat ? `"${name}" updated ✓` : `Category "${name}" created ✓`);
     setSaving(false);
@@ -1317,8 +1352,23 @@ function ProgramModal({
       if (res.ok) {
         const data = await res.json();
         if (data.id) useABAStore.getState().setProgramServerId(id, data.id);
+      } else {
+        // A refused create must not linger in this browser looking saved.
+        useABAStore.getState().removeProgram(id);
+        toast.error(
+          res.status === 403
+            ? "Skill area was NOT saved — your account is not allowed to add skill areas. Ask a BCBA or an admin."
+            : "Skill area was NOT saved. Please try again.",
+        );
+        setSaving(false);
+        return;
       }
-    } catch { /* offline */ }
+    } catch {
+      useABAStore.getState().removeProgram(id);
+      toast.error("Skill area was NOT saved — the server could not be reached. Check the connection and try again.");
+      setSaving(false);
+      return;
+    }
 
     toast.success(`"${name}" added ✓`);
     setSaving(false);

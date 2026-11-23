@@ -36,7 +36,7 @@ import {
 } from "@/store/abaStore";
 import { formatSessionHours } from "@/lib/formatDuration";
 import { isOpenForDataEntry } from "@/lib/targetVisibility";
-import { dedupeTargetRows, normalizeLabel, staleServerRowIds } from "@/lib/storeDedupe";
+import { abandonedUnsavedRowIds, dedupeTargetRows, normalizeLabel, staleServerRowIds } from "@/lib/storeDedupe";
 import { SessionSnapshotDrawer } from "./SessionSnapshotDrawer";
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
@@ -675,6 +675,11 @@ export function DataEntryTab({ clientId }: { clientId: string }) {
     const serverIds = new Set(serverTargetData.groups.flatMap((g) => g.targets.map((t) => t.id)));
     const { targets: afterSync, removeTarget } = useABAStore.getState();
     for (const staleId of staleServerRowIds(afterSync, clientId, serverIds)) removeTarget(staleId);
+    // A goal that never reached the server (its one POST was refused or failed)
+    // is never re-sent, so it can never become real. Drop it once it is past the
+    // in-flight grace period — after the label match above has had its chance to
+    // link it to a server goal with the same wording.
+    for (const deadId of abandonedUnsavedRowIds(useABAStore.getState().targets, clientId)) removeTarget(deadId);
     // Only re-run when the server data or client changes.
     // Actions come from getState() so they don't need to be deps.
     // eslint-disable-next-line react-hooks/exhaustive-deps

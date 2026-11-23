@@ -2081,6 +2081,45 @@ un-archive.
   archived clients. `GET /api/clients`' "last session" now also ignores
   soft-deleted sessions.
 
+## Tracker goals that were never saved no longer look saved (2026-11-23)
+
+Reported as "an RBT added goals for a client and I can't see them". On
+2026-11-18 she added ~30 goals and ~10 skill areas; every
+`POST /api/targets` and `POST /api/clients/[id]/goals` answered **403**
+(RBT has no `smartsteps.targets.create` / `smartsteps.goals.create` — the
+audit log holds a `PERMISSION_DENIED` row for each). The server held none of
+them, yet they stayed on HER screen: every create path added the row to the
+persisted store optimistically, fired ONE POST, ignored the answer and toasted
+"created". **Nothing anywhere ever re-sends an unsaved category, skill area
+or goal**, so such a row lives in one browser forever, and doubles up next to
+the real goal once someone with permission enters it.
+
+- **`src/lib/saveNewOrRollback.ts`**: the create POST now checks the answer;
+  on 403 / failure / unreachable server it removes the local row again and
+  says plainly it was NOT saved (403: "your account is not allowed … ask a
+  BCBA or an admin"). The success toast only shows once the server confirms.
+  Used by ProgramsTab's three modals and the global Goals & Targets page; the
+  client goals page (`clients/[id]/goals`) got the same rollback inline for
+  target / category / skill-area creation (edits are not rolled back — those
+  rows already exist).
+- **The global Goals & Targets "+ New Goals and Targets" box never talked to
+  the server at all** — it wrote category, skill area and target to the local
+  store only. It now saves each level on the server in order (category →
+  skill area with `programId` → target with `parentGoalId`) and requires a
+  skill area when a target is given.
+- **`abandonedUnsavedRowIds()`** (`storeDedupe.ts`) clears leftovers already
+  sitting in browsers: a row for the client with NO `serverId`, older than
+  `UNSAVED_ROW_GRACE_MS` (10 min, so a save still in flight is never touched).
+  Called only after a SUCCESSFUL server fetch, so an offline browser never
+  drops what it shows: ProgramsTab's target sync, category hydration and
+  skill-area hydration, and DataEntryTab's target sync. Runs AFTER the label
+  match, so an unsaved row whose wording matches a server goal is linked, not
+  dropped. Verified with a `tsx` harness (old unsaved pruned, in-flight /
+  saved / other-client kept, undated pruned).
+
+Whether RBTs SHOULD be allowed to create goals is a role decision, not a bug;
+they are not (by `SYSTEM_ROLES`), so a BT asks a BCBA/admin.
+
 ## Rule 5: Deploy (step 3 of the Rule 0 end-of-task sequence)
 
 ### Smart Steps ABA Tracker (git-based, re-wired 2026-08-13)

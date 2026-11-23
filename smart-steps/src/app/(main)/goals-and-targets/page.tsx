@@ -20,6 +20,7 @@ import {
   categoryColor,
   CATEGORY_COLOR_PALETTE,
 } from "@/store/abaStore";
+import { saveNewOrRollback } from "@/lib/saveNewOrRollback";
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 
@@ -74,17 +75,18 @@ function QuickCategoryModal({
     const now = new Date().toISOString();
     addCategory({ id, clientId, name: name.trim(), color, createdAt: now, synced: false });
 
-    try {
-      await fetch("/smart-steps/api/programs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId, name: name.trim(), domain: name.trim() }),
-      });
-    } catch { /* offline */ }
+    // The server's answer used to be ignored, so a refused or failed create
+    // stayed in this browser only, looking saved. Now it is taken back out.
+    const serverId = await saveNewOrRollback({
+      url: "/smart-steps/api/programs",
+      body: { clientId, name: name.trim(), domain: name.trim() },
+      noun: "category",
+      onSaved: (sid) => useABAStore.getState().setCategoryServerId(id, sid),
+      rollback: () => useABAStore.getState().removeCategory(id),
+    });
 
-    toast.success(`Category "${name}" created ✓`);
     setSaving(false);
-    onClose();
+    if (serverId) onClose();
   }
 
   return (
@@ -192,35 +194,80 @@ function QuickGoalModal({
       toast.error("Fill in at least a program name or target title");
       return;
     }
+    // A goal has to hang off a skill area -- one with no parent never shows in
+    // the client's Goals & Targets drill-down.
+    if (targetTitle.trim() && !programName.trim()) {
+      toast.error("Enter the skill area the target belongs to");
+      return;
+    }
     setSaving(true);
     const now = new Date().toISOString();
 
-    // Create or use category
+    // This used to write to this browser's local store ONLY and never sent
+    // anything to the server, so nothing created here was ever seen by anyone
+    // else. Each level is now saved on the server first, in order, and the
+    // local row is kept only once the server has accepted it.
+    const store = () => useABAStore.getState();
+
+    // 1. Category: an existing one must already be on the server.
     let catId = selectedCatId;
+    let catServerId: string | null = null;
     if (selectedCatId === "__new") {
       if (!newCatName.trim()) { toast.error("Enter a category name"); setSaving(false); return; }
       catId = localId();
-      useABAStore.getState().addCategory({
+      store().addCategory({
         id: catId, clientId, name: newCatName.trim(),
         color: categoryColor(catId), createdAt: now, synced: false,
       });
+      catServerId = await saveNewOrRollback({
+        url: "/smart-steps/api/programs",
+        body: { clientId, name: newCatName.trim(), domain: newCatName.trim() },
+        noun: "category",
+        onSaved: (sid) => store().setCategoryServerId(catId, sid),
+        rollback: () => store().removeCategory(catId),
+        announce: false,
+      });
+    } else {
+      catServerId = store().categories.find((c) => c.id === selectedCatId)?.serverId ?? null;
+      if (!catServerId) toast.error("That category is not saved on the server yet — open the client's Goals & Targets to refresh it, then try again.");
     }
+    if (!catServerId) { setSaving(false); return; }
 
-    // Create program
+    // 2. Skill area.
     const progId = localId();
+    let progServerId: string | null = null;
     if (programName.trim()) {
       addProgram({ id: progId, categoryId: catId, clientId, name: programName.trim(), createdAt: now, synced: false });
+      progServerId = await saveNewOrRollback({
+        url: `/smart-steps/api/clients/${clientId}/goals`,
+        body: { title: programName.trim(), domain: store().categories.find((c) => c.id === catId)?.name ?? "", programId: catServerId },
+        noun: "skill area",
+        onSaved: (sid) => store().setProgramServerId(progId, sid),
+        rollback: () => store().removeProgram(progId),
+        announce: false,
+      });
+      if (!progServerId) { setSaving(false); return; }
     }
 
-    // Create target if given
-    if (targetTitle.trim()) {
+    // 3. First target.
+    if (targetTitle.trim() && progServerId) {
+      const targetId = localId();
       addTarget({
-        id: localId(), programId: progId, categoryId: catId, clientId,
+        id: targetId, programId: progId, categoryId: catId, clientId,
         title: targetTitle.trim(), operationalDefinition: "",
         targetType: "DISCRETE_TRIAL", phase: "NEW",
         masteryCriteria: defaultMastery(), promptLevels: defaultPromptLevels(),
         isActive: true, createdAt: now, updatedAt: now, synced: false,
       });
+      const targetServerId = await saveNewOrRollback({
+        url: "/smart-steps/api/targets",
+        body: { definition: targetTitle.trim(), targetType: "DISCRETE_TRIAL", phase: "NEW", parentGoalId: progServerId },
+        noun: "target",
+        onSaved: (sid) => store().setTargetServerId(targetId, sid),
+        rollback: () => store().removeTarget(targetId),
+        announce: false,
+      });
+      if (!targetServerId) { setSaving(false); return; }
     }
 
     toast.success("Created! Go to client's Goals & Targets to add full details.");
