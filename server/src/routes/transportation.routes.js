@@ -141,12 +141,11 @@ router.post("/", requireAuth, async (req, res) => {
     });
 
     // Audit log
-    await writeAuditLog({
-      userId: req.user.id,
-      action: "CREATE",
-      resourceType: "TRANSPORTATION",
-      resourceId: log.id,
-      changes: JSON.stringify(log)
+    await writeAuditLog(req, {
+      action: "TRANSPORTATION_CREATED",
+      entityType: "Transportation",
+      entityId: log.id,
+      detailsJson: log
     });
 
     res.status(201).json(log);
@@ -185,12 +184,11 @@ router.patch("/:id", requireAuth, async (req, res) => {
     });
 
     // Audit log
-    await writeAuditLog({
-      userId: req.user.id,
-      action: "UPDATE",
-      resourceType: "TRANSPORTATION",
-      resourceId: id,
-      changes: JSON.stringify({ before: existing, after: updated })
+    await writeAuditLog(req, {
+      action: "TRANSPORTATION_UPDATED",
+      entityType: "Transportation",
+      entityId: id,
+      detailsJson: updated
     });
 
     res.json(updated);
@@ -218,12 +216,11 @@ router.delete("/:id", requireAuth, async (req, res) => {
     });
 
     // Audit log
-    await writeAuditLog({
-      userId: req.user.id,
-      action: "DELETE",
-      resourceType: "TRANSPORTATION",
-      resourceId: id,
-      changes: JSON.stringify(existing)
+    await writeAuditLog(req, {
+      action: "TRANSPORTATION_DELETED",
+      entityType: "Transportation",
+      entityId: id,
+      detailsJson: existing
     });
 
     res.json({ ok: true });
