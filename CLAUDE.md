@@ -2205,6 +2205,23 @@ Audit of the `Appointment` table found:
 
 This prevents new appointments from entering the database unassigned to a provider. The existing 552 unassigned appointments remain in the database — they will show in "All Providers" view but not in individual provider calendars. If needed, these can be backfilled based on context (e.g., from session provider, from invoice provider), but that requires manual work per appointment or a migration script matching appointments to their correct provider from other records.
 
+## A+ Scheduling appointments — daily recurrence option (added 2026-11-23)
+
+Appointments can now recur daily in addition to the existing weekly and monthly options.
+
+- **Backend** (`server/src/services/clinic/appointments/appointmentService.js`):
+  - Imported `addDays` from `date-fns` alongside existing `addWeeks` and `addMonths`
+  - Extended the recurrence condition to support `DAILY` by adding it to the check: `if (payload.recurrenceType === "DAILY" || payload.recurrenceType === "WEEKLY" || payload.recurrenceType === "MONTHLY")`
+  - Daily appointments use `addDays(startsAt, i)` to increment by one day for each occurrence
+  - Respects the same conflict detection (`hasProviderConflict`) and repeat count logic as weekly/monthly
+
+- **Frontend** (`client/src/pages/aplus/AppointmentsPage.jsx`):
+  - Added "Daily" option to the recurrence dropdown (`<option value="DAILY">Daily</option>`)
+  - Positioned after "Does not repeat" and before "Weekly" for logical flow
+  - Works with the existing "Repeat count" field (default 4 appointments, user-configurable)
+
+Clinics can now schedule daily recurring appointments for things like standing room uses or repeated brief services. The same recurrence rules apply: the system checks for provider conflicts and skips any conflicting slots.
+
 ## Tracker goal hierarchy — what the tables MEAN (restored 2026-11-17)
 
 **The `ParentGoal` model IS the skill area.** Its name is misleading; it has
