@@ -209,8 +209,8 @@ export default function TransportationLogPage() {
   useEffect(() => {
     const load = async () => {
       try {
-        const res = await api.get(`/clients?limit=1000`);
-        setClients(res.data.data || []);
+        const res = await api.get(`/clients`);
+        setClients(Array.isArray(res.data) ? res.data : []);
       } catch (err) {
         console.error("Failed to load clients:", err?.message);
       }
