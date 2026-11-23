@@ -141,16 +141,21 @@ router.post("/", requireAuth, async (req, res) => {
     });
 
     // Audit log
-    await writeAuditLog(req, {
-      action: "TRANSPORTATION_CREATED",
-      entityType: "Transportation",
-      entityId: log.id,
-      detailsJson: log
-    });
+    try {
+      await writeAuditLog(req, {
+        action: "TRANSPORTATION_CREATED",
+        entityType: "Transportation",
+        entityId: log.id,
+        detailsJson: log
+      });
+    } catch (auditErr) {
+      console.error("[POST /api/transportation] Audit log failed:", auditErr?.message);
+      // Don't fail the save if audit logging fails, just log it
+    }
 
     res.status(201).json(log);
   } catch (error) {
-    console.error("[POST /api/transportation]", error?.message);
+    console.error("[POST /api/transportation]", error?.message, error?.stack);
     res.status(500).json({ error: error?.message || "Failed to create transportation log" });
   }
 });
@@ -184,16 +189,20 @@ router.patch("/:id", requireAuth, async (req, res) => {
     });
 
     // Audit log
-    await writeAuditLog(req, {
-      action: "TRANSPORTATION_UPDATED",
-      entityType: "Transportation",
-      entityId: id,
-      detailsJson: updated
-    });
+    try {
+      await writeAuditLog(req, {
+        action: "TRANSPORTATION_UPDATED",
+        entityType: "Transportation",
+        entityId: id,
+        detailsJson: updated
+      });
+    } catch (auditErr) {
+      console.error("[PATCH /api/transportation/:id] Audit log failed:", auditErr?.message);
+    }
 
     res.json(updated);
   } catch (error) {
-    console.error("[PATCH /api/transportation/:id]", error?.message);
+    console.error("[PATCH /api/transportation/:id]", error?.message, error?.stack);
     res.status(500).json({ error: error?.message || "Failed to update transportation log" });
   }
 });
@@ -216,16 +225,20 @@ router.delete("/:id", requireAuth, async (req, res) => {
     });
 
     // Audit log
-    await writeAuditLog(req, {
-      action: "TRANSPORTATION_DELETED",
-      entityType: "Transportation",
-      entityId: id,
-      detailsJson: existing
-    });
+    try {
+      await writeAuditLog(req, {
+        action: "TRANSPORTATION_DELETED",
+        entityType: "Transportation",
+        entityId: id,
+        detailsJson: existing
+      });
+    } catch (auditErr) {
+      console.error("[DELETE /api/transportation/:id] Audit log failed:", auditErr?.message);
+    }
 
     res.json({ ok: true });
   } catch (error) {
-    console.error("[DELETE /api/transportation/:id]", error?.message);
+    console.error("[DELETE /api/transportation/:id]", error?.message, error?.stack);
     res.status(500).json({ error: error?.message || "Failed to delete transportation log" });
   }
 });

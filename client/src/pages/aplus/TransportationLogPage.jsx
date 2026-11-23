@@ -230,10 +230,11 @@ export default function TransportationLogPage() {
         if (filters.to) params.append("to", filters.to);
 
         const res = await api.get(`/transportation?${params.toString()}`);
-        setLogs(res.data.logs || []);
+        const logsData = res.data?.logs || res.data || [];
+        setLogs(Array.isArray(logsData) ? logsData : []);
       } catch (err) {
         toast?.error("Failed to load transportation logs.");
-        console.error(err?.message);
+        console.error("Transportation fetch error:", err?.message, err?.response?.data);
       } finally {
         setLoading(false);
       }
@@ -247,10 +248,11 @@ export default function TransportationLogPage() {
       const load = async () => {
         try {
           const res = await api.get("/transportation/weekly-summary");
-          setWeeklySummary(res.data);
+          const summaryData = res.data?.summary ? res.data : {};
+          setWeeklySummary(summaryData);
         } catch (err) {
           toast?.error("Failed to load weekly summary.");
-          console.error(err?.message);
+          console.error("Weekly summary error:", err?.message, err?.response?.data);
         }
       };
       load();
