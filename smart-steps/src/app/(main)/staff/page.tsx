@@ -96,6 +96,9 @@ function StaffEditorModal({ member, onClose, onSaved }: EditorProps) {
   );
   const [password,        setPassword]        = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  // Local Password only: also email the person an invitation with the sign-in
+  // link (never the password). On by default when adding someone new.
+  const [sendNotice, setSendNotice] = useState(!isEdit);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -147,6 +150,7 @@ function StaffEditorModal({ member, onClose, onSaved }: EditorProps) {
         ...(isInvite ? { loginMethod: "invite" } : {}),
         ...(!isEdit && isRecordOnly ? { loginMethod: "none" } : {}),
         ...(wantsNewPassword ? { password } : {}),
+        ...(wantsNewPassword && sendNotice ? { sendNotice: true } : {}),
         ...(isEdit && loginMethod === "sso" && member?.hasLocalLogin ? { removeLocalLogin: true } : {}),
       };
       const url    = isEdit ? `/smart-steps/api/staff/${member!.id}` : "/smart-steps/api/staff";
@@ -319,6 +323,25 @@ function StaffEditorModal({ member, onClose, onSaved }: EditorProps) {
                   placeholder="Re-enter password"
                 />
               </div>
+              <label className="col-span-2 flex items-start gap-2 text-xs text-zinc-400">
+                <input
+                  type="checkbox"
+                  checked={sendNotice}
+                  onChange={(e) => setSendNotice(e.target.checked)}
+                  className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-[var(--accent-cyan)]"
+                />
+                <span>
+                  Also email them an invitation
+                  <span className="block text-[10px] leading-relaxed text-zinc-600">
+                    Sends the sign-in link to the email below. The password is not included — give it
+                    to them yourself.
+                    {isEdit && " Only sent when you enter a password."}
+                    {isEdit && !member?.hasLocalLogin && member?.invitedAt
+                      ? " The set-password link from the earlier invitation stops working."
+                      : ""}
+                  </span>
+                </span>
+              </label>
             </div>
           )}
 

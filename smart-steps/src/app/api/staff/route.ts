@@ -3,7 +3,7 @@ import { requireSession } from "@/lib/session";
 import { requirePermissionResponse } from "@/lib/permissions";
 import { hashPassword, isValidPassword, MIN_PASSWORD_LENGTH } from "@/lib/password";
 import { auditLog } from "@/lib/auditLogger";
-import { sendInvite } from "@/lib/invite";
+import { sendAccountReadyEmail, sendInvite } from "@/lib/invite";
 import { prisma } from "@/lib/db";
 
 const VALID_ROLES = ["RBT", "BCBA", "ADMIN"] as const;
@@ -77,6 +77,8 @@ export async function GET(req: Request) {
  * - "sso" (or omit password): SSO-linked profile — the user logs in via A+
  *   Center SSO with a matching email.
  * - "local" (with `password`): standalone account with an admin-set password.
+ *   With `sendNotice: true` the person is also emailed an invitation carrying
+ *   the sign-in link (never the password).
  * - "invite": creates the account with no password, emails the user a
  *   one-time link to set their own password and activate the account.
  * - "none": record-only provider — no email, no password, no way to sign in.
@@ -92,7 +94,7 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-    const { name, email, role, displayRole, phone, credentials, password, loginMethod } = body;
+    const { name, email, role, displayRole, phone, credentials, password, loginMethod, sendNotice } = body;
 
     if (!name?.trim()) return NextResponse.json({ error: "Name is required" }, { status: 400 });
     if (!VALID_ROLES.includes(role)) {
@@ -156,6 +158,7 @@ export async function POST(req: Request) {
       email: normalized,
       role,
       loginMethod: isRecordOnly ? "none" : isInvite ? "invite" : passwordHash ? "local" : "sso",
+      ...(sendNotice === true && passwordHash ? { invitationEmailed: true } : {}),
     });
 
     if (isInvite && created.email) {
@@ -168,6 +171,24 @@ export async function POST(req: Request) {
             ...serialize(created),
             _warning:
               "Account created, but the invitation email could not be sent. Use \u201cResend invite\u201d once email is configured.",
+          },
+          { status: 201 }
+        );
+      }
+    }
+
+    // Admin-set password + "also email an invitation": tell the person their
+    // account is ready. The password itself is never emailed.
+    if (sendNotice === true && passwordHash && created.email) {
+      try {
+        await sendAccountReadyEmail({ email: created.email, name: created.name });
+      } catch (err) {
+        console.error("[staff POST] account-ready email failed:", err);
+        return NextResponse.json(
+          {
+            ...serialize(created),
+            _warning:
+              "Account created with your password, but the invitation email could not be sent. The person can still sign in with the password you set.",
           },
           { status: 201 }
         );

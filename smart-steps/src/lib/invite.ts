@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { createRandomToken, hashToken } from "@/lib/token";
 import { sendEmail } from "@/lib/mailer";
-import { buildInviteEmail } from "@/lib/emailTemplates";
+import { buildAccountReadyEmail, buildInviteEmail } from "@/lib/emailTemplates";
 
 export const INVITE_EXPIRES_HOURS = Number(process.env.INVITE_TOKEN_EXPIRES_HOURS || 48);
 
@@ -28,12 +28,40 @@ export function buildAcceptInviteUrl(rawToken: string): string {
   return `${getAppBaseUrl()}/accept-invite?token=${encodeURIComponent(rawToken)}`;
 }
 
-/** Invalidates outstanding invite tokens for a user and issues a fresh one. Returns the raw (unhashed) token. */
-export async function issueInviteToken(userId: string): Promise<string> {
+export function buildLoginUrl(): string {
+  return `${getAppBaseUrl()}/login`;
+}
+
+/**
+ * Spends every outstanding invite token for a user. Called when an admin sets
+ * the password themselves: otherwise the set-password link already sitting in
+ * the person's inbox would still work and could overwrite the admin's password.
+ */
+export async function revokeInviteTokens(userId: string): Promise<void> {
   await prisma.passwordResetToken.updateMany({
     where: { userId, purpose: "INVITE", usedAt: null },
     data: { usedAt: new Date() },
   });
+}
+
+/**
+ * Emails an invitation for an account whose password the admin already set:
+ * sign-in link + login email, never the password. Throws if the email cannot
+ * be sent so callers can warn the admin — the account works regardless.
+ */
+export async function sendAccountReadyEmail(
+  user: { email: string; name: string | null }
+): Promise<void> {
+  await sendEmail({
+    to: user.email,
+    subject: "You've been invited to A+ Center ABA Tracker",
+    html: buildAccountReadyEmail({ name: user.name, email: user.email, loginUrl: buildLoginUrl() }),
+  });
+}
+
+/** Invalidates outstanding invite tokens for a user and issues a fresh one. Returns the raw (unhashed) token. */
+export async function issueInviteToken(userId: string): Promise<string> {
+  await revokeInviteTokens(userId);
   const raw = createRandomToken();
   const expiresAt = new Date(Date.now() + INVITE_EXPIRES_HOURS * 60 * 60 * 1000);
   await prisma.passwordResetToken.create({

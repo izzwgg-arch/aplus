@@ -1014,6 +1014,31 @@ on record only"**: name + role, no email, no password, no invite.
   distinct people sharing one null key — grouping them would merge unrelated
   providers into one.
 
+## Tracker staff — admin-set password AND an invitation email (2026-11-23)
+
+Before this, the Add Staff login methods were mutually exclusive: **Email
+Invite** emailed a set-your-own-password link, **Local Password** let the admin
+set the password but sent nothing. The user wanted both at once.
+
+- The Local Password section of the staff modal has a checkbox, **"Also email
+  them an invitation"** (on by default when adding, off when editing). It sends
+  `buildAccountReadyEmail` (`src/lib/emailTemplates.ts`): the sign-in link
+  (`/smart-steps/login`) and the login email. **The password is never emailed**
+  — the admin hands it over.
+- API: `POST /api/staff` and `PATCH /api/staff/[userId]` accept
+  `sendNotice: true`. It only acts when a password is being set in the same
+  request. A failed send returns the saved record plus `_warning` (the modal
+  already shows that); the account works regardless.
+- **Setting a password for someone with a pending invite now replaces the
+  invite.** `PATCH` with `password` nulls `invitedAt` and calls
+  `revokeInviteTokens()` (`src/lib/invite.ts`). Previously the token stayed
+  live, so the set-password link already in the person's inbox could overwrite
+  the admin's password for up to 48 hours, and the card kept showing
+  "Invited · pending". Clearing the email revokes the tokens too.
+- To do this for someone already invited: Edit → **Local Password** → enter the
+  password (the modal opens on "A+ Center SSO" for them because they have no
+  password yet).
+
 ## Tracker assessments — add goals from the Goal Library (2026-08-24)
 
 An assessment report's goal tables used to be filled in by typing into the

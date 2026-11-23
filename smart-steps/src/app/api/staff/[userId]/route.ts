@@ -3,6 +3,7 @@ import { requireSession } from "@/lib/session";
 import { requirePermissionResponse, invalidateUserCache } from "@/lib/permissions";
 import { auditLog } from "@/lib/auditLogger";
 import { hashPassword, isValidPassword, MIN_PASSWORD_LENGTH } from "@/lib/password";
+import { revokeInviteTokens, sendAccountReadyEmail } from "@/lib/invite";
 import { prisma } from "@/lib/db";
 
 type Params = { params: Promise<{ userId: string }> };
@@ -73,6 +74,12 @@ export async function GET(_req: Request, { params }: Params) {
  * address is cleared and every login is revoked with it (password + pending
  * invite), because every sign-in path here identifies the person BY email.
  * Clearing your own email is refused — it would lock you out.
+ *
+ * Sending a `password` for someone with a pending email invite replaces that
+ * invite: the set-password link they were emailed stops working and the
+ * "Invited · pending" state is cleared, so the admin's password is the one
+ * that stands. With `sendNotice: true` they are also emailed an invitation
+ * carrying the sign-in link (never the password).
  */
 export async function PATCH(req: Request, { params }: Params) {
   const user = await requireSession();
@@ -85,7 +92,7 @@ export async function PATCH(req: Request, { params }: Params) {
 
   try {
     const body = await req.json();
-    const { name, email, role, displayRole, phone, credentials, isActive, appRoleId, password, removeLocalLogin } = body;
+    const { name, email, role, displayRole, phone, credentials, isActive, appRoleId, password, removeLocalLogin, sendNotice } = body;
 
     const data: Record<string, unknown> = {};
 
@@ -153,6 +160,7 @@ export async function PATCH(req: Request, { params }: Params) {
     if (isActive !== undefined) data.isActive = Boolean(isActive);
 
     let passwordChanged = false;
+    let passwordSetByAdmin = false;
     if (password !== undefined && password !== "") {
       if (!isValidPassword(password)) {
         return NextResponse.json(
@@ -161,7 +169,10 @@ export async function PATCH(req: Request, { params }: Params) {
         );
       }
       data.passwordHash = await hashPassword(password);
+      // The admin's password replaces any pending email invite.
+      data.invitedAt = null;
       passwordChanged = true;
+      passwordSetByAdmin = true;
     } else if (removeLocalLogin === true) {
       data.passwordHash = null;
       passwordChanged = true;
@@ -209,10 +220,33 @@ export async function PATCH(req: Request, { params }: Params) {
       });
     }
 
+    // Kill the set-password link from any earlier invite email — left alive, it
+    // could overwrite the password the admin just set. Same when the email is
+    // cleared: nothing should be able to authenticate against the row.
+    if (passwordSetByAdmin || clearingEmail) {
+      await revokeInviteTokens(userId);
+    }
+
+    const emailNotice = passwordSetByAdmin && sendNotice === true && !clearingEmail && !!updated.email;
+
     if (passwordChanged) {
       await auditLog(user.id, "USER_PASSWORD_SET", "User", userId, {
         loginMethod: updated.passwordHash ? "local" : updated.email ? "sso" : "none",
+        ...(emailNotice ? { invitationEmailed: true } : {}),
       });
+    }
+
+    if (emailNotice) {
+      try {
+        await sendAccountReadyEmail({ email: updated.email as string, name: updated.name });
+      } catch (err) {
+        console.error("[staff/[userId] PATCH] account-ready email failed:", err);
+        return NextResponse.json({
+          ...serialize(updated),
+          _warning:
+            "Password saved, but the invitation email could not be sent. The person can still sign in with the password you set.",
+        });
+      }
     }
 
     return NextResponse.json(serialize(updated));
