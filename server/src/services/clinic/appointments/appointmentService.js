@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { addMonths, addWeeks } from "date-fns";
+import { addDays, addMonths, addWeeks } from "date-fns";
 import { prisma } from "../../../config/prisma.js";
 import { resolveAppointmentPricing } from "../../pricing/pricingResolverService.js";
 import { reconcileReminderJobsForAppointment } from "../../reminders/reminderReconcileService.js";
@@ -109,10 +109,17 @@ export async function createAppointment(payload) {
   });
 
   const created = [base];
-  if (payload.recurrenceType === "WEEKLY" || payload.recurrenceType === "MONTHLY") {
+  if (payload.recurrenceType === "DAILY" || payload.recurrenceType === "WEEKLY" || payload.recurrenceType === "MONTHLY") {
     const total = Number(payload.recurrenceCount || 4);
     for (let i = 1; i < total; i += 1) {
-      const nextStart = payload.recurrenceType === "WEEKLY" ? addWeeks(startsAt, i) : addMonths(startsAt, i);
+      let nextStart;
+      if (payload.recurrenceType === "DAILY") {
+        nextStart = addDays(startsAt, i);
+      } else if (payload.recurrenceType === "WEEKLY") {
+        nextStart = addWeeks(startsAt, i);
+      } else {
+        nextStart = addMonths(startsAt, i);
+      }
       const nextEnd = new Date(nextStart.getTime() + durationMinutes * 60000);
       if (await hasProviderConflict({ startsAt: nextStart, endsAt: nextEnd, providerId })) continue;
       const child = await prisma.appointment.create({

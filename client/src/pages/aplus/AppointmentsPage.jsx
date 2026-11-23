@@ -1391,6 +1391,7 @@ function AppointmentModal({ modal, onClose, onSaved, onDeleted, clients, service
                 <FieldLabel label="Recurrence">
                   <select className="saas-input w-full" value={form.recurrenceType} onChange={(e) => set("recurrenceType", e.target.value)}>
                     <option value="NONE">Does not repeat</option>
+                    <option value="DAILY">Daily</option>
                     <option value="WEEKLY">Weekly</option>
                     <option value="MONTHLY">Monthly</option>
                   </select>
