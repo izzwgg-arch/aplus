@@ -1061,6 +1061,35 @@ has the Scheduling app).
 - That PATCH no longer forces `status: "ACTIVE"` for everyone — it used to
   silently re-enable a DISABLED user. The UI never offered it for DISABLED
   users, so nothing visible changed.
+- Deployed 2026-11-24 (`26e387e`, 3 files, all identical to base on the server;
+  `UsersPage.jsx` and `emailTemplates.js` are CRLF there, `user.routes.js` LF).
+  Backup: `/root/deploy-backups/20261124_161157_aba_setpassword/`.
+- **Email caveat:** `sendEmail` (`server/src/utils/mailer.js`) returns silently
+  — no throw — when no `EMAIL_*` env is set and the Google Workspace
+  integration is not enabled, so the UI can say "Invitation sent" when nothing
+  went out. The server has no `EMAIL_*` keys in `.env`; whether the Google
+  Workspace integration is enabled was NOT confirmed. The log line `Email
+  settings missing, skipping send` is printed in both cases, so it proves
+  nothing by itself.
+
+### TWO PM2 daemons both run `aba-app` and fight over port 4000 (found 2026-11-24)
+
+The **root** PM2 (`/root/.pm2`, id 1, cwd `/opt/aba`) and the **aba** PM2
+(`/home/aba/.pm2`) each have an `aba-app`. Only one can bind `:4000`; the other
+crash-loops on `EADDRINUSE` (aba's had 50k+ restarts and an 85 MB error log;
+root's had 314). Before this deploy the **root** copy was the one serving
+(started 2026-11-23 19:07), so the documented
+`sudo -u aba … pm2 startOrReload` restarted nothing live. After
+`pm2 restart aba-app` under root, the **aba** copy won the port and is serving
+now; root's copy is the one looping.
+
+- To find the real server: `ss -ltnp | grep ':4000 '`, then `ps -o user= -p <pid>`.
+  A `server/` deploy is only live once THAT process has restarted.
+- Whichever user serves writes `uploads/` as itself. 24 upload entries were
+  root-owned and were `chown -R aba:aba`'d on 2026-11-24 so the aba process can
+  write to those client folders.
+- Removing the duplicate from the root PM2 (`pm2 delete aba-app && pm2 save` as
+  root) is the fix, but it is a **user decision** — not done.
 
 ## Tracker assessments — add goals from the Goal Library (2026-08-24)
 
