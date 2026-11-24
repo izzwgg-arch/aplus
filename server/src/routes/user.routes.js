@@ -9,7 +9,7 @@ import { invalidateUserCache } from "../services/permissionsService.js";
 import { writeAuditLog } from "../services/auditLogService.js";
 import { createRandomToken, hashToken } from "../utils/token.js";
 import { sendEmail } from "../utils/mailer.js";
-import { buildInviteEmail } from "../utils/emailTemplates.js";
+import { buildAccountReadyEmail, buildInviteEmail } from "../utils/emailTemplates.js";
 import { env } from "../config/env.js";
 
 const router = express.Router();
@@ -51,12 +51,42 @@ router.get("/bcbas", requirePermission("aplus.appointments.view"), async (_req, 
   return res.json(bcbas);
 });
 
+const MIN_PW = 8;
+
+/** Spends every outstanding invite token so an old set-password link cannot overwrite an admin-set password. */
+async function revokeInviteTokens(userId) {
+  await prisma.passwordResetToken.updateMany({
+    where: { userId, purpose: "INVITE", usedAt: null },
+    data: { usedAt: new Date() }
+  });
+}
+
+/** Invitation for an account whose password the admin set: sign-in link + login email, never the password. */
+async function sendAccountReadyEmail(user) {
+  await sendEmail({
+    to: user.email,
+    subject: `You've been invited to A+ Center`,
+    html: buildAccountReadyEmail({
+      fullName: user.fullName,
+      email: user.email,
+      loginUrl: `${env.appBaseUrl}/login`
+    })
+  });
+}
+
 // ---------------------------------------------------------------------------
-// INVITE USER (replaces create-with-password)
+// INVITE USER — or, when `password` is supplied, create an ACTIVE user with
+// that password (no set-password link). `sendNotice: true` then also emails
+// them an invitation carrying the sign-in link, never the password.
 // ---------------------------------------------------------------------------
 router.post("/", requirePermission("aplus.users.create"), async (req, res) => {
-  const { email, fullName, role } = req.body;
+  const { email, fullName, role, password, sendNotice } = req.body;
   if (!email || !fullName) return res.status(400).json({ error: "Email and full name are required." });
+
+  const adminSetPassword = typeof password === "string" && password !== "";
+  if (adminSetPassword && password.length < MIN_PW) {
+    return res.status(400).json({ error: `Password must be at least ${MIN_PW} characters.` });
+  }
 
   const normalizedEmail = email.toLowerCase().trim();
   const safeRole = ["ADMIN", "BCBA", "STAFF"].includes(role) ? role : "STAFF";
@@ -64,13 +94,62 @@ router.post("/", requirePermission("aplus.users.create"), async (req, res) => {
   const existing = await prisma.user.findUnique({ where: { email: normalizedEmail } });
   if (existing) return res.status(409).json({ error: "A user with that email already exists." });
 
-  // Create user with random unusable placeholder hash — they must set a real password via invite
-  const placeholderHash = await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 4);
-
   // Assign a matching system Role by default so the new granular-permission
   // system is effective immediately (admin can change it afterwards from the
   // Permissions page).
   const defaultSystemRole = await prisma.role.findUnique({ where: { key: safeRole } });
+
+  if (adminSetPassword) {
+    const created = await prisma.user.create({
+      data: {
+        email: normalizedEmail,
+        fullName,
+        role: safeRole,
+        roleId: defaultSystemRole?.id || null,
+        passwordHash: await bcrypt.hash(password, 10),
+        status: "ACTIVE",
+        activatedAt: new Date(),
+        invitedById: req.user?.sub || null
+      },
+      select: USER_SELECT
+    });
+
+    let emailSent = false;
+    let emailError = null;
+    if (sendNotice === true) {
+      try {
+        await sendAccountReadyEmail(created);
+        emailSent = true;
+      } catch (err) {
+        console.error("[users] Failed to send account-ready email:", err?.message);
+        emailError = err?.message || "unknown error";
+      }
+    }
+
+    await writeAuditLog(req, {
+      action: "USER_CREATED_WITH_PASSWORD",
+      targetType: "User",
+      targetId: created.id,
+      metadata: {
+        email: created.email,
+        role: created.role,
+        emailRequested: sendNotice === true,
+        emailSent,
+        ...(emailError ? { emailError } : {})
+      }
+    });
+
+    if (emailError) {
+      return res.status(201).json({
+        ...created,
+        _warning: "User created with your password, but the invitation email could not be sent. They can still sign in with the password you set."
+      });
+    }
+    return res.status(201).json({ ...created, _emailSent: emailSent });
+  }
+
+  // Create user with random unusable placeholder hash — they must set a real password via invite
+  const placeholderHash = await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 4);
 
   const created = await prisma.user.create({
     data: {
@@ -254,26 +333,35 @@ router.patch("/:id/status", requirePermission("aplus.users.edit"), async (req, r
 });
 
 // ---------------------------------------------------------------------------
-// ADMIN PASSWORD RESET (sets a temp password; user should change it)
+// ADMIN PASSWORD SET / RESET
+// Works for an INVITED user too: the account becomes ACTIVE with the admin's
+// password and the set-password link from the invite email stops working.
+// A DISABLED user stays disabled — setting a password must not re-enable them.
 // ---------------------------------------------------------------------------
 router.patch("/:id/password", requirePermission("aplus.users.edit"), async (req, res) => {
   const { newPassword } = req.body;
-  if (!newPassword || newPassword.length < 8) {
-    return res.status(400).json({ error: "Password must be at least 8 characters." });
+  if (!newPassword || newPassword.length < MIN_PW) {
+    return res.status(400).json({ error: `Password must be at least ${MIN_PW} characters.` });
   }
 
   const user = await prisma.user.findUnique({ where: { id: req.params.id } });
   if (!user) return res.status(404).json({ error: "User not found." });
 
+  const wasInvited = user.status === "INVITED";
   const passwordHash = await bcrypt.hash(newPassword, 10);
   await prisma.user.update({
     where: { id: req.params.id },
-    data: { passwordHash, status: "ACTIVE" }
+    data: {
+      passwordHash,
+      ...(wasInvited ? { status: "ACTIVE", activatedAt: new Date() } : {})
+    }
   });
+  await revokeInviteTokens(req.params.id);
   await writeAuditLog(req, {
     action: "USER_PASSWORD_RESET_BY_ADMIN",
     targetType: "User",
-    targetId: req.params.id
+    targetId: req.params.id,
+    metadata: { replacedPendingInvite: wasInvited }
   });
   return res.json({ message: "User password reset successfully." });
 });

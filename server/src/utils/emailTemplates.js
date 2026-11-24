@@ -45,6 +45,33 @@ export function buildInviteEmail({ fullName, url, expiresHours = 48 }) {
 </div>`);
 }
 
+/**
+ * Invitation email for an account whose password the administrator already
+ * set. Carries the sign-in link and login email only — never the password,
+ * which the administrator hands over directly.
+ */
+export function buildAccountReadyEmail({ fullName, email, loginUrl }) {
+  return html(`
+<div class="wrap">
+  <div class="header">
+    <h1>${APP_NAME}</h1>
+    <p>You have been invited</p>
+  </div>
+  <div class="body">
+    <p>Hi ${fullName || "there"},</p>
+    <p>You've been invited to access <strong>${APP_NAME}</strong>. Your account is ready to use.</p>
+    <p><strong>Sign-in email:</strong> ${email}<br>
+    <strong>Password:</strong> your administrator set your password and will give it to you directly.</p>
+    <a href="${loginUrl}" class="cta">Sign In</a>
+    <p>If you did not expect this invitation, you can safely ignore this email.</p>
+    <hr class="divider">
+    <p style="font-size:13px;color:#64748b;">If the button above doesn't work, copy and paste this link into your browser:</p>
+    <div class="link-box">${loginUrl}</div>
+  </div>
+  <div class="footer">&copy; ${new Date().getFullYear()} ${APP_NAME}. This is an automated message — please do not reply.</div>
+</div>`);
+}
+
 export function buildResetEmail({ fullName, url, expiresMin = 30 }) {
   const expiresText =
     expiresMin >= 60

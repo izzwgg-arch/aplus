@@ -1039,6 +1039,29 @@ set the password but sent nothing. The user wanted both at once.
   password (the modal opens on "A+ Center SSO" for them because they have no
   password yet).
 
+## A+ Scheduling users — admin can set the password (2026-11-24)
+
+The Scheduling Users page (`client/src/pages/aplus/UsersPage.jsx`,
+`server/src/routes/user.routes.js`) was invite-only: the person had to set
+their own password from the emailed link, and "Reset password" only showed for
+ACTIVE users. The user needed to create a login themselves (a tablet that only
+has the Scheduling app).
+
+- **Invite User form** has an optional **Password** field. Blank = the old
+  invite flow, unchanged. Filled = `POST /api/users` with `password` creates
+  the user **ACTIVE** immediately (`activatedAt` set, no invite token). A
+  checkbox, **"Also email them an invitation"** (on by default), sends
+  `sendNotice: true` → `buildAccountReadyEmail` (`server/src/utils/emailTemplates.js`):
+  sign-in link (`APP_BASE_URL/login`) and login email. **The password is never
+  emailed.** A failed send returns the user plus `_warning`.
+- **Already-invited users** now have a **Set password** button (same
+  `PATCH /api/users/:id/password`). It flips INVITED → ACTIVE, sets
+  `activatedAt`, and revokes outstanding INVITE tokens so the old set-password
+  link cannot overwrite the admin's password.
+- That PATCH no longer forces `status: "ACTIVE"` for everyone — it used to
+  silently re-enable a DISABLED user. The UI never offered it for DISABLED
+  users, so nothing visible changed.
+
 ## Tracker assessments — add goals from the Goal Library (2026-08-24)
 
 An assessment report's goal tables used to be filled in by typing into the

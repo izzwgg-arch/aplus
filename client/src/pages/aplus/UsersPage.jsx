@@ -31,6 +31,8 @@ export default function UsersPage() {
   const [isLoading, setLoading] = useState(true);
   const [isSaving, setSaving]   = useState(false);
   const [form, setForm]         = useState({ email: "", fullName: "", role: "STAFF" });
+  const [password, setPassword] = useState("");
+  const [sendNotice, setSendNotice] = useState(true);
   const [resending, setResending] = useState(null); // userId being resent
 
   useHotkey({ key: "n", ctrlOrMeta: true, enabled: isAdmin, onTrigger: () => nameRef.current?.focus() });
@@ -56,13 +58,29 @@ export default function UsersPage() {
       toast?.error("Name and email are required.");
       return;
     }
+    const withPassword = password !== "";
+    if (withPassword && password.length < 8) {
+      toast?.error("Password must be at least 8 characters.");
+      return;
+    }
     setSaving(true);
     try {
-      const { data } = await api.post("/users", form);
+      const { data } = await api.post(
+        "/users",
+        withPassword ? { ...form, password, sendNotice } : form
+      );
       setForm({ email: "", fullName: "", role: "STAFF" });
+      setPassword("");
+      setSendNotice(true);
       await load();
       if (data._warning) {
         toast?.error(data._warning);
+      } else if (withPassword) {
+        toast?.success(
+          data._emailSent
+            ? `${data.fullName} can sign in now. Invitation sent to ${data.email}.`
+            : `${data.fullName} can sign in now with the password you set.`
+        );
       } else {
         toast?.success(`Invitation sent to ${data.email}.`);
       }
@@ -127,11 +145,17 @@ export default function UsersPage() {
 
   // ── ADMIN PASSWORD RESET ─────────────────────────────────────────────────
   const adminResetPassword = async (u) => {
-    const pw = window.prompt(`Set a temporary password for ${u.fullName} (min 8 chars).\nThey should change it after logging in.`);
+    const invited = u.status === "INVITED";
+    const pw = window.prompt(
+      invited
+        ? `Set a password for ${u.fullName} (min 8 chars).\nTheir account becomes active right away and the link in their invitation email stops working.`
+        : `Set a temporary password for ${u.fullName} (min 8 chars).\nThey should change it after logging in.`
+    );
     if (!pw) return;
     try {
       await api.patch(`/users/${u.id}/password`, { newPassword: pw });
-      toast?.success("Password reset successfully.");
+      if (invited) await load();
+      toast?.success(invited ? `${u.fullName} can sign in now with the password you set.` : "Password reset successfully.");
     } catch (err) {
       toast?.error(err?.response?.data?.error || "Failed to reset password.");
     }
@@ -214,10 +238,10 @@ export default function UsersPage() {
                     </button>
                   )}
 
-                  {/* Admin password reset (only for ACTIVE users who are not self) */}
-                  {u.status === "ACTIVE" && u.id !== me?.id && (
+                  {/* Admin sets the password: reset for ACTIVE users, or instead of the invite link for INVITED ones (never for self) */}
+                  {(u.status === "ACTIVE" || u.status === "INVITED") && u.id !== me?.id && (
                     <button className="btn-secondary py-1.5 text-xs" onClick={() => adminResetPassword(u)}>
-                      Reset password
+                      {u.status === "INVITED" ? "Set password" : "Reset password"}
                     </button>
                   )}
 
@@ -258,7 +282,8 @@ export default function UsersPage() {
         <section className="card card-hover self-start">
           <h2 className="mb-1 text-lg font-semibold text-slate-900">Invite User</h2>
           <p className="mb-4 text-sm text-slate-500">
-            An invitation email with a secure link will be sent to the user. They will set their own password.
+            An invitation email with a secure link will be sent to the user. They will set their own password — or
+            enter a password below to set it yourself.
           </p>
 
           <form onSubmit={inviteUser} className="space-y-3">
@@ -285,8 +310,39 @@ export default function UsersPage() {
             >
               {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
             </select>
+            <div>
+              <input
+                className="saas-input"
+                type="text"
+                autoComplete="off"
+                placeholder="Password (optional — min 8 characters)"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              <p className="mt-1 text-xs text-slate-500">
+                Leave blank to let them choose their own password from the invitation email.
+              </p>
+            </div>
+            {password !== "" && (
+              <label className="flex items-start gap-2 text-sm text-slate-600">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={sendNotice}
+                  onChange={(e) => setSendNotice(e.target.checked)}
+                />
+                <span>
+                  Also email them an invitation
+                  <span className="block text-xs text-slate-400">
+                    It has the sign-in link but not the password — give them the password yourself.
+                  </span>
+                </span>
+              </label>
+            )}
             <button className="btn-primary w-full" disabled={isSaving}>
-              {isSaving ? "Sending invitation…" : "Send invitation"}
+              {isSaving
+                ? (password !== "" ? "Creating user…" : "Sending invitation…")
+                : (password !== "" ? "Create user with this password" : "Send invitation")}
             </button>
           </form>
 
@@ -296,6 +352,10 @@ export default function UsersPage() {
             <p>2. They click the link and create their own password.</p>
             <p>3. Their account is activated and they can sign in.</p>
             <p className="text-slate-400">Invitation links expire after 48 hours. Use Resend Invite if needed.</p>
+            <p className="text-slate-400">
+              If you set the password yourself, the account is active immediately. For someone already invited, use
+              Set password next to their name.
+            </p>
           </div>
         </section>
 
