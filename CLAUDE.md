@@ -1088,8 +1088,12 @@ now; root's copy is the one looping.
 - Whichever user serves writes `uploads/` as itself. 24 upload entries were
   root-owned and were `chown -R aba:aba`'d on 2026-11-24 so the aba process can
   write to those client folders.
-- Removing the duplicate from the root PM2 (`pm2 delete aba-app && pm2 save` as
-  root) is the fix, but it is a **user decision** — not done.
+- **Resolved 2026-11-24 (user-approved):** the duplicate was removed from the
+  root PM2 (`pm2 delete aba-app && pm2 save` as root). Root PM2 now holds only
+  `smart-steps`; the aba PM2's `aba-app` is the single server on `:4000` and
+  its restart count stopped climbing. The old root dump is saved as
+  `root-pm2-dump.before` in the backup folder above. **Never `pm2 start` the
+  Scheduling app from the root PM2** — that is what recreates the fight.
 
 ## Tracker assessments — add goals from the Goal Library (2026-08-24)
 
