@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
-import { requireAnyPermissionResponse, requirePermissionResponse } from "@/lib/permissions";
+import { requireAnyPermissionResponse, requireClientAccessResponse, requirePermissionResponse } from "@/lib/permissions";
 import { prisma } from "@/lib/db";
 import { btObservationRequired, btObservationSaveError } from "@/lib/btObservation";
 
@@ -21,6 +21,10 @@ export async function GET(_req: Request, { params }: Params) {
     });
 
     if (!note) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+    // Assigned-only staff (BT/RBT) may open notes of THEIR clients only.
+    const accessDenied = await requireClientAccessResponse(user.id, note.clientId, "smartsteps.notes.view");
+    if (accessDenied) return accessDenied;
 
     return NextResponse.json(note);
   } catch (e) {

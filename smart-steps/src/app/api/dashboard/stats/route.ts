@@ -1,8 +1,16 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
-import { requirePermissionResponse } from "@/lib/permissions";
+import { requirePermissionResponse, accessibleClientIds } from "@/lib/permissions";
 import { prisma } from "@/lib/db";
 
+/**
+ * GET /smart-steps/api/dashboard/stats
+ *
+ * Every figure here is limited to the clients the signed-in user may see.
+ * Staff who only hold the `.assigned` permission variants (BT/RBT) get counts
+ * and recent sessions for THEIR assigned clients only — never other clients'
+ * names or activity. Roles with the `.all` variants (BCBA/Admin) see everything.
+ */
 export async function GET() {
   const user = await requireSession();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -14,21 +22,39 @@ export async function GET() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // Sessions today (all therapists)
+    const [sessionScope, clientScope, goalScope, assessmentScope] = await Promise.all([
+      accessibleClientIds(user.id, "smartsteps.sessions.view"),
+      accessibleClientIds(user.id, "smartsteps.clients.view"),
+      accessibleClientIds(user.id, "smartsteps.goals.view"),
+      accessibleClientIds(user.id, "smartsteps.assessments.view"),
+    ]);
+
+    const sessionClientFilter = sessionScope === "ALL" ? {} : { clientId: { in: sessionScope } };
+
+    // Sessions today (for the clients this user may see)
     const sessionsToday = await prisma.session.count({
-      where: { startedAt: { gte: today }, deletedAt: null },
+      where: { startedAt: { gte: today }, deletedAt: null, ...sessionClientFilter },
     });
 
     // Total active clients
     const totalClients = await prisma.client.count({
-      where: { isArchived: false },
+      where: { isArchived: false, ...(clientScope === "ALL" ? {} : { id: { in: clientScope } }) },
     });
 
-    // Active targets
+    // Active targets — a target belongs to a client through its parent goal,
+    // either directly or via its sub-goal.
     const activeTargets = await prisma.target.count({
       where: {
         isActive: true,
         phase: { not: "MASTERED" },
+        ...(goalScope === "ALL"
+          ? {}
+          : {
+              OR: [
+                { parentGoal: { clientId: { in: goalScope } } },
+                { subGoal: { parentGoal: { clientId: { in: goalScope } } } },
+              ],
+            }),
       },
     });
 
@@ -37,7 +63,7 @@ export async function GET() {
 
     // Recent sessions (last 5)
     const recentSessions = await prisma.session.findMany({
-      where: { deletedAt: null },
+      where: { deletedAt: null, ...sessionClientFilter },
       take: 5,
       orderBy: { startedAt: "desc" },
       include: {
@@ -49,7 +75,10 @@ export async function GET() {
 
     // Assessments in progress
     const assessmentsInProgress = await prisma.clientAssessment.count({
-      where: { status: "IN_PROGRESS" },
+      where: {
+        status: "IN_PROGRESS",
+        ...(assessmentScope === "ALL" ? {} : { clientId: { in: assessmentScope } }),
+      },
     });
 
     return NextResponse.json({

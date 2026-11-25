@@ -2201,6 +2201,27 @@ the real goal once someone with permission enters it.
 Whether RBTs SHOULD be allowed to create goals is a role decision, not a bug;
 they are not (by `SYSTEM_ROLES`), so a BT asks a BCBA/admin.
 
+## Tracker dashboard — assigned-only staff see only THEIR clients (2026-11-25)
+
+The user reported that staff assigned to one kid could see which OTHER kids'
+sessions were updated. Cause: `GET /api/dashboard/stats`
+(`smart-steps/src/app/api/dashboard/stats/route.ts`) only checked
+`smartsteps.dashboard.view` and queried every client, so the Dashboard's
+**Recent sessions** list (client name, therapist, date) and the four stat
+cards covered the whole clinic for BT/RBT users too.
+
+- The route now scopes every figure with `accessibleClientIds()`: sessions
+  today + recent sessions by `sessions.view`, client count by `clients.view`,
+  active targets by `goals.view` (target → parent goal → client, directly or
+  via the sub-goal), assessments in progress by `assessments.view`. BCBA/Admin
+  hold the `.all` keys and see everything, as before.
+- `GET /api/sessions/[sessionId]` and `GET /api/notes/[noteId]` only checked
+  that the user held *a* view permission, not that the record's client was
+  theirs. Both now call `requireClientAccessResponse` (403 for another client's
+  record). The list endpoints were already scoped.
+- Not checked: `POST /api/sessions/[sessionId]/generate-note` and any `GET` on
+  `/api/trials` — the search flagged them as possibly unscoped by-ID routes.
+
 ## Rule 5: Deploy (step 3 of the Rule 0 end-of-task sequence)
 
 ### Smart Steps ABA Tracker (git-based, re-wired 2026-08-13)

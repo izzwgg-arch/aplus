@@ -162,6 +162,10 @@ export async function GET(
 
     if (!s || s.deletedAt) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
+    // Assigned-only staff (BT/RBT) may open sessions of THEIR clients only.
+    const accessDenied = await requireClientAccessResponse(user.id, s.clientId, "smartsteps.sessions.view");
+    if (accessDenied) return accessDenied;
+
     const grouped = new Map<string, {
       targetId: string;
       targetTitle: string;
